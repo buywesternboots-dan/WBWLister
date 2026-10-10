@@ -4,6 +4,7 @@
 - Minimize lines of code; simple, clean, accurate, fully functional.
 - Don't report changes — only problems or questions.
 - Outline before building when asked; don't build until told.
+- Fix problems and make judgment calls without asking; ask only when truly necessary.
 - Tell me when a session is getting too long and give a copy-ready summary.
 
 ## Context
