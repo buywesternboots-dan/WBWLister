@@ -1,0 +1,9 @@
+{
+  "manifest_version": 3,
+  "name": "WBW Importer",
+  "version": "0.1",
+  "permissions": ["contextMenus", "scripting", "tabs", "storage"],
+  "host_permissions": ["https://*.facebook.com/*", "https://*.vercel.app/*", "http://localhost:3000/*"],
+  "background": { "service_worker": "background.js" },
+  "action": { "default_popup": "popup.html" }
+}
