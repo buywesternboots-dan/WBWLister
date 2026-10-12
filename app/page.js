@@ -5,7 +5,7 @@ const api = (method, body, q = '') =>
   fetch('/api/items' + q, { method, headers: { 'Content-Type': 'application/json' }, body: body && JSON.stringify(body) })
     .then(async r => { const j = await r.json(); if (!r.ok) throw new Error(j.error); return j; });
 
-const TABS = { review: 'Newly imported', published: 'Exported', removed: 'Removed' };
+const TABS = { review: 'Newly imported', published: 'Exported', removed: 'Removed', archived: 'Archived' };
 // WBW import columns. Adjust to match WBW's CSV importer.
 const CSV = { title: 'Title', price: 'Price', size: 'Size', condition: 'Condition', brand: 'Brand', description: 'Description', photos: 'Image URLs', source_id: 'Source ID' };
 const cell = v => `"${String(Array.isArray(v) ? v.join('|') : v ?? '').replace(/"/g, '""')}"`;
@@ -35,6 +35,7 @@ export default function Inventory() {
   const exportCsv = () => { download(items.filter(i => sel.has(i.id))); if (tab === 'review') bulk({ action: 'publish' }); };
   const save = () => act({ ids: [edit.id], action: 'edit', ...Object.fromEntries([...FIELDS, 'description'].map(f => [f, edit[f]])) });
 
+  const gone = tab === 'removed' || tab === 'archived';
   const groups = tab === 'review'
     ? Object.entries(GROUPS).map(([k, label]) => [label, items.filter(i => i.boot === k)])
     : [[TABS[tab], items]];
@@ -51,14 +52,14 @@ export default function Inventory() {
         <label><input type="checkbox" checked={sel.size === items.length}
           onChange={() => setSel(sel.size === items.length ? new Set() : new Set(items.map(i => i.id)))} /> {sel.size} selected</label>
         {sel.size > 0 && <>
-          {tab !== 'removed' && <span className="adj">
+          {!gone && <span className="adj">
             <input inputMode="decimal" placeholder="Lower by" value={adj.value} onChange={e => setAdj({ ...adj, value: e.target.value })} />
             <select value={adj.unit} onChange={e => setAdj({ ...adj, unit: e.target.value })}><option>%</option><option>$</option></select>
             <button onClick={lower}>Apply</button>
           </span>}
-          {tab !== 'removed' && <button className="primary" onClick={exportCsv}>Export CSV</button>}
-          {tab !== 'removed' && <button onClick={() => bulk({ action: 'remove' })}>Remove</button>}
-          {tab === 'removed' && <button onClick={() => bulk({ action: 'restore' })}>Restore</button>}
+          {!gone && <button className="primary" onClick={exportCsv}>Export CSV</button>}
+          {!gone && <button onClick={() => bulk({ action: 'remove' })}>Remove</button>}
+          {gone && <button onClick={() => bulk({ action: 'restore' })}>Restore</button>}
         </>}
       </div>}
 
