@@ -5,7 +5,16 @@ const api = (method, body, q = '') =>
   fetch('/api/items' + q, { method, headers: { 'Content-Type': 'application/json' }, body: body && JSON.stringify(body) })
     .then(async r => { const j = await r.json(); if (!r.ok) throw new Error(j.error); return j; });
 
-const TABS = { review: 'Newly imported', published: 'Published', removed: 'Removed' };
+const TABS = { review: 'Newly imported', published: 'Exported', removed: 'Removed' };
+// WBW import columns. Adjust to match WBW's CSV importer.
+const CSV = { title: 'Title', price: 'Price', size: 'Size', condition: 'Condition', brand: 'Brand', description: 'Description', photos: 'Image URLs', source_id: 'Source ID' };
+const cell = v => `"${String(Array.isArray(v) ? v.join('|') : v ?? '').replace(/"/g, '""')}"`;
+const download = rows => {
+  const csv = [Object.values(CSV), ...rows.map(r => Object.keys(CSV).map(k => r[k]))].map(r => r.map(cell).join(',')).join('
+');
+  const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(new Blob([csv], { type: 'text/csv' })), download: `wbw-import-${new Date().toISOString().slice(0, 10)}.csv` });
+  a.click();
+};
 const GROUPS = { boot: 'Boots', unsure: 'Unsure', not: 'Not boots' };
 const FIELDS = ['title', 'price', 'size', 'condition', 'brand'];
 
@@ -24,6 +33,7 @@ export default function Inventory() {
   const bulk = body => act({ ids: [...sel], ...body });
   const toggle = id => setSel(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const lower = () => { const v = Number(adj.value); if (v > 0) bulk({ action: 'price', [adj.unit === '%' ? 'percent' : 'amount']: v }); };
+  const exportCsv = () => { download(items.filter(i => sel.has(i.id))); if (tab === 'review') bulk({ action: 'publish' }); };
   const save = () => act({ ids: [edit.id], action: 'edit', ...Object.fromEntries([...FIELDS, 'description'].map(f => [f, edit[f]])) });
 
   const groups = tab === 'review'
@@ -47,7 +57,7 @@ export default function Inventory() {
             <select value={adj.unit} onChange={e => setAdj({ ...adj, unit: e.target.value })}><option>%</option><option>$</option></select>
             <button onClick={lower}>Apply</button>
           </span>}
-          {tab === 'review' && <button className="primary" onClick={() => bulk({ action: 'publish' })}>Publish</button>}
+          {tab !== 'removed' && <button className="primary" onClick={exportCsv}>Export CSV</button>}
           {tab !== 'removed' && <button onClick={() => bulk({ action: 'remove' })}>Remove</button>}
           {tab === 'removed' && <button onClick={() => bulk({ action: 'restore' })}>Restore</button>}
         </>}
