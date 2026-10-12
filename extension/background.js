@@ -47,58 +47,66 @@ async function collectIds() {
 
 const run = async (tabId, func) => (await chrome.scripting.executeScript({ target: { tabId }, func }))[0].result;
 
-async function send(item) {
+async function api(method, body, q = '') {
   const { server, seller } = await chrome.storage.sync.get(['server', 'seller']);
   if (!server) throw new Error('Set the WBW server URL in the extension popup.');
-  const r = await fetch(`${server.replace(/\/$/, '')}/api/items`, {
-    method: 'POST',
+  const r = await fetch(`${server.replace(/\/$/, '')}/api/items${q}`, {
+    method,
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${seller || 'demo'}` },
-    body: JSON.stringify(item),
+    body: body && JSON.stringify(body),
   });
   const j = await r.json();
   if (!r.ok) throw new Error(j.error);
   return j;
 }
+const send = item => api('POST', item);
 
 const loaded = tabId => new Promise(res => chrome.tabs.onUpdated.addListener(function l(id, info) {
   if (id === tabId && info.status === 'complete') { chrome.tabs.onUpdated.removeListener(l); res(); }
 }));
 
-async function importUrl(url, sellerId) {
+async function importUrl(url, sellerId, overwrite) {
   const tab = await chrome.tabs.create({ url, active: false });
   await loaded(tab.id);
   await wait(2500);
   try {
     const item = await run(tab.id, readListing);
     if (sellerId && item.seller_id && item.seller_id !== sellerId) return { other: true };
-    return await send(item);
+    return await send({ ...item, overwrite });
   }
   finally { chrome.tabs.remove(tab.id); }
 }
 
-// Opens the seller's Marketplace profile, then imports only their listings (profile pages also show other sellers').
-async function importProfile(sellerId) {
+// Opens the seller's Marketplace profile and imports their listings (profile pages also show other sellers'; those are skipped).
+// sync: also moves items no longer listed to Removed. overwrite: re-reads known listings and updates changed ones.
+async function importProfile(sellerId, sync, overwrite) {
   const tab = await chrome.tabs.create({ url: `https://www.facebook.com/marketplace/profile/${sellerId}/` });
   await loaded(tab.id);
   await wait(3000);
   const ids = await run(tab.id, collectIds);
-  let total = 0, failed = 0, others = 0;
-  for (const [i, id] of ids.entries()) {
-    badge(ids.length - i);
+  if (!ids.length) throw new Error('No listings found on this profile.');
+  const known = new Set(overwrite ? [] : await api('GET', null, '?source=facebook'));
+  const todo = ids.filter(id => !known.has(id));
+  const n = { added: 0, updated: 0, failed: 0, removed: 0 };
+  for (let i = 0, others = 0; i < todo.length; i++) {
+    badge(todo.length - i);
     try {
-      const r = await importUrl(`https://www.facebook.com/marketplace/item/${id}/`, sellerId);
-      if (r.other) { if (++others >= 3) break; } else { others = 0; total++; }
-    } catch { failed++; total++; }
+      const r = await importUrl(`https://www.facebook.com/marketplace/item/${todo[i]}/`, sellerId, overwrite);
+      if (r.other) { if (++others >= 3) break; continue; }
+      others = 0;
+      if (r.item?.updated) n.updated++; else if (r.item) n.added++;
+    } catch { n.failed++; }
     await wait(3000 + Math.random() * 3000);
   }
+  if (sync) n.removed = (await api('PATCH', { action: 'sync', source: 'facebook', ids })).removed;
   badge('');
-  return { total, failed };
+  return n;
 }
 
 const addCurrent = async tabId => send(await run(tabId, readListing));
 
 chrome.runtime.onMessage.addListener((m, _, reply) => {
-  (m.type === 'profile' ? importProfile(m.sellerId) : addCurrent(m.tabId)).then(r => reply({ r }), e => reply({ error: e.message }));
+  (m.type === 'profile' ? importProfile(m.sellerId, m.sync, m.overwrite) : addCurrent(m.tabId)).then(r => reply({ r }), e => reply({ error: e.message }));
   return true;
 });
 

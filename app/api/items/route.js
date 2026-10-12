@@ -6,7 +6,10 @@ const handle = fn => async req => {
   catch (e) { return Response.json({ error: e.message }, { status: 400 }); }
 };
 
-export const GET = handle(req => wbw.getItems(seller(req), new URL(req.url).searchParams.get('status') || 'review'));
+export const GET = handle(req => {
+  const q = new URL(req.url).searchParams;
+  return q.get('source') ? wbw.getSourceIds(seller(req), q.get('source')) : wbw.getItems(seller(req), q.get('status') || 'review');
+});
 
 export const POST = handle(async req => {
   const item = await wbw.createItem(seller(req), await req.json());
@@ -16,6 +19,7 @@ export const POST = handle(async req => {
 export const PATCH = handle(async req => {
   const { ids, action, percent, amount, ...fields } = await req.json();
   if (!ids?.length) throw new Error('Select at least one item.');
+  if (action === 'sync') return { removed: await wbw.syncSource(seller(req), fields.source, ids) };
   if (action === 'edit') await wbw.updateItems(seller(req), ids, fields);
   else if (action === 'price') await wbw.lowerPrice(seller(req), ids, percent, amount);
   else await wbw.setStatus(seller(req), ids, action);
