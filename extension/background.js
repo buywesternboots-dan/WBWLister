@@ -48,11 +48,13 @@ async function send(item) {
   return j;
 }
 
+const loaded = tabId => new Promise(res => chrome.tabs.onUpdated.addListener(function l(id, info) {
+  if (id === tabId && info.status === 'complete') { chrome.tabs.onUpdated.removeListener(l); res(); }
+}));
+
 async function importUrl(url, sellerId) {
   const tab = await chrome.tabs.create({ url, active: false });
-  await new Promise(res => chrome.tabs.onUpdated.addListener(function l(id, info) {
-    if (id === tab.id && info.status === 'complete') { chrome.tabs.onUpdated.removeListener(l); res(); }
-  }));
+  await loaded(tab.id);
   await wait(2500);
   try {
     const item = await run(tab.id, readListing);
@@ -62,10 +64,12 @@ async function importUrl(url, sellerId) {
   finally { chrome.tabs.remove(tab.id); }
 }
 
-// Profile pages also show other sellers' listings; skip those and stop once they take over.
-async function importProfile(tabId) {
-  const sellerId = (await chrome.tabs.get(tabId)).url.match(/profile\/(\d+)/)?.[1];
-  const ids = await run(tabId, collectIds);
+// Opens the seller's Marketplace profile, then imports only their listings (profile pages also show other sellers').
+async function importProfile(sellerId) {
+  const tab = await chrome.tabs.create({ url: `https://www.facebook.com/marketplace/profile/${sellerId}/` });
+  await loaded(tab.id);
+  await wait(3000);
+  const ids = await run(tab.id, collectIds);
   let total = 0, failed = 0, others = 0;
   for (const [i, id] of ids.entries()) {
     badge(ids.length - i);
@@ -82,7 +86,7 @@ async function importProfile(tabId) {
 const addCurrent = async tabId => send(await run(tabId, readListing));
 
 chrome.runtime.onMessage.addListener((m, _, reply) => {
-  (m.type === 'profile' ? importProfile(m.tabId) : addCurrent(m.tabId)).then(r => reply({ r }), e => reply({ error: e.message }));
+  (m.type === 'profile' ? importProfile(m.sellerId) : addCurrent(m.tabId)).then(r => reply({ r }), e => reply({ error: e.message }));
   return true;
 });
 
