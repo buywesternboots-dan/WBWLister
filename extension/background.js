@@ -1,6 +1,7 @@
 const ITEM = /facebook\.com\/marketplace\/item\/(\d+)/;
 const wait = ms => new Promise(r => setTimeout(r, ms));
 const badge = t => chrome.action.setBadgeText({ text: String(t) });
+const status = t => { console.log('[WBW]', t); return chrome.storage.local.set({ status: `${new Date().toLocaleTimeString()} ${t}` }); };
 
 // Runs inside a Facebook listing page.
 function readListing() {
@@ -24,7 +25,7 @@ function readListing() {
   return {
     source: 'facebook',
     source_id: location.href.match(/item\/(\d+)/)?.[1],
-    seller_id: main.querySelector('a[href*="/marketplace/profile/"]')?.href.match(/profile\/(\d+)/)?.[1],
+    seller_ids: [...new Set([...document.querySelectorAll('a[href*="/marketplace/profile/"]')].map(a => a.href.match(/profile\/(\d+)/)?.[1]).filter(Boolean))],
     title,
     price: (lines.find(l => /^\$[\d,]+(\.\d\d)?$/.test(l)) || '').replace(/[$,]/g, '') || null,
     description,
@@ -61,9 +62,9 @@ async function api(method, body, q = '') {
 }
 const send = item => api('POST', item);
 
-const loaded = tabId => new Promise(res => chrome.tabs.onUpdated.addListener(function l(id, info) {
+const loaded = tabId => Promise.race([wait(20000), new Promise(res => chrome.tabs.onUpdated.addListener(function l(id, info) {
   if (id === tabId && info.status === 'complete') { chrome.tabs.onUpdated.removeListener(l); res(); }
-}));
+}))]);
 
 async function importUrl(url, sellerId, overwrite) {
   const tab = await chrome.tabs.create({ url, active: false });
@@ -71,7 +72,7 @@ async function importUrl(url, sellerId, overwrite) {
   await wait(2500);
   try {
     const item = await run(tab.id, readListing);
-    if (sellerId && item.seller_id && item.seller_id !== sellerId) return { other: true };
+    if (sellerId && item.seller_ids.length && !item.seller_ids.includes(sellerId)) return { other: true };
     return await send({ ...item, overwrite });
   }
   finally { chrome.tabs.remove(tab.id); }
@@ -83,6 +84,7 @@ async function importProfile(sellerId, sync, overwrite) {
   const tab = await chrome.tabs.create({ url: `https://www.facebook.com/marketplace/profile/${sellerId}/` });
   await loaded(tab.id);
   await wait(3000);
+  status('Scanning profile for listings…');
   const ids = await run(tab.id, collectIds);
   if (!ids.length) throw new Error('No listings found on this profile.');
   const known = new Set(overwrite ? [] : await api('GET', null, '?source=facebook'));
@@ -90,12 +92,13 @@ async function importProfile(sellerId, sync, overwrite) {
   const n = { added: 0, updated: 0, failed: 0, removed: 0 };
   for (let i = 0, others = 0; i < todo.length; i++) {
     badge(todo.length - i);
+    status(`Listing ${i + 1} of ${todo.length} (${ids.length - todo.length} already imported) — ${n.added} added, ${n.updated} updated, ${n.failed} failed`);
     try {
       const r = await importUrl(`https://www.facebook.com/marketplace/item/${todo[i]}/`, sellerId, overwrite);
-      if (r.other) { if (++others >= 3) break; continue; }
+      if (r.other) { status(`Listing ${todo[i]} belongs to another seller — skipped`); if (++others >= 3) break; continue; }
       others = 0;
       if (r.item?.updated) n.updated++; else if (r.item) n.added++;
-    } catch { n.failed++; }
+    } catch (e) { n.failed++; status(`Listing ${todo[i]} failed: ${e.message}`); }
     await wait(3000 + Math.random() * 3000);
   }
   if (sync) n.removed = (await api('PATCH', { action: 'sync', source: 'facebook', ids })).removed;
@@ -106,7 +109,9 @@ async function importProfile(sellerId, sync, overwrite) {
 const addCurrent = async tabId => send(await run(tabId, readListing));
 
 chrome.runtime.onMessage.addListener((m, _, reply) => {
-  (m.type === 'profile' ? importProfile(m.sellerId, m.sync, m.overwrite) : addCurrent(m.tabId)).then(r => reply({ r }), e => reply({ error: e.message }));
+  (m.type === 'profile' ? importProfile(m.sellerId, m.sync, m.overwrite) : addCurrent(m.tabId))
+    .then(r => { if (m.type === 'profile') status(`Done: ${r.added} added, ${r.updated} updated, ${r.removed} removed, ${r.failed} failed.`); reply({ r }); },
+      e => { badge('!'); status(`Error: ${e.message}`); reply({ error: e.message }); });
   return true;
 });
 
