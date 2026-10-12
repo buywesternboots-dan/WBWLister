@@ -12,6 +12,7 @@ function readListing() {
   return {
     source: 'facebook',
     source_id: location.href.match(/item\/(\d+)/)?.[1],
+    seller_id: main.querySelector('a[href*="/marketplace/profile/"]')?.href.match(/profile\/(\d+)/)?.[1],
     title: meta('og:title') || document.title.replace(/^.*Marketplace\s*[-–]\s*/, '').replace(/\s*\|\s*Facebook$/, ''),
     price: (lines.find(l => /^\$[\d,]+(\.\d\d)?$/.test(l)) || '').replace(/[$,]/g, '') || null,
     description: meta('og:description') || after("seller's description"),
@@ -24,7 +25,7 @@ function readListing() {
 // Runs inside a Marketplace profile page: scrolls until no new listings load.
 async function collectIds() {
   const ids = () => new Set([...document.querySelectorAll('a[href*="/marketplace/item/"]')].map(a => a.href.match(/item\/(\d+)/)?.[1]).filter(Boolean));
-  for (let n = 0, same = 0; same < 3;) {
+  for (let n = 0, same = 0, k = 0; same < 3 && k++ < 40;) {
     scrollTo(0, document.body.scrollHeight);
     await new Promise(r => setTimeout(r, 1500));
     const c = ids().size; same = c === n ? same + 1 : 0; n = c;
@@ -47,26 +48,35 @@ async function send(item) {
   return j;
 }
 
-async function importUrl(url) {
+async function importUrl(url, sellerId) {
   const tab = await chrome.tabs.create({ url, active: false });
   await new Promise(res => chrome.tabs.onUpdated.addListener(function l(id, info) {
     if (id === tab.id && info.status === 'complete') { chrome.tabs.onUpdated.removeListener(l); res(); }
   }));
   await wait(2500);
-  try { return await send(await run(tab.id, readListing)); }
+  try {
+    const item = await run(tab.id, readListing);
+    if (sellerId && item.seller_id && item.seller_id !== sellerId) return { other: true };
+    return await send(item);
+  }
   finally { chrome.tabs.remove(tab.id); }
 }
 
+// Profile pages also show other sellers' listings; skip those and stop once they take over.
 async function importProfile(tabId) {
+  const sellerId = (await chrome.tabs.get(tabId)).url.match(/profile\/(\d+)/)?.[1];
   const ids = await run(tabId, collectIds);
-  let failed = 0;
+  let total = 0, failed = 0, others = 0;
   for (const [i, id] of ids.entries()) {
     badge(ids.length - i);
-    try { await importUrl(`https://www.facebook.com/marketplace/item/${id}/`); } catch { failed++; }
+    try {
+      const r = await importUrl(`https://www.facebook.com/marketplace/item/${id}/`, sellerId);
+      if (r.other) { if (++others >= 3) break; } else { others = 0; total++; }
+    } catch { failed++; total++; }
     await wait(3000 + Math.random() * 3000);
   }
   badge('');
-  return { total: ids.length, failed };
+  return { total, failed };
 }
 
 const addCurrent = async tabId => send(await run(tabId, readListing));
