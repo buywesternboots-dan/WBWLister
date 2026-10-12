@@ -7,18 +7,30 @@ function readListing() {
   const meta = p => document.querySelector(`meta[property="${p}"]`)?.content?.trim() || '';
   const main = document.querySelector('[role="main"]') || document.body;
   const lines = main.innerText.split('\n').map(s => s.trim()).filter(Boolean);
-  const after = label => { const i = lines.findIndex(l => l.toLowerCase() === label); return i >= 0 ? lines[i + 1] : ''; };
-  const imgs = [...main.querySelectorAll('img')].filter(i => i.src.includes('scontent') && i.naturalWidth >= 200).map(i => i.src);
+  const at = label => lines.findIndex(l => l.toLowerCase() === label);
+  const after = label => { const i = at(label); return i >= 0 ? lines[i + 1] : ''; };
+  // Description: lines after the condition value, up to the location / seller section.
+  const c = at('condition'), stop = /^(see less|seller information|location is approximate|.+, [A-Z]{2})$/i;
+  const desc = c < 0 ? [] : lines.slice(c + 2, lines.findIndex((l, i) => i > c + 1 && stop.test(l)) >>> 0);
+  // Photos: this listing's gallery only (skip other listings' links), one per image file, largest copy.
+  const best = {};
+  for (const i of main.querySelectorAll('img')) {
+    if (!i.src.includes('scontent') || i.naturalWidth < 200 || i.closest('a[href*="/marketplace/item/"]')) continue;
+    const f = new URL(i.src).pathname.split('/').pop();
+    if (!best[f] || i.naturalWidth > best[f].w) best[f] = { w: i.naturalWidth, src: i.src };
+  }
+  const title = meta('og:title') || document.title.replace(/^.*Marketplace\s*[-–]\s*/, '').replace(/\s*\|\s*Facebook$/, '');
+  const description = meta('og:description') || desc.join('\n');
   return {
     source: 'facebook',
     source_id: location.href.match(/item\/(\d+)/)?.[1],
     seller_id: main.querySelector('a[href*="/marketplace/profile/"]')?.href.match(/profile\/(\d+)/)?.[1],
-    title: meta('og:title') || document.title.replace(/^.*Marketplace\s*[-–]\s*/, '').replace(/\s*\|\s*Facebook$/, ''),
+    title,
     price: (lines.find(l => /^\$[\d,]+(\.\d\d)?$/.test(l)) || '').replace(/[$,]/g, '') || null,
-    description: meta('og:description') || after("seller's description"),
+    description,
     condition: after('condition'),
-    size: after('size'),
-    photos: [...new Set([meta('og:image'), ...imgs].filter(Boolean))],
+    size: after('size') || `${title}\n${description}`.match(/\bsize:?\s*(\d{1,2}(\.5)?\s?(EEE|EE|[A-EW])?)\b/i)?.[1] || '',
+    photos: Object.values(best).map(b => b.src).slice(0, 20).concat(Object.keys(best).length ? [] : meta('og:image') || []),
   };
 }
 
