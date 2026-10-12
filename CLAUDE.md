@@ -17,7 +17,7 @@
 - Repo root: Next.js app (no web/ subfolder).
   - lib/wbw.js: mock WBW layer (Neon Postgres + Vercel Blob). Replace only this file to connect to real WBW. Table auto-creates.
   - app/api/items/route.js: GET list by status, POST create, PATCH bulk actions. Mock auth: Bearer seller name, default "demo".
-  - app/page.js: inventory page (tabs Newly imported / Published / Removed; groups Boots / Unsure / Not boots; bulk lower price, publish, remove, restore; tap to edit).
+  - app/page.js: inventory page (tabs Newly imported / Exported / Removed; groups Boots / Unsure / Not boots; bulk lower price, Export CSV for WBW import (columns in CSV const), remove, restore; tap to edit).
   - Env: DATABASE_URL, BLOB_READ_WRITE_TOKEN.
 - extension/: Chrome extension (MV3). Popup (server URL, seller, "Import all from this profile", "Add this listing"), right-click "Add to WBW". FB reader uses og meta tags + text labels; untested against real pages.
 
