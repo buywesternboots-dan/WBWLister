@@ -1,7 +1,10 @@
 const ITEM = /facebook\.com\/marketplace\/item\/(\d+)/;
 const wait = ms => new Promise(r => setTimeout(r, ms));
 const badge = t => chrome.action.setBadgeText({ text: String(t) });
-const status = t => { console.log('[WBW]', t); return chrome.storage.local.set({ status: `${new Date().toLocaleTimeString()} ${t}` }); };
+const status = async t => {
+  const { log = [] } = await chrome.storage.local.get('log');
+  return chrome.storage.local.set({ log: [`${new Date().toLocaleTimeString()} ${t}`, ...log].slice(0, 15) });
+};
 
 // Runs inside a Facebook listing page.
 function readListing() {
@@ -35,15 +38,17 @@ function readListing() {
   };
 }
 
-// Runs inside a Marketplace profile page: scrolls until no new listings load.
+// Runs inside a Marketplace profile page. The profile opens as a dialog over the general feed, so read and scroll only the dialog.
 async function collectIds() {
-  const ids = () => new Set([...document.querySelectorAll('a[href*="/marketplace/item/"]')].map(a => a.href.match(/item\/(\d+)/)?.[1]).filter(Boolean));
+  const links = () => [...(document.querySelector('[role="dialog"]') || document).querySelectorAll('a[href*="/marketplace/item/"]')];
+  const ids = () => [...new Set(links().map(a => a.href.match(/item\/(\d+)/)?.[1]).filter(Boolean))];
   for (let n = 0, same = 0, k = 0; same < 3 && k++ < 40;) {
-    scrollTo(0, document.body.scrollHeight);
+    const last = links().at(-1);
+    last ? last.scrollIntoView({ block: 'end' }) : scrollTo(0, document.body.scrollHeight);
     await new Promise(r => setTimeout(r, 1500));
-    const c = ids().size; same = c === n ? same + 1 : 0; n = c;
+    const c = ids().length; same = c === n ? same + 1 : 0; n = c;
   }
-  return [...ids()];
+  return ids();
 }
 
 const run = async (tabId, func) => (await chrome.scripting.executeScript({ target: { tabId }, func }))[0].result;
@@ -72,7 +77,7 @@ async function importUrl(url, sellerId, overwrite) {
   await wait(2500);
   try {
     const item = await run(tab.id, readListing);
-    if (sellerId && item.seller_ids.length && !item.seller_ids.includes(sellerId)) return { other: true };
+    if (sellerId && item.seller_ids.length && !item.seller_ids.includes(sellerId)) return { other: true, sellers: item.seller_ids };
     return await send({ ...item, overwrite });
   }
   finally { chrome.tabs.remove(tab.id); }
@@ -86,6 +91,7 @@ async function importProfile(sellerId, sync, overwrite) {
   await wait(3000);
   status('Scanning profile for listings…');
   const ids = await run(tab.id, collectIds);
+  status(`Found ${ids.length} listings on the profile`);
   if (!ids.length) throw new Error('No listings found on this profile.');
   const known = new Set(overwrite ? [] : await api('GET', null, '?source=facebook'));
   const todo = ids.filter(id => !known.has(id));
@@ -95,7 +101,7 @@ async function importProfile(sellerId, sync, overwrite) {
     status(`Listing ${i + 1} of ${todo.length} (${ids.length - todo.length} already imported) — ${n.added} added, ${n.updated} updated, ${n.failed} failed`);
     try {
       const r = await importUrl(`https://www.facebook.com/marketplace/item/${todo[i]}/`, sellerId, overwrite);
-      if (r.other) { status(`Listing ${todo[i]} belongs to another seller — skipped`); if (++others >= 3) break; continue; }
+      if (r.other) { status(`Skipped ${todo[i]}: seller links on page ${r.sellers.join(', ') || 'none'}, expected ${sellerId}`); if (++others >= 3) break; continue; }
       others = 0;
       if (r.item?.updated) n.updated++; else if (r.item) n.added++;
     } catch (e) { n.failed++; status(`Listing ${todo[i]} failed: ${e.message}`); }
