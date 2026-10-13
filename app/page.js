@@ -15,6 +15,9 @@ const LABELS = { price: 'Price*', wbw_price: 'WBW Price', title: 'Title*', brand
 const FIELDS = Object.keys(LABELS);
 const REQUIRED = FIELDS.filter(f => LABELS[f].endsWith('*'));
 const missing = i => REQUIRED.filter(f => !i[f]).map(f => LABELS[f].replace(/\*$/, ''));
+const unverified = i => (i.guessed ?? []).filter(f => i[f]);
+// One-click values for items that genuinely have none.
+const PRESETS = { brand: 'Unbranded', size: 'Estimated' };
 // WBW import CSV columns, in WBW's order.
 const CSV = { seller: 'WBW Seller Name', ...Object.fromEntries(FIELDS.map(f => [f, LABELS[f].replace(/\*$/, '')])), category: 'Category', photos: 'Image URLs', source_id: 'Source ID' };
 const cell = v => `"${String(Array.isArray(v) ? v.join('|') : v ?? '').replace(/"/g, '""')}"`;
@@ -41,7 +44,11 @@ export default function Inventory() {
   const bulk = body => act({ ids: [...sel], ...body });
   const toggle = id => setSel(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const lower = () => { const v = Number(adj.value); if (v > 0) bulk({ action: 'price', [adj.unit === '%' ? 'percent' : 'amount']: v }); };
-  const exportCsv = () => { download(items.filter(i => sel.has(i.id))); if (tab === 'review') bulk({ action: 'publish' }); };
+  const exportCsv = () => {
+    const rows = items.filter(i => sel.has(i.id)), todo = rows.filter(i => unverified(i).length).length;
+    if (todo && !confirm(`${todo} of ${rows.length} items still have auto-filled fields nobody verified (yellow). Export anyway?`)) return;
+    download(rows); if (tab === 'review') bulk({ action: 'publish' });
+  };
   const save = () => act({ ids: [edit.id], action: 'edit', ...Object.fromEntries(FIELDS.map(f => [f, edit[f]])) });
 
   const gone = tab === 'removed' || tab === 'archived';
@@ -83,15 +90,20 @@ export default function Inventory() {
           <input type="checkbox" checked={sel.has(i.id)} onChange={() => toggle(i.id)} />
           {i.photos[0] ? <img src={i.photos[0]} alt="" /> : <div className="noimg" />}
           {edit?.id === i.id ? <div className="form">
-            {FIELDS.map(f => <label key={f}>{LABELS[f]}{f === 'description'
+            {FIELDS.map(f => <label key={f} className={unverified(i).includes(f) ? 'guess' : ''}>
+              <span>{LABELS[f]}{unverified(i).includes(f) && ' — auto-filled, verify'}
+                {PRESETS[f] && <button type="button" className="preset" onClick={() => setEdit({ ...edit, [f]: PRESETS[f] })}>{PRESETS[f]}</button>}</span>
+              {f === 'description'
               ? <textarea rows="4" value={edit[f] ?? ''} onChange={e => setEdit({ ...edit, [f]: e.target.value })} />
               : <input value={edit[f] ?? ''} onChange={e => setEdit({ ...edit, [f]: e.target.value })} />}</label>)}
-            <span><button className="primary" onClick={save}>Save</button><button onClick={() => setEdit(null)}>Cancel</button></span>
+            <span><button className="primary" onClick={save}>Save (marks all verified)</button><button onClick={() => setEdit(null)}>Cancel</button></span>
           </div> : <div className="info" onClick={() => setEdit(i)}>
             <strong>{i.title || 'Untitled'}</strong>
             {missing(i).length > 0 && <small className="err">Missing: {missing(i).join(', ')}</small>}
-            <dl>{FIELDS.filter(f => f !== 'title' && f !== 'description').map(f => <div key={f} className={!i[f] && REQUIRED.includes(f) ? 'err' : ''}>
-              <dt>{LABELS[f].replace(/\*$/, '')}</dt><dd>{f.includes('price') && i[f] ? `${Number(i[f]).toFixed(2)}` : i[f] || '—'}</dd></div>)}</dl>
+            {unverified(i).length > 0 && <small className="warn">Verify: {unverified(i).map(f => LABELS[f].replace(/\*$/, '')).join(', ')}</small>}
+            <dl>{FIELDS.filter(f => f !== 'title' && f !== 'description').map(f =>
+              <div key={f} className={!i[f] && REQUIRED.includes(f) ? 'err' : unverified(i).includes(f) ? 'guess' : ''}>
+              <dt>{LABELS[f].replace(/\*$/, '')}</dt><dd>{f.includes('price') && i[f] ? `$${Number(i[f]).toFixed(2)}` : i[f] || '—'}</dd></div>)}</dl>
             {i.description && <p className="desc">{i.description}</p>}
             <small>Tap to edit</small>
           </div>}
@@ -116,6 +128,8 @@ h2{font-size:15px;margin:20px 0 8px;color:#6b5a4a}
 .form{display:flex;flex-direction:column;gap:6px;flex:1}.form label{display:flex;flex-direction:column;font-size:13px;color:#6b5a4a;gap:2px}.form span{display:flex;gap:6px}
 dl{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:4px 12px;margin:6px 0;font-size:13px}dt{color:#8a7a6a;font-size:11px}dd{margin:0}
 .desc{font-size:13px;color:#4a3d31;margin:4px 0;white-space:pre-line;max-height:4.2em;overflow:hidden}
+.guess{background:#fff3c4;border-radius:4px;padding:0 4px}.warn{color:#8a5a00}
+.preset{margin-left:6px;padding:0 6px;font-size:12px}.form label>span{display:flex;align-items:center}
 .who{display:flex;gap:6px;align-items:center;margin-bottom:12px}.who input{width:160px}
 .err{color:#a3261b}.empty{color:#6b5a4a}
 `;
