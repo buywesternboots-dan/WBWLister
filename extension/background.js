@@ -19,7 +19,11 @@ function readListing() {
   const LABEL = /^(boot style|style|(men|women|kid)s?['’]?s? shoe size|shoe size|size|brand|color|colou?r|material|width)$/i;
   const attrs = {};
   let j = c + 2;
-  while (c >= 0 && LABEL.test(lines[j] || '')) { attrs[lines[j].toLowerCase().replace(/^.*shoe size$/, 'size')] = lines[j + 1]; j += 2; }
+  while (c >= 0 && LABEL.test(lines[j] || '')) {
+    const l = lines[j].toLowerCase();
+    if (/^(men|women|kid)/.test(l)) attrs.sized_for = l.startsWith('women') ? 'Women' : l.startsWith('men') ? 'Men' : 'Kids';
+    attrs[l.replace(/^.*shoe size$/, 'size').replace('colour', 'color')] = lines[j + 1]; j += 2;
+  }
   const desc = c < 0 ? [] : lines.slice(j, lines.findIndex((l, i) => i >= j && stop.test(l)) >>> 0);
   // Photos: this listing's gallery only (skip other listings' links), one per image file, largest copy.
   const best = {};
@@ -38,6 +42,9 @@ function readListing() {
     description,
     condition: after('condition'),
     brand: attrs.brand || null,
+    sized_for: attrs.sized_for || null,
+    color: attrs.color || null,
+    material: attrs.material || null,
     // Size with width from the title (e.g. 10.5EE) beats FB's size field, which has no width.
     size: title.match(/\b(\d{1,2}(?:\.5)?) ?(EEE|EE|[A-EW])\b/)?.slice(1).join('') || attrs.size || after('size')
       || description.match(/\bsize:?[ \t]*(\d{1,2}(\.5)?[ \t]?(EEE|EE|[A-EW])?)\b/i)?.[1] || '',
