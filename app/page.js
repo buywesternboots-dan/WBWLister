@@ -9,14 +9,14 @@ const api = (method, body, q = '') =>
 
 const TABS = { review: 'Newly imported', published: 'Exported', removed: 'Removed', archived: 'Archived' };
 // WBW import columns. Adjust to match WBW's CSV importer.
-const CSV = { title: 'Title', price: 'Price', size: 'Size', condition: 'Condition', brand: 'Brand', description: 'Description', photos: 'Image URLs', source_id: 'Source ID' };
+const CSV = { category: 'Category', title: 'Title', price: 'Price', size: 'Size', condition: 'Condition', brand: 'Brand', description: 'Description', photos: 'Image URLs', source_id: 'Source ID' };
 const cell = v => `"${String(Array.isArray(v) ? v.join('|') : v ?? '').replace(/"/g, '""')}"`;
 const download = rows => {
-  const csv = [Object.values(CSV), ...rows.map(r => Object.keys(CSV).map(k => r[k]))].map(r => r.map(cell).join(',')).join('\r\n');
+  const csv = [Object.values(CSV), ...rows.map(r => ({ ...r, category: GROUPS[r.boot] === 'Unsure' ? '' : GROUPS[r.boot] })).map(r => Object.keys(CSV).map(k => r[k]))].map(r => r.map(cell).join(',')).join('\r\n');
   const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(new Blob([csv], { type: 'text/csv' })), download: `wbw-import-${new Date().toISOString().slice(0, 10)}.csv` });
   a.click();
 };
-const GROUPS = { boot: 'Boots', unsure: 'Unsure', not: 'Not boots' };
+const GROUPS = { boot: 'Boots', belt: 'Belts', unsure: 'Unsure' };
 const FIELDS = ['title', 'price', 'size', 'condition', 'brand'];
 
 export default function Inventory() {
