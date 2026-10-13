@@ -89,8 +89,10 @@ export default function Inventory() {
             <span><button className="primary" onClick={save}>Save</button><button onClick={() => setEdit(null)}>Cancel</button></span>
           </div> : <div className="info" onClick={() => setEdit(i)}>
             <strong>{i.title || 'Untitled'}</strong>
-            <span>WBW ${Number(i.wbw_price ?? i.price ?? 0).toFixed(2)}{i.sized_for && ` · ${i.sized_for}`}{i.size && ` · ${i.size}${i.width ?? ''}`}{i.material && ` · ${i.material}`}{i.condition && ` · ${i.condition}`}</span>
             {missing(i).length > 0 && <small className="err">Missing: {missing(i).join(', ')}</small>}
+            <dl>{FIELDS.filter(f => f !== 'title' && f !== 'description').map(f => <div key={f} className={!i[f] && REQUIRED.includes(f) ? 'err' : ''}>
+              <dt>{LABELS[f].replace(/\*$/, '')}</dt><dd>{f.includes('price') && i[f] ? `${Number(i[f]).toFixed(2)}` : i[f] || '—'}</dd></div>)}</dl>
+            {i.description && <p className="desc">{i.description}</p>}
             <small>Tap to edit</small>
           </div>}
         </div>)}
@@ -112,6 +114,8 @@ h2{font-size:15px;margin:20px 0 8px;color:#6b5a4a}
 .item img,.noimg{width:72px;height:72px;object-fit:cover;border-radius:6px;background:#eee;flex-shrink:0}
 .info{display:flex;flex-direction:column;cursor:pointer;flex:1}.info small{color:#8a7a6a}
 .form{display:flex;flex-direction:column;gap:6px;flex:1}.form label{display:flex;flex-direction:column;font-size:13px;color:#6b5a4a;gap:2px}.form span{display:flex;gap:6px}
+dl{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:4px 12px;margin:6px 0;font-size:13px}dt{color:#8a7a6a;font-size:11px}dd{margin:0}
+.desc{font-size:13px;color:#4a3d31;margin:4px 0;white-space:pre-line;max-height:4.2em;overflow:hidden}
 .who{display:flex;gap:6px;align-items:center;margin-bottom:12px}.who input{width:160px}
 .err{color:#a3261b}.empty{color:#6b5a4a}
 `;
