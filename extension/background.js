@@ -13,9 +13,14 @@ function readListing() {
   const lines = main.innerText.split('\n').map(s => s.trim()).filter(Boolean);
   const at = label => lines.findIndex(l => l.toLowerCase() === label);
   const after = label => { const i = at(label); return i >= 0 ? lines[i + 1] : ''; };
-  // Description: lines after the condition value, up to the location / seller section.
+  // Details: label/value pairs (Boot Style, Men's Shoe Size, Brand…) after the condition value, then the description,
+  // up to the location / seller section.
   const c = at('condition'), stop = /^(see less|seller information|location is approximate|.+, [A-Z]{2})$/i;
-  const desc = c < 0 ? [] : lines.slice(c + 2, lines.findIndex((l, i) => i > c + 1 && stop.test(l)) >>> 0);
+  const LABEL = /^(boot style|style|(men|women|kid)s?['’]?s? shoe size|shoe size|size|brand|color|colou?r|material|width)$/i;
+  const attrs = {};
+  let j = c + 2;
+  while (c >= 0 && LABEL.test(lines[j] || '')) { attrs[lines[j].toLowerCase().replace(/^.*shoe size$/, 'size')] = lines[j + 1]; j += 2; }
+  const desc = c < 0 ? [] : lines.slice(j, lines.findIndex((l, i) => i >= j && stop.test(l)) >>> 0);
   // Photos: this listing's gallery only (skip other listings' links), one per image file, largest copy.
   const best = {};
   for (const i of main.querySelectorAll('img')) {
@@ -33,7 +38,10 @@ function readListing() {
     price: (lines.find(l => /^\$[\d,]+(\.\d\d)?$/.test(l)) || '').replace(/[$,]/g, '') || null,
     description,
     condition: after('condition'),
-    size: after('size') || `${title}\n${description}`.match(/\bsize:?\s*(\d{1,2}(\.5)?\s?(EEE|EE|[A-EW])?)\b/i)?.[1] || '',
+    brand: attrs.brand || null,
+    // Size with width from the title (e.g. 10.5EE) beats FB's size field, which has no width.
+    size: title.match(/\b(\d{1,2}(?:\.5)?) ?(EEE|EE|[A-EW])\b/)?.slice(1).join('') || attrs.size || after('size')
+      || description.match(/\bsize:?[ \t]*(\d{1,2}(\.5)?[ \t]?(EEE|EE|[A-EW])?)\b/i)?.[1] || '',
     photos: Object.values(best).map(b => b.src).slice(0, 20).concat(Object.keys(best).length ? [] : meta('og:image') || []),
   };
 }
