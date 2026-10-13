@@ -1,6 +1,6 @@
 import * as wbw from '../../../lib/wbw';
 
-const seller = req => req.headers.get('authorization')?.replace('Bearer ', '') || 'demo'; // mock auth
+const seller = req => req.headers.get('authorization')?.replace('Bearer ', '').trim().toLowerCase() || 'demo'; // mock auth, case-insensitive
 const handle = fn => async req => {
   try { return Response.json(await fn(req)); }
   catch (e) { return Response.json({ error: e.message }, { status: 400 }); }
