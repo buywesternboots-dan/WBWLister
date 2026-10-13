@@ -1,8 +1,10 @@
 'use client';
 import { useEffect, useState } from 'react';
 
+// Mock auth: seller name from ?seller= (default demo), same as the extension's Seller box.
+const seller = () => new URLSearchParams(location.search).get('seller') || 'demo';
 const api = (method, body, q = '') =>
-  fetch('/api/items' + q, { method, headers: { 'Content-Type': 'application/json' }, body: body && JSON.stringify(body) })
+  fetch('/api/items' + q, { method, headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${seller()}` }, body: body && JSON.stringify(body) })
     .then(async r => { const j = await r.json(); if (!r.ok) throw new Error(j.error); return j; });
 
 const TABS = { review: 'Newly imported', published: 'Exported', removed: 'Removed', archived: 'Archived' };
@@ -24,9 +26,10 @@ export default function Inventory() {
   const [edit, setEdit] = useState(null);
   const [adj, setAdj] = useState({ value: '', unit: '%' });
   const [err, setErr] = useState('');
+  const [who, setWho] = useState('');
 
   const load = () => api('GET', null, `?status=${tab}`).then(setItems).catch(e => setErr(e.message));
-  useEffect(() => { setSel(new Set()); setEdit(null); load(); }, [tab]);
+  useEffect(() => { setWho(seller()); setSel(new Set()); setEdit(null); load(); }, [tab]);
 
   const act = body => { setErr(''); api('PATCH', body).then(() => { setSel(new Set()); setEdit(null); load(); }).catch(e => setErr(e.message)); };
   const bulk = body => act({ ids: [...sel], ...body });
@@ -43,6 +46,9 @@ export default function Inventory() {
   return (
     <main>
       <style>{css}</style>
+      <form className="who" onSubmit={e => { e.preventDefault(); location.search = `?seller=${encodeURIComponent(e.target.s.value.trim())}`; }}>
+        Seller: <input name="s" key={who} defaultValue={who} /> <button>Switch</button>
+      </form>
       <nav>{Object.entries(TABS).map(([k, label]) =>
         <button key={k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>{label}</button>)}</nav>
 
@@ -98,5 +104,6 @@ h2{font-size:15px;margin:20px 0 8px;color:#6b5a4a}
 .item img,.noimg{width:72px;height:72px;object-fit:cover;border-radius:6px;background:#eee;flex-shrink:0}
 .info{display:flex;flex-direction:column;cursor:pointer;flex:1}.info small{color:#8a7a6a}
 .form{display:flex;flex-direction:column;gap:6px;flex:1}.form span{display:flex;gap:6px}
+.who{display:flex;gap:6px;align-items:center;margin-bottom:12px}.who input{width:160px}
 .err{color:#a3261b}.empty{color:#6b5a4a}
 `;
