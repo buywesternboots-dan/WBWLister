@@ -33,7 +33,6 @@ function readListing() {
   return {
     source: 'facebook',
     source_id: location.href.match(/item\/(\d+)/)?.[1],
-    seller_ids: [...new Set([...document.querySelectorAll('a[href*="/marketplace/profile/"]')].map(a => a.href.match(/profile\/(\d+)/)?.[1]).filter(Boolean))],
     title,
     price: (lines.find(l => /^\$[\d,]+(\.\d\d)?$/.test(l)) || '').replace(/[$,]/g, '') || null,
     description,
@@ -79,19 +78,17 @@ const loaded = tabId => Promise.race([wait(20000), new Promise(res => chrome.tab
   if (id === tabId && info.status === 'complete') { chrome.tabs.onUpdated.removeListener(l); res(); }
 }))]);
 
-async function importUrl(url, sellerId, overwrite) {
+async function importUrl(url, overwrite) {
   const tab = await chrome.tabs.create({ url, active: false });
   await loaded(tab.id);
   await wait(2500);
   try {
-    const item = await run(tab.id, readListing);
-    if (sellerId && item.seller_ids.length && !item.seller_ids.includes(sellerId)) return { other: true, sellers: item.seller_ids };
-    return await send({ ...item, overwrite });
+    return await send({ ...(await run(tab.id, readListing)), overwrite });
   }
   finally { chrome.tabs.remove(tab.id); }
 }
 
-// Opens the seller's Marketplace profile and imports their listings (profile pages also show other sellers'; those are skipped).
+// Opens the seller's Marketplace profile and imports every listing in it (non-boots land in Unsure).
 // sync: also moves items no longer listed to Removed. overwrite: re-reads known listings and updates changed ones.
 async function importProfile(sellerId, sync, overwrite) {
   const tab = await chrome.tabs.create({ url: `https://www.facebook.com/marketplace/profile/${sellerId}/` });
@@ -104,13 +101,11 @@ async function importProfile(sellerId, sync, overwrite) {
   const known = new Set(overwrite ? [] : await api('GET', null, '?source=facebook'));
   const todo = ids.filter(id => !known.has(id));
   const n = { added: 0, updated: 0, failed: 0, removed: 0 };
-  for (let i = 0, others = 0; i < todo.length; i++) {
+  for (let i = 0; i < todo.length; i++) {
     badge(todo.length - i);
     status(`Listing ${i + 1} of ${todo.length} (${ids.length - todo.length} already imported) — ${n.added} added, ${n.updated} updated, ${n.failed} failed`);
     try {
-      const r = await importUrl(`https://www.facebook.com/marketplace/item/${todo[i]}/`, sellerId, overwrite);
-      if (r.other) { status(`Skipped ${todo[i]}: seller links on page ${r.sellers.join(', ') || 'none'}, expected ${sellerId}`); if (++others >= 3) break; continue; }
-      others = 0;
+      const r = await importUrl(`https://www.facebook.com/marketplace/item/${todo[i]}/`, overwrite);
       if (r.item?.updated) n.updated++; else if (r.item) n.added++;
     } catch (e) { n.failed++; status(`Listing ${todo[i]} failed: ${e.message}`); }
     await wait(3000 + Math.random() * 3000);
