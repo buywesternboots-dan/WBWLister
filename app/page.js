@@ -26,6 +26,8 @@ const download = rows => {
   const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(new Blob([csv], { type: 'text/csv' })), download: `wbw-import-${new Date().toISOString().slice(0, 10)}.csv` });
   a.click();
 };
+// Saved stores for "Import from website" (any other address can be typed).
+const SITES = { 'The Boot Whisperer': 'thebootwhisperer.net', 'Nashville Booted (boots)': 'https://nashvillebooted.com/collections/the-boots', 'Bootitude': 'bootitude.net' };
 const GROUPS = { boot: 'Boots', belt: 'Belts', unsure: 'Unsure' };
 
 export default function Inventory() {
@@ -87,7 +89,11 @@ export default function Inventory() {
         Seller: <input name="s" key={who} defaultValue={who} /> <button>Switch</button>
       </form>
       <div className="site">
-        <input placeholder="Import from website (e.g. thebootwhisperer.net)" value={site.url} onChange={e => setSite({ ...site, url: e.target.value.trim() })} />
+        <select value={Object.values(SITES).includes(site.url) ? site.url : ''} onChange={e => setSite({ ...site, url: e.target.value })}>
+          <option value="">Import from website…</option>
+          {Object.entries(SITES).map(([name, url]) => <option key={url} value={url}>{name}</option>)}
+        </select>
+        <input placeholder="or type a store address" value={site.url} onChange={e => setSite({ ...site, url: e.target.value.trim() })} />
         <button disabled={!site.url} onClick={() => importSite(false)}>Import</button>
         <button disabled={!site.url} onClick={() => importSite(true)}>Sync</button>
         <label><input type="checkbox" checked={site.overwrite} onChange={e => setSite({ ...site, overwrite: e.target.checked })} /> Update changed</label>
