@@ -13,7 +13,7 @@ async function start(type, sync) {
   if (type === 'profile' && !sellerId) return $('status').textContent = 'Paste a Marketplace profile link (facebook.com/marketplace/profile/…).';
   if (type === 'listing' && !/marketplace\/item\//.test(tab.url)) return $('status').textContent = 'Open a Marketplace listing first.';
   $('status').textContent = type === 'profile' ? 'Working. You can close this; the icon shows items left.' : 'Adding…';
-  const { r, error } = await chrome.runtime.sendMessage({ type, tabId: tab.id, sellerId, sync, overwrite: $('overwrite').checked });
+  const { r, error } = await chrome.runtime.sendMessage({ type, tabId: tab.id, sellerId, sync });
   $('status').textContent = error || (type === 'profile'
     ? `Done: ${r.added} added, ${r.updated} updated, ${r.removed} removed, ${r.failed} failed.`
     : r.duplicate ? 'Already imported.' : 'Added.');

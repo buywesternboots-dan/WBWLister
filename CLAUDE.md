@@ -20,8 +20,8 @@
   - lib/wbw.js FIELDS = WBW listing fields; enrich() fills them from listing text; values inferred from free text are listed in items.guessed and shown yellow until the seller saves (= verified). CSV columns in app/page.js LABELS/CSV (WBW Seller Name first).
   - app/page.js: inventory page (tabs Newly imported / Exported / Removed / Archived [auto after 30 days in Removed]; groups Boots / Belts / Unsure (category stored in items.boot); bulk lower price, Export CSV for WBW import (columns in CSV const), remove, restore; tap to edit).
   - Env: DATABASE_URL, BLOB_READ_WRITE_TOKEN.
-- lib/sites.js + app/api/import: website stores (Wix/Shopify…) imported server-side from sitemap + schema.org Product data; "Import from website" box on the inventory page (saved stores in SITES dropdown in app/page.js, or type any; Shopify collection links import just that collection; Import / Sync / Update changed). Sold items skipped.
-- extension/: Chrome extension (MV3). Popup (server URL, seller, profile link, "Import all from this profile", "Sync with this profile" [+ "Update changed listings"; unlisted items → Removed], "Add this listing"), right-click "Add to WBW". FB reader uses og meta tags + text labels; untested against real pages.
+- lib/sites.js + app/api/import: website stores (Wix/Shopify…) imported server-side from sitemap + schema.org Product data; "Import from website" box on the inventory page (saved stores in SITES dropdown in app/page.js, or type any; Shopify collection links import just that collection). Import = new only; Sync = re-read all, refresh source-changed items (items.src_hash fingerprint of source data, so seller edits are not seen as changes), remove gone/sold.
+- extension/: Chrome extension (MV3). Popup (server URL, seller, profile link, "Import all from this profile", "Sync with this profile" [re-reads all; source-changed items refreshed; unlisted → Removed], "Add this listing"), right-click "Add to WBW". FB reader uses og meta tags + text labels; untested against real pages.
 
 ## Status
 - Web app builds (next build passes); not yet run against a real database.

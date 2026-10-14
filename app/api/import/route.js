@@ -16,11 +16,11 @@ export const GET = handle(async req => {
   return { source, urls, known: urls.filter(u => have.has(slug(u))) };
 });
 
-// POST { url, overwrite } → imports one product page (skipped if sold).
+// POST { url } → imports one product page (skipped if sold; ignored if already imported and unchanged).
 export const POST = handle(async req => {
-  const { url, overwrite } = await req.json();
+  const { url } = await req.json();
   const item = await readProduct(url);
   if (!item) return { sold: true };
-  const row = await wbw.createItem(seller(req), { ...item, overwrite });
+  const row = await wbw.createItem(seller(req), item);
   return { item: row, duplicate: !row };
 });

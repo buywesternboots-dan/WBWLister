@@ -38,7 +38,7 @@ export default function Inventory() {
   const [adj, setAdj] = useState({ value: '', unit: '%' });
   const [err, setErr] = useState('');
   const [who, setWho] = useState('');
-  const [site, setSite] = useState({ url: '', overwrite: false, progress: '', failed: [] });
+  const [site, setSite] = useState({ url: '', progress: '', failed: [] });
 
   const load = () => api('GET', null, `?status=${tab}`).then(setItems).catch(e => setErr(e.message));
   useEffect(() => { setWho(seller()); setSel(new Set()); setEdit(null); load(); }, [tab]);
@@ -54,7 +54,7 @@ export default function Inventory() {
   };
   const save = () => act({ ids: [edit.id], action: 'edit', ...Object.fromEntries(FIELDS.map(f => [f, edit[f]])) });
 
-  // Website import: list the store's products, import them one by one, then (sync) remove what's gone or sold.
+  // Website import: Import = new products only. Sync = re-read all (refresh changed ones), then remove what's gone or sold.
   // retry: just these product URLs (the previous run's failures).
   const importSite = async (sync, retry) => {
     setErr('');
@@ -64,12 +64,12 @@ export default function Inventory() {
       say('Reading the store\'s product list…');
       const { source, urls, known } = retry ? { urls: retry, known: [] } : await api('GET', null, `?site=${encodeURIComponent(site.url)}`, '/api/import');
       const slug = u => u.split('/').filter(Boolean).pop(), have = new Set(known);
-      const todo = site.overwrite ? urls : urls.filter(u => !have.has(u)), listed = new Set(urls.map(slug));
+      const todo = sync ? urls : urls.filter(u => !have.has(u)), listed = new Set(urls.map(slug));
       const n = { added: 0, updated: 0, sold: 0, failed: 0, removed: 0 };
       for (const [i, url] of todo.entries()) {
         say(`Product ${i + 1} of ${todo.length} (${known.length} already imported) — ${n.added} added, ${n.updated} updated, ${n.sold} sold, ${n.failed} failed`);
         try {
-          const r = await api('POST', { url, overwrite: site.overwrite }, '', '/api/import');
+          const r = await api('POST', { url }, '', '/api/import');
           if (r.sold) { n.sold++; listed.delete(slug(url)); } else if (r.item?.updated) n.updated++; else if (r.item) n.added++;
         } catch (e) { n.failed++; setSite(s => ({ ...s, failed: [...s.failed, { url, error: e.message }] })); }
       }
@@ -98,7 +98,6 @@ export default function Inventory() {
         <input placeholder="or type a store address" value={site.url} onChange={e => setSite({ ...site, url: e.target.value.trim() })} />
         <button disabled={!site.url} onClick={() => importSite(false)}>Import</button>
         <button disabled={!site.url} onClick={() => importSite(true)}>Sync</button>
-        <label><input type="checkbox" checked={site.overwrite} onChange={e => setSite({ ...site, overwrite: e.target.checked })} /> Update changed</label>
         {site.progress && <small>{site.progress}</small>}
         {site.failed.length > 0 && <details className="failed" open>
           <summary>{site.failed.length} failed <button onClick={() => importSite(false, site.failed.map(f => f.url))}>Retry failed</button></summary>

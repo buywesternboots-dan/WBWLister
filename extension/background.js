@@ -85,19 +85,20 @@ const loaded = tabId => Promise.race([wait(20000), new Promise(res => chrome.tab
   if (id === tabId && info.status === 'complete') { chrome.tabs.onUpdated.removeListener(l); res(); }
 }))]);
 
-async function importUrl(url, overwrite) {
+async function importUrl(url) {
   const tab = await chrome.tabs.create({ url, active: false });
   await loaded(tab.id);
   await wait(2500);
   try {
-    return await send({ ...(await run(tab.id, readListing)), overwrite });
+    return await send(await run(tab.id, readListing));
   }
   finally { chrome.tabs.remove(tab.id); }
 }
 
 // Opens the seller's Marketplace profile and imports every listing in it (non-boots land in Unsure).
-// sync: also moves items no longer listed to Removed. overwrite: re-reads known listings and updates changed ones.
-async function importProfile(sellerId, sync, overwrite) {
+// Import: new listings only. Sync: re-reads every listing (the server refreshes changed ones, ignores unchanged)
+// and moves items no longer listed to Removed.
+async function importProfile(sellerId, sync) {
   const tab = await chrome.tabs.create({ url: `https://www.facebook.com/marketplace/profile/${sellerId}/` });
   await loaded(tab.id);
   await wait(3000);
@@ -105,14 +106,14 @@ async function importProfile(sellerId, sync, overwrite) {
   const ids = await run(tab.id, collectIds);
   status(`Found ${ids.length} listings on the profile`);
   if (!ids.length) throw new Error('No listings found on this profile.');
-  const known = new Set(overwrite ? [] : await api('GET', null, '?source=facebook'));
+  const known = new Set(sync ? [] : await api('GET', null, '?source=facebook'));
   const todo = ids.filter(id => !known.has(id));
   const n = { added: 0, updated: 0, failed: 0, removed: 0 };
   for (let i = 0; i < todo.length; i++) {
     badge(todo.length - i);
     status(`Listing ${i + 1} of ${todo.length} (${ids.length - todo.length} already imported) — ${n.added} added, ${n.updated} updated, ${n.failed} failed`);
     try {
-      const r = await importUrl(`https://www.facebook.com/marketplace/item/${todo[i]}/`, overwrite);
+      const r = await importUrl(`https://www.facebook.com/marketplace/item/${todo[i]}/`);
       if (r.item?.updated) n.updated++; else if (r.item) n.added++;
     } catch (e) { n.failed++; status(`Listing ${todo[i]} failed: ${e.message}`); }
     await wait(3000 + Math.random() * 3000);
@@ -125,7 +126,7 @@ async function importProfile(sellerId, sync, overwrite) {
 const addCurrent = async tabId => send(await run(tabId, readListing));
 
 chrome.runtime.onMessage.addListener((m, _, reply) => {
-  (m.type === 'profile' ? importProfile(m.sellerId, m.sync, m.overwrite) : addCurrent(m.tabId))
+  (m.type === 'profile' ? importProfile(m.sellerId, m.sync) : addCurrent(m.tabId))
     .then(r => { if (m.type === 'profile') status(`Done: ${r.added} added, ${r.updated} updated, ${r.removed} removed, ${r.failed} failed.`); reply({ r }); },
       e => { badge('!'); status(`Error: ${e.message}`); reply({ error: e.message }); });
   return true;
