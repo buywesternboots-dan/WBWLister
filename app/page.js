@@ -38,7 +38,7 @@ export default function Inventory() {
   const [adj, setAdj] = useState({ value: '', unit: '%' });
   const [err, setErr] = useState('');
   const [who, setWho] = useState('');
-  const [site, setSite] = useState({ url: '', overwrite: false, progress: '' });
+  const [site, setSite] = useState({ url: '', overwrite: false, progress: '', failed: [] });
 
   const load = () => api('GET', null, `?status=${tab}`).then(setItems).catch(e => setErr(e.message));
   useEffect(() => { setWho(seller()); setSel(new Set()); setEdit(null); load(); }, [tab]);
@@ -59,6 +59,7 @@ export default function Inventory() {
     setErr('');
     const say = progress => setSite(s => ({ ...s, progress }));
     try {
+      setSite(s => ({ ...s, failed: [] }));
       say('Reading the store\'s product list…');
       const { source, urls, known } = await api('GET', null, `?site=${encodeURIComponent(site.url)}`, '/api/import');
       const slug = u => u.split('/').filter(Boolean).pop(), have = new Set(known);
@@ -69,7 +70,7 @@ export default function Inventory() {
         try {
           const r = await api('POST', { url, overwrite: site.overwrite }, '', '/api/import');
           if (r.sold) { n.sold++; listed.delete(slug(url)); } else if (r.item?.updated) n.updated++; else if (r.item) n.added++;
-        } catch { n.failed++; }
+        } catch (e) { n.failed++; setSite(s => ({ ...s, failed: [...s.failed, { url, error: e.message }] })); }
       }
       if (sync) n.removed = (await api('PATCH', { action: 'sync', source, ids: [...listed] })).removed;
       say(`Done: ${n.added} added, ${n.updated} updated, ${n.sold} sold (skipped), ${n.removed} removed, ${n.failed} failed.`);
@@ -98,6 +99,10 @@ export default function Inventory() {
         <button disabled={!site.url} onClick={() => importSite(true)}>Sync</button>
         <label><input type="checkbox" checked={site.overwrite} onChange={e => setSite({ ...site, overwrite: e.target.checked })} /> Update changed</label>
         {site.progress && <small>{site.progress}</small>}
+        {site.failed.length > 0 && <details className="failed" open>
+          <summary>{site.failed.length} failed</summary>
+          {site.failed.map(f => <div key={f.url}><a href={f.url} target="_blank">{f.url.split('/').pop()}</a> — {f.error}</div>)}
+        </details>}
       </div>
       <nav>{Object.entries(TABS).map(([k, label]) =>
         <button key={k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>{label}</button>)}</nav>
@@ -168,6 +173,7 @@ dl{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:4p
 .guess{background:#fff3c4;border-radius:4px;padding:0 4px}.warn{color:#8a5a00}
 .preset{margin-left:6px;padding:0 6px;font-size:12px}.form label>span{display:flex;align-items:center}
 .site{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:12px}.site input:not([type]){flex:1;min-width:220px}.site small{width:100%;color:#6b5a4a}
+.failed{width:100%;font-size:13px;color:#a3261b;max-height:200px;overflow:auto}.failed a{color:inherit}
 .who{display:flex;gap:6px;align-items:center;margin-bottom:12px}.who input{width:160px}
 .err{color:#a3261b}.empty{color:#6b5a4a}
 `;
