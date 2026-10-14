@@ -55,13 +55,14 @@ export default function Inventory() {
   const save = () => act({ ids: [edit.id], action: 'edit', ...Object.fromEntries(FIELDS.map(f => [f, edit[f]])) });
 
   // Website import: list the store's products, import them one by one, then (sync) remove what's gone or sold.
-  const importSite = async sync => {
+  // retry: just these product URLs (the previous run's failures).
+  const importSite = async (sync, retry) => {
     setErr('');
     const say = progress => setSite(s => ({ ...s, progress }));
     try {
       setSite(s => ({ ...s, failed: [] }));
       say('Reading the store\'s product list…');
-      const { source, urls, known } = await api('GET', null, `?site=${encodeURIComponent(site.url)}`, '/api/import');
+      const { source, urls, known } = retry ? { urls: retry, known: [] } : await api('GET', null, `?site=${encodeURIComponent(site.url)}`, '/api/import');
       const slug = u => u.split('/').filter(Boolean).pop(), have = new Set(known);
       const todo = site.overwrite ? urls : urls.filter(u => !have.has(u)), listed = new Set(urls.map(slug));
       const n = { added: 0, updated: 0, sold: 0, failed: 0, removed: 0 };
@@ -100,7 +101,7 @@ export default function Inventory() {
         <label><input type="checkbox" checked={site.overwrite} onChange={e => setSite({ ...site, overwrite: e.target.checked })} /> Update changed</label>
         {site.progress && <small>{site.progress}</small>}
         {site.failed.length > 0 && <details className="failed" open>
-          <summary>{site.failed.length} failed</summary>
+          <summary>{site.failed.length} failed <button onClick={() => importSite(false, site.failed.map(f => f.url))}>Retry failed</button></summary>
           {site.failed.map(f => <div key={f.url}><a href={f.url} target="_blank">{f.url.split('/').pop()}</a> — {f.error}</div>)}
         </details>}
       </div>
