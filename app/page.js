@@ -3,8 +3,8 @@ import { useEffect, useState } from 'react';
 
 // Mock auth: seller name from ?seller= (default demo), same as the extension's Seller box.
 const seller = () => new URLSearchParams(location.search).get('seller') || 'demo';
-const api = (method, body, q = '') =>
-  fetch('/api/items' + q, { method, headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${seller()}` }, body: body && JSON.stringify(body) })
+const api = (method, body, q = '', path = '/api/items') =>
+  fetch(path + q, { method, headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${seller()}` }, body: body && JSON.stringify(body) })
     .then(async r => { const j = await r.json(); if (!r.ok) throw new Error(j.error); return j; });
 
 const TABS = { review: 'Newly imported', published: 'Exported', removed: 'Removed', archived: 'Archived' };
@@ -36,6 +36,7 @@ export default function Inventory() {
   const [adj, setAdj] = useState({ value: '', unit: '%' });
   const [err, setErr] = useState('');
   const [who, setWho] = useState('');
+  const [site, setSite] = useState({ url: '', overwrite: false, progress: '' });
 
   const load = () => api('GET', null, `?status=${tab}`).then(setItems).catch(e => setErr(e.message));
   useEffect(() => { setWho(seller()); setSel(new Set()); setEdit(null); load(); }, [tab]);
@@ -51,6 +52,29 @@ export default function Inventory() {
   };
   const save = () => act({ ids: [edit.id], action: 'edit', ...Object.fromEntries(FIELDS.map(f => [f, edit[f]])) });
 
+  // Website import: list the store's products, import them one by one, then (sync) remove what's gone or sold.
+  const importSite = async sync => {
+    setErr('');
+    const say = progress => setSite(s => ({ ...s, progress }));
+    try {
+      say('Reading the store\'s product list…');
+      const { source, urls, known } = await api('GET', null, `?site=${encodeURIComponent(site.url)}`, '/api/import');
+      const slug = u => u.split('/').filter(Boolean).pop(), have = new Set(known);
+      const todo = site.overwrite ? urls : urls.filter(u => !have.has(u)), listed = new Set(urls.map(slug));
+      const n = { added: 0, updated: 0, sold: 0, failed: 0, removed: 0 };
+      for (const [i, url] of todo.entries()) {
+        say(`Product ${i + 1} of ${todo.length} (${known.length} already imported) — ${n.added} added, ${n.updated} updated, ${n.sold} sold, ${n.failed} failed`);
+        try {
+          const r = await api('POST', { url, overwrite: site.overwrite }, '', '/api/import');
+          if (r.sold) { n.sold++; listed.delete(slug(url)); } else if (r.item?.updated) n.updated++; else if (r.item) n.added++;
+        } catch { n.failed++; }
+      }
+      if (sync) n.removed = (await api('PATCH', { action: 'sync', source, ids: [...listed] })).removed;
+      say(`Done: ${n.added} added, ${n.updated} updated, ${n.sold} sold (skipped), ${n.removed} removed, ${n.failed} failed.`);
+      load();
+    } catch (e) { say(''); setErr(e.message); }
+  };
+
   const gone = tab === 'removed' || tab === 'archived';
   const groups = tab === 'review'
     ? Object.entries(GROUPS).map(([k, label]) => [label, items.filter(i => i.boot === k)])
@@ -62,6 +86,13 @@ export default function Inventory() {
       <form className="who" onSubmit={e => { e.preventDefault(); location.search = `?seller=${encodeURIComponent(e.target.s.value.trim())}`; }}>
         Seller: <input name="s" key={who} defaultValue={who} /> <button>Switch</button>
       </form>
+      <div className="site">
+        <input placeholder="Import from website (e.g. thebootwhisperer.net)" value={site.url} onChange={e => setSite({ ...site, url: e.target.value.trim() })} />
+        <button disabled={!site.url} onClick={() => importSite(false)}>Import</button>
+        <button disabled={!site.url} onClick={() => importSite(true)}>Sync</button>
+        <label><input type="checkbox" checked={site.overwrite} onChange={e => setSite({ ...site, overwrite: e.target.checked })} /> Update changed</label>
+        {site.progress && <small>{site.progress}</small>}
+      </div>
       <nav>{Object.entries(TABS).map(([k, label]) =>
         <button key={k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>{label}</button>)}</nav>
 
@@ -130,6 +161,7 @@ dl{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:4p
 .desc{font-size:13px;color:#4a3d31;margin:4px 0;white-space:pre-line;max-height:4.2em;overflow:hidden}
 .guess{background:#fff3c4;border-radius:4px;padding:0 4px}.warn{color:#8a5a00}
 .preset{margin-left:6px;padding:0 6px;font-size:12px}.form label>span{display:flex;align-items:center}
+.site{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:12px}.site input:not([type]){flex:1;min-width:220px}.site small{width:100%;color:#6b5a4a}
 .who{display:flex;gap:6px;align-items:center;margin-bottom:12px}.who input{width:160px}
 .err{color:#a3261b}.empty{color:#6b5a4a}
 `;
