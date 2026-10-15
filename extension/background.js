@@ -1,6 +1,8 @@
 const ITEM = /facebook\.com\/marketplace\/item\/(\d+)/;
 const wait = ms => new Promise(r => setTimeout(r, ms));
 const badge = t => chrome.action.setBadgeText({ text: String(t) });
+// Progress bar state (shown in the popup); status() only logs problems and milestones.
+const progress = p => chrome.storage.local.set({ progress: p });
 const status = async t => {
   const { log = [] } = await chrome.storage.local.get('log');
   return chrome.storage.local.set({ log: [`${new Date().toLocaleTimeString()} ${t}`, ...log].slice(0, 15) });
@@ -48,7 +50,7 @@ function readListing() {
     // Size with width from the title (e.g. 10.5EE) beats FB's size field, which has no width.
     size: title.match(/\b(\d{1,2}(?:\.5)?) ?(EEE|EE|[A-EW])\b/)?.slice(1).join('') || attrs.size || after('size')
       || description.match(/\bsize:?[ \t]*(\d{1,2}(\.5)?[ \t]?(EEE|EE|[A-EW])?)\b/i)?.[1] || '',
-    photos: Object.values(best).map(b => b.src).slice(0, 20).concat(Object.keys(best).length ? [] : meta('og:image') || []),
+    photos: Object.values(best).map(b => b.src).slice(0, 30).concat(Object.keys(best).length ? [] : meta('og:image') || []),
   };
 }
 
@@ -111,7 +113,7 @@ async function importProfile(sellerId, sync) {
   const n = { added: 0, updated: 0, failed: 0, removed: 0 };
   for (let i = 0; i < todo.length; i++) {
     badge(todo.length - i);
-    status(`Listing ${i + 1} of ${todo.length} (${ids.length - todo.length} already imported) — ${n.added} added, ${n.updated} updated, ${n.failed} failed`);
+    progress({ done: i, total: todo.length, label: `${sync ? 'Syncing' : 'Importing'} — ${n.added} added, ${n.updated} updated, ${n.failed} failed` });
     try {
       const r = await importUrl(`https://www.facebook.com/marketplace/item/${todo[i]}/`);
       if (r.item?.updated) n.updated++; else if (r.item) n.added++;
@@ -127,8 +129,8 @@ const addCurrent = async tabId => send(await run(tabId, readListing));
 
 chrome.runtime.onMessage.addListener((m, _, reply) => {
   (m.type === 'profile' ? importProfile(m.sellerId, m.sync) : addCurrent(m.tabId))
-    .then(r => { if (m.type === 'profile') status(`Done: ${r.added} added, ${r.updated} updated, ${r.removed} removed, ${r.failed} failed.`); reply({ r }); },
-      e => { badge('!'); status(`Error: ${e.message}`); reply({ error: e.message }); });
+    .then(r => { if (m.type === 'profile') progress(null), status(`Done: ${r.added} added, ${r.updated} updated, ${r.removed} removed, ${r.failed} failed.`); reply({ r }); },
+      e => { badge('!'); progress(null); status(`Error: ${e.message}`); reply({ error: e.message }); });
   return true;
 });
 

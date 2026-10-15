@@ -3,7 +3,12 @@ const PROFILE = /marketplace\/profile\/(\d+)/;
 chrome.storage.sync.get(['server', 'seller'], s => { $('server').value = s.server || ''; $('seller').value = s.seller || 'demo'; });
 chrome.tabs.query({ active: true, currentWindow: true }, ([t]) => { if (PROFILE.test(t.url)) $('profileUrl').value = t.url; });
 
-const show = () => chrome.storage.local.get('log', s => { if (s.log) $('log').textContent = s.log.join('\n'); });
+const show = () => chrome.storage.local.get(['log', 'progress'], s => {
+  if (s.log) $('log').textContent = s.log.join('\n');
+  const p = s.progress;
+  $('bar').style.display = p ? '' : 'none'; $('barLabel').textContent = p ? `${p.done} of ${p.total} — ${p.label}` : '';
+  if (p) Object.assign($('bar'), { value: p.done, max: p.total });
+});
 show(); chrome.storage.onChanged.addListener(show);
 
 async function start(type, sync) {
