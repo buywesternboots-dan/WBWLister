@@ -8,6 +8,7 @@
 - Tell me when a session is getting too long and give a copy-ready summary.
 
 ## Context
+- This repo is an MVP for testing; production will run on another machine, GitHub and Vercel (not the user's). Keep it portable: config via env vars, nothing tied to these accounts.
 - WBW: custom marketplace for cowboy/western boots, built by another developer. I have full backend access, but we're building against a mock WBW for now.
 - Stack: Next.js on Vercel. No marketplace APIs; data comes from customer-facing pages.
 - Goal: sellers import listings (Facebook Marketplace first; eBay, Poshmark, Depop later), review, edit, manage inventory, publish on WBW.
