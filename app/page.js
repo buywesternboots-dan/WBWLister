@@ -10,7 +10,7 @@ const api = (method, body, q = '', path = '/api/items') =>
 
 const TABS = { review: 'Newly imported', published: 'Exported', removed: 'Removed', archived: 'Archived' };
 // Item fields: key → label. * = required by WBW.
-const LABELS = { price: 'Price*', wbw_price: 'WBW Price', title: 'Title*', brand: 'Brand*', sized_for: 'Sized for (Men/Women)*', width: 'Width*',
+const LABELS = { price: 'Price*', wbw_price: 'WBW Price', title: 'Title*', brand: 'Brand*', sized_for: 'Sized for (Men/Women)*', width: 'Width',
   material_type: 'Material type', material: 'Material', made_in: 'Where made', condition: 'Condition*', color: 'Color', sole: 'Sole', heel: 'Heel',
   toe: 'Toe', size: 'Size', description: 'Description' };
 const FIELDS = Object.keys(LABELS);
@@ -186,7 +186,7 @@ export default function Inventory() {
                   {PRESETS[f] && <button type="button" className="preset" onClick={() => setEdit({ ...edit, [f]: PRESETS[f] })}>{PRESETS[f]}</button>}</span>
                 {f === 'description'
                 ? <textarea rows="4" value={edit[f] ?? ''} onChange={e => setEdit({ ...edit, [f]: e.target.value })} />
-                : <input list={CHOICES[f] && `dl-${f}`} value={edit[f] ?? ''} onChange={e => setEdit({ ...edit, [f]: e.target.value })} />}</label>)}
+                : <input list={CHOICES[f] && `dl-${f}`} placeholder={f === 'width' ? 'M (used if left blank)' : ''} value={edit[f] ?? ''} onChange={e => setEdit({ ...edit, [f]: e.target.value })} />}</label>)}
               <span><button className="primary" onClick={save}>Save (marks all verified)</button><button onClick={() => setEdit(null)}>Cancel</button></span>
             </div> : <div className="info" onClick={() => setEdit(i)}>
               <strong>{i.title || 'Untitled'}</strong>
