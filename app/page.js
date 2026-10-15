@@ -51,12 +51,15 @@ export default function Inventory() {
   const [adj, setAdj] = useState({ value: '', unit: '%' });
   const [err, setErr] = useState('');
   const [who, setWho] = useState('');
+  const [sellers, setSellers] = useState([]);
   const [q, setQ] = useState('');
   const [sort, setSort] = useState('likely');
   const [filter, setFilter] = useState({}); // group → FILTERS key
   const [site, setSite] = useState({ url: '', run: null, failed: [] });
 
   const load = () => api('GET', null, `?status=${tab}`).then(setItems).catch(e => setErr(e.message));
+  useEffect(() => { api('GET', null, '?sellers').then(setSellers).catch(() => {}); }, []);
+  const switchTo = name => { if (name?.trim()) location.search = `?seller=${encodeURIComponent(name.trim().toLowerCase())}`; };
   useEffect(() => { setWho(seller()); setSel(new Set()); setEdit(null); setFilter({}); load(); }, [tab]);
 
   const act = body => { setErr(''); api('PATCH', body).then(() => { setSel(new Set()); setEdit(null); load(); }).catch(e => setErr(e.message)); };
@@ -114,9 +117,13 @@ export default function Inventory() {
     <main>
       <style>{css}</style>
       {Object.entries(CHOICES).map(([f, opts]) => <datalist key={f} id={`dl-${f}`}>{opts.map(o => <option key={o} value={o} />)}</datalist>)}
-      <form className="who" onSubmit={e => { e.preventDefault(); location.search = `?seller=${encodeURIComponent(e.target.s.value.trim())}`; }}>
-        Seller: <input name="s" key={who} defaultValue={who} /> <button>Switch</button>
-      </form>
+      <div className="who">
+        Seller: <select value={who} onChange={e => e.target.value === '+' ? switchTo(prompt('New seller name (their WBW seller name):')) : switchTo(e.target.value)}>
+          {!sellers.some(s => s.seller === who) && <option value={who}>{who}</option>}
+          {sellers.map(s => <option key={s.seller} value={s.seller}>{s.seller} — {s.active} items{s.review ? `, ${s.review} new` : ''}</option>)}
+          <option value="+">+ New seller…</option>
+        </select>
+      </div>
       <div className="site">
         <select value={Object.values(SITES).includes(site.url) ? site.url : ''} onChange={e => setSite({ ...site, url: e.target.value })}>
           <option value="">Import from website…</option>
@@ -221,6 +228,6 @@ dl{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:4p
 .site{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:12px}.site input:not([type]){flex:1;min-width:220px}
 .run{width:100%;display:flex;flex-direction:column;gap:2px}.run progress{width:100%}.run small{color:#6b5a4a}
 .failed{width:100%;font-size:13px;color:#a3261b;max-height:200px;overflow:auto}.failed a{color:inherit}
-.who{display:flex;gap:6px;align-items:center;margin-bottom:12px}.who input{width:160px}
+.who{display:flex;gap:6px;align-items:center;margin-bottom:12px}.who select{flex:1;min-width:0}
 .err{color:#a3261b!important}.empty{color:#6b5a4a}
 `;
