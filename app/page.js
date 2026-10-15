@@ -18,6 +18,9 @@ const REQUIRED = FIELDS.filter(f => LABELS[f].endsWith('*'));
 const label = f => LABELS[f].replace(/\*$/, '');
 // Missing = required and empty, or filled with a default because the listing didn't say (e.g. width "M").
 const missing = i => REQUIRED.filter(f => !i[f] || (i.defaulted ?? []).includes(f));
+// Not required, but shown red when empty so the seller knows it isn't there.
+const ALERT = ['width'];
+const flagged = i => [...missing(i), ...ALERT.filter(f => !i[f])];
 const unverified = i => (i.guessed ?? []).filter(f => i[f]);
 const isReady = i => !missing(i).length && !unverified(i).length;
 // One-click values for items that genuinely have none.
@@ -40,7 +43,8 @@ const SORTS = {
 };
 // Group header quick filters: Ready, To verify, and one per missing required field.
 const FILTERS = { ready: ['Ready', isReady], verify: ['To verify', i => unverified(i).length > 0],
-  ...Object.fromEntries(REQUIRED.map(f => [f, [`Missing ${label(f)}`, i => missing(i).includes(f)]])) };
+  ...Object.fromEntries(REQUIRED.map(f => [f, [`Missing ${label(f)}`, i => missing(i).includes(f)]])),
+  ...Object.fromEntries(ALERT.map(f => [f, [`No ${label(f).toLowerCase()}`, i => !i[f]]])) };
 const CONCURRENT = 4; // website products imported at once
 
 export default function Inventory() {
@@ -181,12 +185,12 @@ export default function Inventory() {
             <input type="checkbox" checked={sel.has(i.id)} onChange={() => toggle(i.id)} />
             {i.photos[0] ? <img src={i.photos[0]} alt="" /> : <div className="noimg" />}
             {edit?.id === i.id ? <div className="form">
-              {FIELDS.map(f => <label key={f} className={unverified(i).includes(f) ? 'guess' : missing(i).includes(f) ? 'miss' : ''}>
+              {FIELDS.map(f => <label key={f} className={unverified(i).includes(f) ? 'guess' : flagged(i).includes(f) ? 'miss' : ''}>
                 <span>{LABELS[f]}{unverified(i).includes(f) && ' — auto-filled, verify'}{(i.defaulted ?? []).includes(f) && ' — not in listing, default used'}
                   {PRESETS[f] && <button type="button" className="preset" onClick={() => setEdit({ ...edit, [f]: PRESETS[f] })}>{PRESETS[f]}</button>}</span>
                 {f === 'description'
                 ? <textarea rows="4" value={edit[f] ?? ''} onChange={e => setEdit({ ...edit, [f]: e.target.value })} />
-                : <input list={CHOICES[f] && `dl-${f}`} placeholder={f === 'width' ? 'M (used if left blank)' : ''} value={edit[f] ?? ''} onChange={e => setEdit({ ...edit, [f]: e.target.value })} />}</label>)}
+                : <input list={CHOICES[f] && `dl-${f}`} value={edit[f] ?? ''} onChange={e => setEdit({ ...edit, [f]: e.target.value })} />}</label>)}
               <span><button className="primary" onClick={save}>Save (marks all verified)</button><button onClick={() => setEdit(null)}>Cancel</button></span>
             </div> : <div className="info" onClick={() => setEdit(i)}>
               <strong>{i.title || 'Untitled'}</strong>
@@ -195,7 +199,7 @@ export default function Inventory() {
               {missing(i).length > 0 && <small className="err">Missing: {missing(i).map(label).join(', ')}</small>}
               {unverified(i).length > 0 && <small className="warn">Verify: {unverified(i).map(label).join(', ')}</small>}
               <dl>{FIELDS.filter(f => f !== 'title' && f !== 'description').map(f =>
-                <div key={f} className={missing(i).includes(f) ? 'err' : unverified(i).includes(f) ? 'guess' : ''}>
+                <div key={f} className={flagged(i).includes(f) ? 'err' : unverified(i).includes(f) ? 'guess' : ''}>
                 <dt>{label(f)}</dt><dd>{f.includes('price') && i[f] ? `$${Number(i[f]).toFixed(2)}` : i[f] || '—'}{(i.defaulted ?? []).includes(f) && ' (default)'}</dd></div>)}</dl>
               {i.description && <p className="desc">{i.description}</p>}
               <small>Tap to edit</small>
