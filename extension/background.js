@@ -39,6 +39,7 @@ function readListing() {
   return {
     source: 'facebook',
     source_id: location.href.match(/item\/(\d+)/)?.[1],
+    source_url: `https://www.facebook.com/marketplace/item/${location.href.match(/item\/(\d+)/)?.[1]}/`,
     title,
     price: (lines.find(l => /^\$[\d,]+(\.\d\d)?$/.test(l)) || '').replace(/[$,]/g, '') || null,
     description,

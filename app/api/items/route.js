@@ -20,6 +20,7 @@ export const POST = handle(async req => {
 export const PATCH = handle(async req => {
   const { ids, action, percent, amount, ...fields } = await req.json();
   if (!ids?.length) throw new Error('Select at least one item.');
+  if (action === 'move') return { moved: await wbw.moveItems(seller(req), ids, fields.to) };
   if (action === 'sync') return { removed: await wbw.syncSource(seller(req), fields.source, ids) };
   if (action === 'edit') await wbw.updateItems(seller(req), ids, fields);
   else if (action === 'price') await wbw.lowerPrice(seller(req), ids, percent, amount);

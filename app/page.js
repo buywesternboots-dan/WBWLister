@@ -23,10 +23,10 @@ const isReady = i => !missing(i).length && !unverified(i).length;
 // One-click values for items that genuinely have none.
 const PRESETS = { brand: 'Unbranded', size: 'Estimated' };
 // WBW import CSV columns, in WBW's order.
-const CSV = { seller: 'WBW Seller Name', ...Object.fromEntries(FIELDS.map(f => [f, label(f)])), category: 'Category', photos: 'Image URLs', source_id: 'Source ID' };
+const CSV = { seller: 'WBW Seller Name', ...Object.fromEntries(FIELDS.map(f => [f, label(f)])), category: 'Category', website_url: 'Seller Website Link', photos: 'Image URLs', source_id: 'Source ID' };
 const cell = v => `"${String(Array.isArray(v) ? v.join('|') : v ?? '').replace(/"/g, '""')}"`;
 const download = rows => {
-  const csv = [Object.values(CSV), ...rows.map(r => ({ ...r, wbw_price: r.wbw_price ?? r.price, category: ['boot', 'belt'].includes(r.boot) ? GROUPS[r.boot] : '' })).map(r => Object.keys(CSV).map(k => r[k]))].map(r => r.map(cell).join(',')).join('\r\n');
+  const csv = [Object.values(CSV), ...rows.map(r => ({ ...r, website_url: r.source === 'facebook' ? '' : r.source_url, wbw_price: r.wbw_price ?? r.price, category: ['boot', 'belt'].includes(r.boot) ? GROUPS[r.boot] : '' })).map(r => Object.keys(CSV).map(k => r[k]))].map(r => r.map(cell).join(',')).join('\r\n');
   const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(new Blob([csv], { type: 'text/csv' })), download: `wbw-import-${new Date().toISOString().slice(0, 10)}.csv` });
   a.click();
 };
@@ -162,6 +162,7 @@ export default function Inventory() {
           </span>}
           {!gone && <button className="primary" onClick={exportCsv}>Export CSV</button>}
           {!gone && <button onClick={() => bulk({ action: 'remove' })}>Remove</button>}
+          <button onClick={() => { const to = prompt('Move the selected items to which seller?'); if (to) bulk({ action: 'move', to }); }}>Move to seller…</button>
           {gone && <button onClick={() => bulk({ action: 'restore' })}>Restore</button>}
         </>}
       </div>}
@@ -189,6 +190,7 @@ export default function Inventory() {
               <span><button className="primary" onClick={save}>Save (marks all verified)</button><button onClick={() => setEdit(null)}>Cancel</button></span>
             </div> : <div className="info" onClick={() => setEdit(i)}>
               <strong>{i.title || 'Untitled'}</strong>
+              {i.source_url && <a className="src" href={i.source_url} target="_blank" onClick={e => e.stopPropagation()}>View on {i.source === 'facebook' ? 'Facebook' : i.source}</a>}
               {i.boot === 'unsure' && <small>{Math.round((i.boot_score ?? 0) * 100)}% likely a boot</small>}
               {missing(i).length > 0 && <small className="err">Missing: {missing(i).map(label).join(', ')}</small>}
               {unverified(i).length > 0 && <small className="warn">Verify: {unverified(i).map(label).join(', ')}</small>}
@@ -229,5 +231,6 @@ dl{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:4p
 .run{width:100%;display:flex;flex-direction:column;gap:2px}.run progress{width:100%}.run small{color:#6b5a4a}
 .failed{width:100%;font-size:13px;color:#a3261b;max-height:200px;overflow:auto}.failed a{color:inherit}
 .who{display:flex;gap:6px;align-items:center;margin-bottom:12px}.who select{flex:1;min-width:0}
+.src{font-size:13px;color:#1f6f6b;align-self:flex-start}
 .err{color:#a3261b!important}.empty{color:#6b5a4a}
 `;
