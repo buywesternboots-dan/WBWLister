@@ -46,15 +46,16 @@ const SELLER_FORM = [
   ['login_password', 'Seller login password (lets them log in to review their items; leave blank to keep the current one)', 'password'],
   ['h4', 'Shipping & returns (Google feed; blank = marketplace default, no returns)', 'h'], ['ship_price', 'Shipping price (USD)'], ['handle_days', 'Handling time (business days)'],
   ['return_days', 'Return window in days (blank = final sale)'],
+  ['brand_context', 'Brand context on WBW listings (from the WBW brand page)', 'toggle'],
   ['h3', 'Listing style', 'h'], ['notes', 'Notes (how this seller writes listings)', 'area'],
   ['terms', 'Custom terms, one per line: their shorthand = meaning (e.g. BJ = Black Jack, Sz = Size)', 'area'],
   ['defaults', 'Defaults, one per line: field = value, used when a listing doesn\'t say (e.g. sized_for = Women, made_in = USA)', 'area'],
 ];
 // Export: WBW import CSV columns, in WBW's order (until the direct WBW connection replaces it).
-const CSV = { seller: 'WBW Seller Name', ...Object.fromEntries(FIELDS.map(f => [f, label(f)])), category: 'Category', website_url: 'Seller Website Link', photos: 'Image URLs', alts: 'Image Alt Text', source_id: 'Source ID' };
+const CSV = { seller: 'WBW Seller Name', ...Object.fromEntries(FIELDS.map(f => [f, label(f)])), category: 'Category', website_url: 'Seller Website Link', photos: 'Image URLs', alts: 'Image Alt Text', brand_context: 'Brand Context', brand_link: 'Brand Page Link', seller_context: 'Seller Context', source_id: 'Source ID' };
 const cell = v => `"${String(Array.isArray(v) ? v.join('|') : v ?? '').replace(/"/g, '""')}"`;
-const download = rows => {
-  const row = r => ({ ...r, website_url: ['facebook', 'depop', 'poshmark', 'ebay'].includes(r.source) ? '' : r.source_url, wbw_price: r.wbw_price ?? r.price,
+const download = (rows, brands = {}, s = {}) => {
+  const row = r => ({ ...r, seller_context: s.display_name ? `Sold by ${s.display_name}${s.location ? ` of ${s.location}` : ''}.` : '', brand_context: brands[r.brand] ? `${brands[r.brand].text} ${[r.material, r.size && `size ${r.size}`].filter(Boolean).join(', ')}.` : '', brand_link: brands[r.brand]?.link ?? '', website_url: ['facebook', 'depop', 'poshmark', 'ebay'].includes(r.source) ? '' : r.source_url, wbw_price: r.wbw_price ?? r.price,
     category: ['boot', 'belt'].includes(r.boot) ? GROUPS[r.boot] : '',
     photos: r.photos.map((_, n) => photoUrl(location.origin, r, n + 1)), alts: r.photos.map((_, n) => altText(r, n + 1)) });
   const csv = [Object.values(CSV), ...rows.map(r => Object.keys(CSV).map(k => row(r)[k]))].map(r => r.map(cell).join(',')).join('\r\n');
@@ -116,10 +117,11 @@ export default function Inventory() {
   const toggle = id => setSel(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const lower = () => { const v = Number(adj.value); if (v > 0) bulk({ action: 'price', [adj.unit === '%' ? 'percent' : 'amount']: v }); };
   const save = () => act({ ids: [edit.id], action: 'edit', ...Object.fromEntries(FIELDS.map(f => [f, edit[f]])) });
-  const exportCsv = () => {
+  const exportCsv = async () => {
     const rows = items.filter(i => sel.has(i.id)), notReady = rows.filter(i => !isReady(i)).length;
     if (notReady && !confirm(`${notReady} of ${rows.length} items aren't ready (missing or unverified fields). Export anyway?`)) return;
-    download(rows); if (tab === 'review') bulk({ action: 'publish' });
+    const names = current?.brand_context === 'off' ? [] : [...new Set(rows.map(r => r.brand).filter(Boolean))];
+    download(rows, names.length ? await api('GET', null, `?names=${encodeURIComponent(names)}`, '/api/brand').catch(() => ({})) : {}); if (tab === 'review') bulk({ action: 'publish' });
   };
   const saveSeller = () => api('POST', { ...sellerForm, rename_from: sellerForm.created_at && current?.name }, '', '/api/sellers')
     .then(s => { setSellerForm(null); s.name === who ? loadSellers() : switchTo(s.name); }).catch(e => setErr(e.message));
@@ -196,6 +198,7 @@ export default function Inventory() {
         <strong>{sellerForm.created_at ? 'Edit seller' : 'New seller'}</strong>
         {SELLER_FORM.map(([f, l, kind]) => kind === 'h' ? <h3 key={f}>{l}</h3> :
           <label key={f}>{l}{kind === 'area' ? <textarea rows="3" value={sellerForm[f] ?? ''} onChange={setForm(f)} />
+            : kind === 'toggle' ? <select value={sellerForm[f] ?? 'on'} onChange={setForm(f)}><option value="on">On</option><option value="off">Off</option></select>
             : kind === 'sync' ? <select value={sellerForm.sync ?? 'off'} onChange={setForm(f)}>
               <option value="off">Off (sync by hand)</option><option value="daily">Daily</option><option value="weekly">Weekly</option></select>
             : <input type={kind === 'password' ? 'password' : 'text'} autoComplete="new-password" value={sellerForm[f] ?? ''} onChange={setForm(f)}
