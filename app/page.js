@@ -121,7 +121,7 @@ export default function Inventory() {
     const rows = items.filter(i => sel.has(i.id)), notReady = rows.filter(i => !isReady(i)).length;
     if (notReady && !confirm(`${notReady} of ${rows.length} items aren't ready (missing or unverified fields). Export anyway?`)) return;
     const names = current?.brand_context === 'off' ? [] : [...new Set(rows.map(r => r.brand).filter(Boolean))];
-    download(rows, names.length ? await api('GET', null, `?names=${encodeURIComponent(names)}`, '/api/brand').catch(() => ({})) : {}); if (tab === 'review') bulk({ action: 'publish' });
+    download(rows, names.length ? await api('GET', null, `?names=${encodeURIComponent(names)}`, '/api/brand').catch(() => ({})) : {}, current); if (tab === 'review') bulk({ action: 'publish' });
   };
   const saveSeller = () => api('POST', { ...sellerForm, rename_from: sellerForm.created_at && current?.name }, '', '/api/sellers')
     .then(s => { setSellerForm(null); s.name === who ? loadSellers() : switchTo(s.name); }).catch(e => setErr(e.message));
