@@ -73,11 +73,11 @@ async function collectIds() {
 const run = async (tabId, func) => (await chrome.scripting.executeScript({ target: { tabId }, func }))[0].result;
 
 async function api(method, body, q = '') {
-  const { server, seller } = await chrome.storage.sync.get(['server', 'seller']);
+  const { server, seller, password } = await chrome.storage.sync.get(['server', 'seller', 'password']);
   if (!server) throw new Error('Set the WBW server URL in the extension popup.');
   const r = await fetch(`${server.replace(/\/$/, '')}/api/items${q}`, {
     method,
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${seller || 'demo'}` },
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${seller || ''}`, 'x-app-password': password || '' },
     body: body && JSON.stringify(body),
   });
   const j = await r.json();

@@ -2,8 +2,8 @@
 import { useEffect, useState } from 'react';
 import { CHOICES, searchMatch } from '../lib/vocab';
 
-// Mock auth: seller name from ?seller= (default demo), same as the extension's Seller box.
-const seller = () => new URLSearchParams(location.search).get('seller') || 'demo';
+// Selected seller from ?seller= (same as the extension's Seller box).
+const seller = () => new URLSearchParams(location.search).get('seller') || '';
 const api = (method, body, q = '', path = '/api/items') =>
   fetch(path + q, { method, headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${seller()}` }, body: body && JSON.stringify(body) })
     .then(async r => { const j = await r.json(); if (!r.ok) throw new Error(j.error); return j; });
@@ -34,7 +34,6 @@ const download = rows => {
   a.click();
 };
 // Saved stores for "Import from website" (any other address can be typed).
-const SITES = { 'The Boot Whisperer': 'thebootwhisperer.net', 'Nashville Booted (boots)': 'https://nashvillebooted.com/collections/the-boots', 'Bootitude': 'bootitude.net' };
 const GROUPS = { boot: 'Boots', belt: 'Belts', unsure: 'Not sure', other: 'Other' };
 // Sorts: most likely a boot first, or newest import day first (same day: most likely boot first).
 const SORTS = {
@@ -45,6 +44,15 @@ const SORTS = {
 const FILTERS = { ready: ['Ready', isReady], verify: ['To verify', i => unverified(i).length > 0],
   ...Object.fromEntries(REQUIRED.map(f => [f, [`Missing ${label(f)}`, i => missing(i).includes(f)]])),
   ...Object.fromEntries(ALERT.map(f => [f, [`No ${label(f).toLowerCase()}`, i => !i[f]]])) };
+// Seller settings form: [field, label, kind] (kind: h = heading, area = multi-line, sync = sync choice, else one line).
+const SELLER_FORM = [
+  ['h1', 'Details', 'h'], ['name', 'WBW seller name* (the WBW account these items attach to)'], ['display_name', 'Display name*'],
+  ['contact', 'Contact person'], ['email', 'Email'], ['phone', 'Phone'], ['location', 'Location (city, state)'],
+  ['h2', 'Import & sync', 'h'], ['website', 'Website (store or collection link)'], ['fb_profile', 'Facebook Marketplace profile link'], ['sync', 'Automatic sync', 'sync'],
+  ['h3', 'Listing style', 'h'], ['notes', 'Notes (how this seller writes listings)', 'area'],
+  ['terms', 'Custom terms, one per line: their shorthand = meaning (e.g. BJ = Black Jack, Sz = Size)', 'area'],
+  ['defaults', 'Defaults, one per line: field = value, used when a listing doesn\'t say (e.g. sized_for = Women, made_in = USA)', 'area'],
+];
 const CONCURRENT = 4; // website products imported at once
 // Runs fn; on failure tries twice more (after 1 s, then 2 s) before giving up.
 const retry = async (fn, n = 1) => { try { return await fn(); } catch (e) { if (n >= 3) throw e; await new Promise(r => setTimeout(r, n * 1000)); return retry(fn, n + 1); } };
@@ -63,11 +71,12 @@ export default function Inventory() {
   const [filter, setFilter] = useState({}); // group → FILTERS key
   const [site, setSite] = useState({ url: '', run: null, failed: [] });
 
-  const load = () => api('GET', null, `?status=${tab}`).then(setItems).catch(e => setErr(e.message));
+  const load = () => seller() ? api('GET', null, `?status=${tab}`).then(setItems).catch(e => setErr(e.message)) : setItems([]);
   const [sellerForm, setSellerForm] = useState(null); // seller details being added/edited
   const loadSellers = () => api('GET', null, '', '/api/sellers').then(setSellers).catch(() => {});
   useEffect(() => { loadSellers(); }, []);
   const current = sellers.find(s => s.seller === who), hasDetails = !!current?.name;
+  const delItems = () => confirm(`Delete ${sel.size} items for good? This can't be undone.`) && bulk({ action: 'delete' });
   useEffect(() => { if (current?.website) setSite(s => ({ ...s, url: current.website })); }, [current?.website]);
   const saveSeller = () => api('POST', sellerForm, '', '/api/sellers')
     .then(s => { setSellerForm(null); s.name === who ? loadSellers() : switchTo(s.name); }).catch(e => setErr(e.message));
@@ -130,29 +139,26 @@ export default function Inventory() {
       <style>{css}</style>
       {Object.entries(CHOICES).map(([f, opts]) => <datalist key={f} id={`dl-${f}`}>{opts.map(o => <option key={o} value={o} />)}</datalist>)}
       <div className="who">
-        Seller: <select value={who} onChange={e => e.target.value === '+' ? setSellerForm({}) : switchTo(e.target.value)}>
-          {!sellers.some(s => s.seller === who) && <option value={who}>{who}</option>}
+        Seller: <select value={who} onChange={e => switchTo(e.target.value)}>
+          {!sellers.some(s => s.seller === who) && <option value={who}>{who || 'Pick a seller…'}</option>}
           {sellers.map(s => <option key={s.seller} value={s.seller}>{s.seller} — {s.active} items{s.review ? `, ${s.review} new` : ''}</option>)}
-          <option value="+">+ New seller…</option>
         </select>
-        <button onClick={() => setSellerForm(current?.name ? current : { name: who })}>{hasDetails ? 'Seller details' : 'Add seller details'}</button>
+        {who && <button onClick={() => setSellerForm(current?.name ? current : { name: who })}>{hasDetails ? 'Seller settings' : 'Set up seller'}</button>}
+        <button className="primary" onClick={() => setSellerForm({ sync: 'off' })}>+ Add seller</button>
       </div>
       {sellerForm && <div className="sellerform">
         <strong>{sellerForm.created_at ? 'Edit seller' : 'New seller'}</strong>
-        {[['name', 'WBW seller name* (the WBW account these items attach to)'], ['display_name', 'Display name*'], ['contact', 'Contact person'],
-          ['email', 'Email'], ['phone', 'Phone'], ['location', 'Location (city, state)'], ['website', 'Website (for website imports)'],
-          ['fb_profile', 'Facebook Marketplace profile link'], ['notes', 'Notes']].map(([f, l]) =>
-          <label key={f}>{l}<input value={sellerForm[f] ?? ''} disabled={f === 'name' && !!sellerForm.created_at}
-            onChange={e => setSellerForm({ ...sellerForm, [f]: e.target.value })} /></label>)}
+        {SELLER_FORM.map(([f, l, kind]) => kind === 'h' ? <h3 key={f}>{l}</h3> :
+          <label key={f}>{l}{kind === 'area' ? <textarea rows="3" value={sellerForm[f] ?? ''} onChange={e => setSellerForm({ ...sellerForm, [f]: e.target.value })} />
+            : kind === 'sync' ? <select value={sellerForm.sync ?? 'off'} onChange={e => setSellerForm({ ...sellerForm, sync: e.target.value })}>
+              <option value="off">Off (sync by hand)</option><option value="daily">Daily</option><option value="weekly">Weekly</option></select>
+            : <input value={sellerForm[f] ?? ''} disabled={f === 'name' && !!sellerForm.created_at} onChange={e => setSellerForm({ ...sellerForm, [f]: e.target.value })} />}</label>)}
         <span><button className="primary" onClick={saveSeller}>Save seller</button><button onClick={() => setSellerForm(null)}>Cancel</button></span>
       </div>}
-      {!hasDetails && !sellerForm && <p className="err">Add this seller's details before importing for them.</p>}
+      {!who && !sellerForm && <p className="empty">Pick a seller above, or add one.</p>}
+      {who && !hasDetails && !sellerForm && <p className="err">Set up this seller (details and import settings) before importing for them.</p>}
       <div className="site">
-        <select value={Object.values(SITES).includes(site.url) ? site.url : ''} onChange={e => setSite({ ...site, url: e.target.value })}>
-          <option value="">Import from website…</option>
-          {Object.entries(SITES).map(([name, url]) => <option key={url} value={url}>{name}</option>)}
-        </select>
-        <input placeholder="or type a store address" value={site.url} onChange={e => setSite({ ...site, url: e.target.value.trim() })} />
+        <input placeholder="Seller's website (set in Seller settings)" value={site.url} onChange={e => setSite({ ...site, url: e.target.value.trim() })} />
         <button disabled={!site.url || !hasDetails} onClick={() => importSite(false)}>Import</button>
         <button disabled={!site.url || !hasDetails} onClick={() => importSite(true)}>Sync</button>
         {r?.label && <div className="run">{r.total > 0 && <progress value={r.done} max={r.total} />}
@@ -186,6 +192,7 @@ export default function Inventory() {
           {!gone && <button className="primary" onClick={exportCsv}>Export CSV</button>}
           {!gone && <button onClick={() => bulk({ action: 'remove' })}>Remove</button>}
           <button onClick={() => { const to = prompt('Move the selected items to which seller?'); if (to) bulk({ action: 'move', to }); }}>Move to seller…</button>
+          <button onClick={delItems}>Delete</button>
           {gone && <button onClick={() => bulk({ action: 'restore' })}>Restore</button>}
         </>}
       </div>}
@@ -255,7 +262,7 @@ dl{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:4p
 .failed{width:100%;font-size:13px;color:#a3261b;max-height:200px;overflow:auto}.failed a{color:inherit}
 .who{display:flex;gap:6px;align-items:center;margin-bottom:12px}.who select{flex:1;min-width:0}
 .sellerform{display:flex;flex-direction:column;gap:6px;padding:12px;margin-bottom:12px;background:#fff;border:1px solid #e6dfd6;border-radius:8px}
-.sellerform label{display:flex;flex-direction:column;font-size:13px;color:#6b5a4a;gap:2px}.sellerform span{display:flex;gap:6px}
+.sellerform label{display:flex;flex-direction:column;font-size:13px;color:#6b5a4a;gap:2px}.sellerform span{display:flex;gap:6px}.sellerform h3{margin:8px 0 0;font-size:14px;color:#1f6f6b}
 .src{font-size:13px;color:#1f6f6b;align-self:flex-start}
 .err{color:#a3261b!important}.empty{color:#6b5a4a}
 `;

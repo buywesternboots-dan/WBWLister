@@ -1,6 +1,7 @@
 import * as wbw from '../../../lib/wbw';
 
-const seller = req => req.headers.get('authorization')?.replace('Bearer ', '').trim().toLowerCase() || 'demo'; // mock auth, case-insensitive
+// Which seller's items (case-insensitive). The tool itself is password-protected (proxy.js).
+const seller = req => { const s = req.headers.get('authorization')?.replace('Bearer ', '').trim().toLowerCase(); if (!s) throw new Error('Pick a seller first.'); return s; };
 const handle = fn => async req => {
   try { return Response.json(await fn(req)); }
   catch (e) { return Response.json({ error: e.message }, { status: 400 }); }
@@ -19,6 +20,7 @@ export const POST = handle(async req => {
 export const PATCH = handle(async req => {
   const { ids, action, percent, amount, ...fields } = await req.json();
   if (!ids?.length) throw new Error('Select at least one item.');
+  if (action === 'delete') return { deleted: await wbw.deleteItems(seller(req), ids) };
   if (action === 'move') return { moved: await wbw.moveItems(seller(req), ids, fields.to) };
   if (action === 'sync') return { removed: await wbw.syncSource(seller(req), fields.source, ids) };
   if (action === 'edit') await wbw.updateItems(seller(req), ids, fields);

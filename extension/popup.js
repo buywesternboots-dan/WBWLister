@@ -1,11 +1,11 @@
 const $ = id => document.getElementById(id);
 const PROFILE = /marketplace\/profile\/(\d+)/;
-chrome.storage.sync.get(['server', 'seller'], s => { $('server').value = s.server || ''; $('seller').value = s.seller || 'demo'; });
+chrome.storage.sync.get(['server', 'seller', 'password'], s => { $('server').value = s.server || ''; $('seller').value = s.seller || ''; $('password').value = s.password || ''; });
 chrome.tabs.query({ active: true, currentWindow: true }, ([t]) => { if (PROFILE.test(t.url)) $('profileUrl').value = t.url; });
 // Fill the profile link from the seller's saved details.
 $('seller').onchange = async () => {
   const name = $('seller').value.trim().toLowerCase(), server = $('server').value.trim().replace(/\/$/, '');
-  const s = (await (await fetch(`${server}/api/sellers`)).json().catch(() => [])).find?.(s => s.seller === name);
+  const s = (await (await fetch(`${server}/api/sellers`, { headers: { 'x-app-password': $('password').value } })).json().catch(() => [])).find?.(s => s.seller === name);
   $('status').textContent = s?.name ? '' : 'No details saved for this seller yet — add them on the inventory page first.';
   if (s?.fb_profile && !$('profileUrl').value) $('profileUrl').value = s.fb_profile;
 };
@@ -19,7 +19,7 @@ const show = () => chrome.storage.local.get(['log', 'progress'], s => {
 show(); chrome.storage.onChanged.addListener(show);
 
 async function start(type, sync) {
-  await chrome.storage.sync.set({ server: $('server').value.trim(), seller: $('seller').value.trim() });
+  await chrome.storage.sync.set({ server: $('server').value.trim(), seller: $('seller').value.trim(), password: $('password').value });
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   const sellerId = $('profileUrl').value.trim().match(PROFILE)?.[1];
   if (type === 'profile' && !sellerId) return $('status').textContent = 'Paste a Marketplace profile link (facebook.com/marketplace/profile/…).';

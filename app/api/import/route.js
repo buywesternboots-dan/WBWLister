@@ -2,7 +2,7 @@ import * as wbw from '../../../lib/wbw';
 import { productUrls, readProduct, slug } from '../../../lib/sites';
 
 export const maxDuration = 300;
-const seller = req => req.headers.get('authorization')?.replace('Bearer ', '').trim().toLowerCase() || 'demo'; // mock auth, case-insensitive
+const seller = req => { const s = req.headers.get('authorization')?.replace('Bearer ', '').trim().toLowerCase(); if (!s) throw new Error('Pick a seller first.'); return s; };
 const handle = fn => async req => {
   try { return Response.json(await fn(req)); }
   catch (e) { return Response.json({ error: e.message }, { status: 400 }); }
