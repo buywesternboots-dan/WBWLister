@@ -24,6 +24,7 @@
 - lib/vocab.js: shared brands (with families, e.g. Rios), materials (aliases, longest wins: HBL = Caiman Lizard), edit-form suggestions (CHOICES; free text always allowed), search.
 - Import rules: each failed item is retried twice before counting as failed; every photo must import (max 30) or it fails; gender defaults Men; width not required and never defaulted: blank when not in the listing, shown red as a heads-up (ALERT in app/page.js); condition New only if explicit, else Broken In.
 - lib/sites.js + app/api/import: website stores (Wix/Shopify…) imported server-side from sitemap + schema.org Product data; "Import from website" box on the inventory page (uses the selected seller's website; Shopify collection links import just that collection). Import = new only; Sync = re-read all, refresh source-changed items (items.src_hash fingerprint of source data, so seller edits are not seen as changes), remove gone/sold.
+- Depop (Cloudflare blocks servers): extension opens the shop once and reads Depop's own listing feed (webapi.depop.com shops/{id}/products, page context) — readDepopShop()/importDepop() in extension/background.js; photos linked (permanent). Seller's Depop link goes in the fb_profile field.
 - extension/: Chrome extension (MV3). Popup (server URL, seller, profile link, "Import all from this profile", "Sync with this profile" [re-reads all; source-changed items refreshed; unlisted → Removed], "Add this listing"), right-click "Add to WBW". FB reader uses og meta tags + text labels; untested against real pages.
 
 ## Status

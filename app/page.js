@@ -48,7 +48,7 @@ const FILTERS = { ready: ['Ready', isReady], verify: ['To verify', i => unverifi
 const SELLER_FORM = [
   ['h1', 'Details', 'h'], ['name', 'WBW seller name* (the WBW account these items attach to)'], ['display_name', 'Display name*'],
   ['contact', 'Contact person'], ['email', 'Email'], ['phone', 'Phone'], ['location', 'Location (city, state)'],
-  ['h2', 'Import & sync', 'h'], ['website', 'Website (store or collection link)'], ['fb_profile', 'Facebook Marketplace profile link'], ['sync', 'Automatic sync', 'sync'],
+  ['h2', 'Import & sync', 'h'], ['website', 'Website (store or collection link)'], ['fb_profile', 'Facebook Marketplace profile or Depop shop link (used by the extension)'], ['sync', 'Automatic sync', 'sync'],
   ['h3', 'Listing style', 'h'], ['notes', 'Notes (how this seller writes listings)', 'area'],
   ['terms', 'Custom terms, one per line: their shorthand = meaning (e.g. BJ = Black Jack, Sz = Size)', 'area'],
   ['defaults', 'Defaults, one per line: field = value, used when a listing doesn\'t say (e.g. sized_for = Women, made_in = USA)', 'area'],

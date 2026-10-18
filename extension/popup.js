@@ -1,7 +1,7 @@
 const $ = id => document.getElementById(id);
-const PROFILE = /marketplace\/profile\/(\d+)/;
+const PROFILE = /marketplace\/profile\/(\d+)/, DEPOP = /depop\.com\/(?!products\/)([\w.-]+)/;
 chrome.storage.sync.get(['server', 'seller', 'password'], s => { $('server').value = s.server || ''; $('seller').value = s.seller || ''; $('password').value = s.password || ''; });
-chrome.tabs.query({ active: true, currentWindow: true }, ([t]) => { if (PROFILE.test(t.url)) $('profileUrl').value = t.url; });
+chrome.tabs.query({ active: true, currentWindow: true }, ([t]) => { if (PROFILE.test(t.url) || DEPOP.test(t.url)) $('profileUrl').value = t.url; });
 // Fill the profile link from the seller's saved details.
 $('seller').onchange = async () => {
   const name = $('seller').value.trim().toLowerCase(), server = $('server').value.trim().replace(/\/$/, '');
@@ -21,12 +21,13 @@ show(); chrome.storage.onChanged.addListener(show);
 async function start(type, sync) {
   await chrome.storage.sync.set({ server: $('server').value.trim(), seller: $('seller').value.trim(), password: $('password').value });
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  const sellerId = $('profileUrl').value.trim().match(PROFILE)?.[1];
-  if (type === 'profile' && !sellerId) return $('status').textContent = 'Paste a Marketplace profile link (facebook.com/marketplace/profile/…).';
+  const link = $('profileUrl').value.trim(), sellerId = link.match(PROFILE)?.[1], shop = link.match(DEPOP)?.[1];
+  if (type === 'profile' && shop) type = 'depop';
+  if (type === 'profile' && !sellerId) return $('status').textContent = 'Paste a Marketplace profile link (facebook.com/marketplace/profile/…) or a Depop shop link (depop.com/…).';
   if (type === 'listing' && !/marketplace\/item\//.test(tab.url)) return $('status').textContent = 'Open a Marketplace listing first.';
-  $('status').textContent = type === 'profile' ? 'Working. You can close this; the icon shows items left.' : 'Adding…';
-  const { r, error } = await chrome.runtime.sendMessage({ type, tabId: tab.id, sellerId, sync });
-  $('status').textContent = error || (type === 'profile'
+  $('status').textContent = type !== 'listing' ? 'Working. You can close this; the icon shows items left.' : 'Adding…';
+  const { r, error } = await chrome.runtime.sendMessage({ type, tabId: tab.id, sellerId, shop, sync });
+  $('status').textContent = error || (type !== 'listing'
     ? `Done: ${r.added} added, ${r.updated} updated, ${r.removed} removed, ${r.failed} failed.`
     : r.duplicate ? 'Already imported.' : 'Added.');
 }
