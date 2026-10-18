@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
 import { CHOICES, searchMatch } from '../lib/vocab';
+import { altText, photoUrl } from '../lib/seo';
 
 // Selected seller comes from ?seller= (the extension's seller dropdown uses the same names).
 const seller = () => new URLSearchParams(location.search).get('seller') || '';
@@ -43,16 +44,19 @@ const SELLER_FORM = [
   ['h2', 'Import & sync', 'h'], ['website', 'Website, Poshmark or eBay link (store, collection, poshmark.com/closet/…, or ebay.com/usr/<username>)'],
   ['fb_profile', 'Facebook Marketplace profile or Depop shop link (imported through the Chrome extension)'], ['sync', 'Automatic sync', 'sync'],
   ['login_password', 'Seller login password (lets them log in to review their items; leave blank to keep the current one)', 'password'],
+  ['h4', 'Shipping & returns (Google feed; blank = marketplace default, no returns)', 'h'], ['ship_price', 'Shipping price (USD)'], ['handle_days', 'Handling time (business days)'],
+  ['return_days', 'Return window in days (blank = final sale)'],
   ['h3', 'Listing style', 'h'], ['notes', 'Notes (how this seller writes listings)', 'area'],
   ['terms', 'Custom terms, one per line: their shorthand = meaning (e.g. BJ = Black Jack, Sz = Size)', 'area'],
   ['defaults', 'Defaults, one per line: field = value, used when a listing doesn\'t say (e.g. sized_for = Women, made_in = USA)', 'area'],
 ];
 // Export: WBW import CSV columns, in WBW's order (until the direct WBW connection replaces it).
-const CSV = { seller: 'WBW Seller Name', ...Object.fromEntries(FIELDS.map(f => [f, label(f)])), category: 'Category', website_url: 'Seller Website Link', photos: 'Image URLs', source_id: 'Source ID' };
+const CSV = { seller: 'WBW Seller Name', ...Object.fromEntries(FIELDS.map(f => [f, label(f)])), category: 'Category', website_url: 'Seller Website Link', photos: 'Image URLs', alts: 'Image Alt Text', source_id: 'Source ID' };
 const cell = v => `"${String(Array.isArray(v) ? v.join('|') : v ?? '').replace(/"/g, '""')}"`;
 const download = rows => {
   const row = r => ({ ...r, website_url: ['facebook', 'depop', 'poshmark', 'ebay'].includes(r.source) ? '' : r.source_url, wbw_price: r.wbw_price ?? r.price,
-    category: ['boot', 'belt'].includes(r.boot) ? GROUPS[r.boot] : '' });
+    category: ['boot', 'belt'].includes(r.boot) ? GROUPS[r.boot] : '',
+    photos: r.photos.map((_, n) => photoUrl(location.origin, r, n + 1)), alts: r.photos.map((_, n) => altText(r, n + 1)) });
   const csv = [Object.values(CSV), ...rows.map(r => Object.keys(CSV).map(k => row(r)[k]))].map(r => r.map(cell).join(',')).join('\r\n');
   Object.assign(document.createElement('a'), { href: URL.createObjectURL(new Blob([csv], { type: 'text/csv' })), download: `wbw-import-${new Date().toISOString().slice(0, 10)}.csv` }).click();
 };

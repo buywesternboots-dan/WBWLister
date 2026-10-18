@@ -17,4 +17,4 @@ export async function proxy(req) {
   return NextResponse.next({ request: { headers } });
 }
 
-export const config = { matcher: ['/((?!login|api/login|_next|favicon).*)'] };
+export const config = { matcher: ['/((?!login|api/login|img|feed|_next|favicon).*)'] };
