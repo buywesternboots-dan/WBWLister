@@ -26,7 +26,7 @@ const missing = i => REQUIRED.filter(f => !i[f]);
 const flagged = i => [...missing(i), ...ALERT.filter(f => !i[f])];
 const unverified = i => (i.guessed ?? []).filter(f => i[f]);
 const isReady = i => !missing(i).length && !unverified(i).length;
-const PRESETS = { brand: 'Unbranded', size: 'Estimated' }; // one-click values for items that genuinely have none
+const PRESETS = { brand: ['Unbranded', 'Custom'], size: ['Estimated'] }; // one-click values for items that genuinely have none
 // Group header quick filters: Ready, To verify, one per missing required field, and the alert fields.
 const FILTERS = { ready: ['Ready', isReady], verify: ['To verify', i => unverified(i).length > 0],
   ...Object.fromEntries(REQUIRED.map(f => [f, [`Missing ${label(f)}`, i => !i[f]]])),
@@ -247,7 +247,7 @@ export default function Inventory() {
             {edit?.id === i.id ? <div className="form">
               {FIELDS.map(f => <label key={f} className={unverified(i).includes(f) ? 'guess' : flagged(i).includes(f) ? 'miss' : ''}>
                 <span>{LABELS[f]}{unverified(i).includes(f) && ' — auto-filled, verify'}
-                  {PRESETS[f] && <button type="button" className="preset" onClick={() => setEdit({ ...edit, [f]: PRESETS[f] })}>{PRESETS[f]}</button>}</span>
+                  {PRESETS[f]?.map(p => <button key={p} type="button" className="preset" onClick={() => setEdit({ ...edit, [f]: p })}>{p}</button>)}</span>
                 {f === 'description' ? <textarea rows="4" value={edit[f] ?? ''} onChange={setField(f)} />
                   : <input list={CHOICES[f] && `dl-${f}`} value={edit[f] ?? ''} onChange={setField(f)} />}</label>)}
               <span><button className="primary" onClick={save}>Save (marks all verified)</button><button onClick={() => setEdit(null)}>Cancel</button></span>
