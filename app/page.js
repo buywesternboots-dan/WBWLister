@@ -78,7 +78,7 @@ export default function Inventory() {
   const current = sellers.find(s => s.seller === who), hasDetails = !!current?.name;
   const delItems = () => confirm(`Delete ${sel.size} items for good? This can't be undone.`) && bulk({ action: 'delete' });
   useEffect(() => { if (current?.website) setSite(s => ({ ...s, url: current.website })); }, [current?.website]);
-  const saveSeller = () => api('POST', sellerForm, '', '/api/sellers')
+  const saveSeller = () => api('POST', { ...sellerForm, rename_from: sellerForm.created_at && current?.name }, '', '/api/sellers')
     .then(s => { setSellerForm(null); s.name === who ? loadSellers() : switchTo(s.name); }).catch(e => setErr(e.message));
   const switchTo = name => { if (name?.trim()) location.search = `?seller=${encodeURIComponent(name.trim().toLowerCase())}`; };
   useEffect(() => { setWho(seller()); setSel(new Set()); setEdit(null); setFilter({}); load(); }, [tab]);
@@ -152,7 +152,7 @@ export default function Inventory() {
           <label key={f}>{l}{kind === 'area' ? <textarea rows="3" value={sellerForm[f] ?? ''} onChange={e => setSellerForm({ ...sellerForm, [f]: e.target.value })} />
             : kind === 'sync' ? <select value={sellerForm.sync ?? 'off'} onChange={e => setSellerForm({ ...sellerForm, sync: e.target.value })}>
               <option value="off">Off (sync by hand)</option><option value="daily">Daily</option><option value="weekly">Weekly</option></select>
-            : <input value={sellerForm[f] ?? ''} disabled={f === 'name' && !!sellerForm.created_at} onChange={e => setSellerForm({ ...sellerForm, [f]: e.target.value })} />}</label>)}
+            : <input value={sellerForm[f] ?? ''} onChange={e => setSellerForm({ ...sellerForm, [f]: e.target.value })} />}</label>)}
         <span><button className="primary" onClick={saveSeller}>Save seller</button><button onClick={() => setSellerForm(null)}>Cancel</button></span>
       </div>}
       {!who && !sellerForm && <p className="empty">Pick a seller above, or add one.</p>}
