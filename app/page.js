@@ -42,6 +42,7 @@ const SELLER_FORM = [
   ['contact', 'Contact person'], ['email', 'Email'], ['phone', 'Phone'], ['location', 'Location (city, state)'],
   ['h2', 'Import & sync', 'h'], ['website', 'Website, Poshmark or eBay link (store, collection, poshmark.com/closet/…, or ebay.com/usr/<username>)'],
   ['fb_profile', 'Facebook Marketplace profile or Depop shop link (imported through the Chrome extension)'], ['sync', 'Automatic sync', 'sync'],
+  ['login_password', 'Seller login password (lets them log in to review their items; leave blank to keep the current one)', 'password'],
   ['h3', 'Listing style', 'h'], ['notes', 'Notes (how this seller writes listings)', 'area'],
   ['terms', 'Custom terms, one per line: their shorthand = meaning (e.g. BJ = Black Jack, Sz = Size)', 'area'],
   ['defaults', 'Defaults, one per line: field = value, used when a listing doesn\'t say (e.g. sized_for = Women, made_in = USA)', 'area'],
@@ -76,15 +77,21 @@ export default function Inventory() {
   const [failed, setFailed] = useState([]);
   const [ext, setExt] = useState(false); // WBW Importer extension present on this page
   const [err, setErr] = useState('');
+  const [me, setMe] = useState({ role: 'team' }); // a seller's own login is locked to their items
+  const team = me.role === 'team';
 
   const current = sellers.find(s => s.seller === who), hasDetails = !!current?.name;
   const setRun = patch => setRunState(r => ({ ...r, ...patch }));
   const loadSellers = () => api('GET', null, '', '/api/sellers').then(setSellers).catch(e => setErr(e.message));
-  const load = () => (seller() ? api('GET', null, `?status=${tab}`).then(setItems).catch(e => setErr(e.message)) : setItems([]));
+  // A seller's login is always their own items (the server enforces it); the team picks a seller via ?seller=.
+  const load = () => (seller() || me.seller ? api('GET', null, `?status=${tab}`).then(setItems).catch(e => setErr(e.message)) : setItems([]));
   const loadRef = useRef(load); loadRef.current = load;
 
-  useEffect(() => { setWho(seller()); loadSellers(); }, []);
-  useEffect(() => { setSel(new Set()); setEdit(null); setFilter({}); load(); }, [tab]);
+  useEffect(() => {
+    api('GET', null, '', '/api/me').then(m => { setMe(m); if (m.seller) setWho(m.seller); }).catch(() => {});
+    setWho(seller()); loadSellers();
+  }, []);
+  useEffect(() => { setSel(new Set()); setEdit(null); setFilter({}); load(); }, [tab, me.seller]);
   useEffect(() => { setLink(current?.website || current?.fb_profile || ''); }, [current?.website, current?.fb_profile]);
   // Facebook/Depop imports run in the extension (extension/bridge.js); it reports progress back here.
   useEffect(() => {
@@ -167,13 +174,14 @@ export default function Inventory() {
       {Object.entries(CHOICES).map(([f, opts]) => <datalist key={f} id={`dl-${f}`}>{opts.map(o => <option key={o} value={o} />)}</datalist>)}
 
       <div className="who">
-        Seller: <select value={who} onChange={e => switchTo(e.target.value)}>
+        {!team ? <strong>{current?.display_name ?? who}</strong> : <>Seller: <select value={who} onChange={e => switchTo(e.target.value)}>
           {!current && <option value={who}>{who || 'Pick a seller…'}</option>}
           {sellers.map(s => <option key={s.seller} value={s.seller}>{s.display_name ?? s.seller} — {s.active} items{s.review ? `, ${s.review} new` : ''}</option>)}
         </select>
         {who && <button onClick={() => setSellerForm(hasDetails ? current : { name: who, sync: 'off' })}>{hasDetails ? 'Seller settings' : 'Set up seller'}</button>}
-        <button className="primary" onClick={() => setSellerForm({ sync: 'off' })}>+ Add seller</button>
-        <a className="src" href="/wbw-importer.zip" download title="Needed for Facebook and Depop imports">Chrome extension{ext ? ' ✓' : ''}</a>
+        <button className="primary" onClick={() => setSellerForm({ sync: 'off' })}>+ Add seller</button></>}
+        {team && <a className="src" href="/wbw-importer.zip" download title="Needed for Facebook and Depop imports">Chrome extension{ext ? ' ✓' : ''}</a>}
+        <a className="src" href="/login" onClick={e => { e.preventDefault(); fetch('/api/login', { method: 'DELETE' }).then(() => location.assign('/login')); }}>Log out</a>
       </div>
       {!ext && EXTENSION_LINK.test(link) && <p className="help">Facebook and Depop import through the WBW Importer Chrome extension:
         1) download it with the <a href="/wbw-importer.zip" download>Chrome extension</a> link and unzip it; 2) open chrome://extensions and turn on
@@ -185,12 +193,13 @@ export default function Inventory() {
           <label key={f}>{l}{kind === 'area' ? <textarea rows="3" value={sellerForm[f] ?? ''} onChange={setForm(f)} />
             : kind === 'sync' ? <select value={sellerForm.sync ?? 'off'} onChange={setForm(f)}>
               <option value="off">Off (sync by hand)</option><option value="daily">Daily</option><option value="weekly">Weekly</option></select>
-            : <input value={sellerForm[f] ?? ''} onChange={setForm(f)} />}</label>)}
+            : <input type={kind === 'password' ? 'password' : 'text'} autoComplete="new-password" value={sellerForm[f] ?? ''} onChange={setForm(f)}
+              placeholder={kind === 'password' ? (sellerForm.has_login ? 'Login set — type to change' : 'No login yet') : ''} />}</label>)}
         <span><button className="primary" onClick={saveSeller}>Save seller</button><button onClick={() => setSellerForm(null)}>Cancel</button>
           {sellerForm.created_at && !current?.active && <button onClick={deleteSeller}>Delete seller</button>}</span>
       </div>}
-      {!who && !sellerForm && <p className="empty">Pick a seller above, or add one.</p>}
-      {who && !hasDetails && !sellerForm && <p className="err">Set up this seller (details and import settings) before importing for them.</p>}
+      {team && !who && !sellerForm && <p className="empty">Pick a seller above, or add one.</p>}
+      {team && who && !hasDetails && !sellerForm && <p className="err">Set up this seller (details and import settings) before importing for them.</p>}
 
       {hasDetails && <div className="site">
         <input placeholder="Website, Poshmark, eBay, Facebook or Depop link (saved in Seller settings)" value={link} onChange={e => setLink(e.target.value.trim())} />
@@ -226,8 +235,8 @@ export default function Inventory() {
           {!gone && <button className="primary" onClick={exportCsv}>Export CSV</button>}
           {!gone && <button onClick={() => bulk({ action: 'remove' })}>Remove</button>}
           {gone && <button onClick={() => bulk({ action: 'restore' })}>Restore</button>}
-          <button onClick={() => { const to = prompt('Move the selected items to which seller?'); if (to) bulk({ action: 'move', to }); }}>Move to seller…</button>
-          <button onClick={() => confirm(`Delete ${sel.size} items for good? This can't be undone.`) && bulk({ action: 'delete' })}>Delete</button>
+          {team && <button onClick={() => { const to = prompt('Move the selected items to which seller?'); if (to) bulk({ action: 'move', to }); }}>Move to seller…</button>}
+          {team && <button onClick={() => confirm(`Delete ${sel.size} items for good? This can't be undone.`) && bulk({ action: 'delete' })}>Delete</button>}
         </>}
       </div>}
 

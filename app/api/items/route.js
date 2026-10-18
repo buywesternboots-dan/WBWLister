@@ -1,5 +1,5 @@
 import * as wbw from '../../../lib/wbw';
-import { handle, sellerOf } from '../../../lib/http';
+import { handle, sellerOf, teamOnly } from '../../../lib/http';
 
 // GET ?status= → the seller's items; GET ?source= → source ids they already have (start of an import).
 export const GET = handle(req => {
@@ -18,8 +18,8 @@ export const PATCH = handle(async req => {
   const { ids, action, percent, amount, ...fields } = await req.json(), seller = sellerOf(req);
   if (!ids?.length) throw new Error('Select at least one item.');
   switch (action) {
-    case 'delete': return { deleted: await wbw.deleteItems(seller, ids) };
-    case 'move': return { moved: await wbw.moveItems(seller, ids, fields.to) };
+    case 'delete': teamOnly(req); return { deleted: await wbw.deleteItems(seller, ids) };
+    case 'move': teamOnly(req); return { moved: await wbw.moveItems(seller, ids, fields.to) };
     case 'sync': return { removed: await wbw.syncSource(seller, fields.source, ids) };
     case 'edit': await wbw.updateItems(seller, ids, fields); break;
     case 'price': await wbw.lowerPrice(seller, ids, percent, amount); break;
