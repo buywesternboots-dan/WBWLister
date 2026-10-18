@@ -243,7 +243,7 @@ export default function Inventory() {
           {tab === 'pending' && <button onClick={() => bulk({ action: 'restore' })}>Still for sale</button>}
           {!live && tab !== 'pending' && <button onClick={() => bulk({ action: 'restore' })}>Restore</button>}
           {team && <button onClick={() => { const to = prompt('Move the selected items to which seller?'); if (to) bulk({ action: 'move', to }); }}>Move to seller…</button>}
-          {team && <button onClick={() => confirm(`Delete ${sel.size} items for good? This can't be undone.`) && bulk({ action: 'delete' })}>Delete</button>}
+          {team && <button onClick={() => confirm(`Delete ${sel.size} items? Their photos and details stay in the WBW photo archive.`) && bulk({ action: 'delete' })}>Delete</button>}
         </>}
       </div>}
 
