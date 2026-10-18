@@ -1,13 +1,26 @@
 const $ = id => document.getElementById(id);
 const PROFILE = /marketplace\/profile\/(\d+)/, DEPOP = /depop\.com\/(?!products\/)([\w.-]+)/;
-chrome.storage.sync.get(['server', 'seller', 'password'], s => { $('server').value = s.server || ''; $('seller').value = s.seller || ''; $('password').value = s.password || ''; });
+// Seller dropdown from the server; picking one fills in their saved Facebook/Depop link.
+let sellers = [];
+const loadSellers = async saved => {
+  const server = $('server').value.trim().replace(/\/$/, '');
+  if (!server) return;
+  sellers = await (await fetch(`${server}/api/sellers`, { headers: { 'x-app-password': $('password').value } })).json().catch(() => []);
+  if (!Array.isArray(sellers)) return $('status').textContent = sellers.error ?? 'Could not load sellers.';
+  $('seller').innerHTML = '<option value="">Pick a seller…</option>' + sellers.filter(s => s.name)
+    .map(s => `<option value="${s.name}">${s.display_name}</option>`).join('');
+  if (saved) $('seller').value = saved;
+};
+chrome.storage.sync.get(['server', 'seller', 'password'], async s => {
+  $('server').value = s.server || ''; $('password').value = s.password || '';
+  await loadSellers(s.seller);
+});
+$('server').onchange = $('password').onchange = () => loadSellers($('seller').value);
 chrome.tabs.query({ active: true, currentWindow: true }, ([t]) => { if (PROFILE.test(t.url) || DEPOP.test(t.url)) $('profileUrl').value = t.url; });
-// Fill the profile link from the seller's saved details.
-$('seller').onchange = async () => {
-  const name = $('seller').value.trim().toLowerCase(), server = $('server').value.trim().replace(/\/$/, '');
-  const s = (await (await fetch(`${server}/api/sellers`, { headers: { 'x-app-password': $('password').value } })).json().catch(() => [])).find?.(s => s.seller === name);
-  $('status').textContent = s?.name ? '' : 'No details saved for this seller yet — add them on the inventory page first.';
-  if (s?.fb_profile && !$('profileUrl').value) $('profileUrl').value = s.fb_profile;
+$('seller').onchange = () => {
+  const s = sellers.find(s => s.name === $('seller').value);
+  $('profileUrl').value = s?.fb_profile ?? '';
+  $('status').textContent = s && !s.fb_profile ? 'No Facebook/Depop link saved for this seller — add it in Seller settings, or paste one here.' : '';
 };
 
 const show = () => chrome.storage.local.get(['log', 'progress'], s => {
