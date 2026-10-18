@@ -5,5 +5,6 @@
   "permissions": ["contextMenus", "scripting", "tabs", "storage"],
   "host_permissions": ["https://*.facebook.com/*", "https://*.depop.com/*", "https://*.vercel.app/*", "http://localhost:3000/*"],
   "background": { "service_worker": "background.js" },
+  "content_scripts": [{ "matches": ["https://*.vercel.app/*", "http://localhost:3000/*"], "js": ["bridge.js"] }],
   "action": { "default_popup": "popup.html" }
 }

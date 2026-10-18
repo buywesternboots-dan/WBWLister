@@ -1,0 +1,14 @@
+// Runs on the WBW Lister page: lets the page start Facebook/Depop imports here (those sites block servers, so they run
+// in this browser) and shows their progress on the page.
+const post = m => window.postMessage(m, location.origin);
+post({ wbwExtension: true });
+window.addEventListener('message', e => {
+  if (e.source !== window) return;
+  if (e.data?.wbwPing) post({ wbwExtension: true });
+  if (e.data?.wbwImport) chrome.runtime.sendMessage({ ...e.data.wbwImport, server: location.origin },
+    r => post({ wbwDone: r ?? { error: chrome.runtime.lastError?.message ?? 'The extension stopped.' } }));
+});
+chrome.storage.onChanged.addListener(c => {
+  if (c.progress) post({ wbwProgress: c.progress.newValue ?? null });
+  if (c.log) post({ wbwLog: c.log.newValue?.[0] });
+});

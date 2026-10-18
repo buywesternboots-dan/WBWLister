@@ -103,13 +103,17 @@ async function readDepopShop() {
   });
 }
 
+// Imports started from the WBW Lister page use that page's server and selected seller instead of the popup's.
+let job = null;
 async function api(method, body, q = '') {
-  const { server, seller, password } = await chrome.storage.sync.get(['server', 'seller', 'password']);
+  const saved = await chrome.storage.sync.get(['server', 'seller', 'password']);
+  const { server, seller, password } = { ...saved, ...job };
   if (!server) throw new Error('Set the WBW server URL in the extension popup.');
   const r = await fetch(`${server.replace(/\/$/, '')}/api/items${q}`, {
     method,
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${seller || ''}`, 'x-app-password': password || '' },
     body: body && JSON.stringify(body),
+    credentials: 'include', // the page's login cookie, when started from the page
   });
   const j = await r.json();
   if (!r.ok) throw new Error(j.error);
@@ -185,10 +189,20 @@ async function importProfile(sellerId, sync) {
 
 const addCurrent = async tabId => retry(async () => send(await run(tabId, readListing)));
 
+// From the page: { type: 'link', link, sync, seller, server } — a Facebook profile or Depop shop link.
+const fromLink = (link, sync) => {
+  const fb = link.match(/marketplace\/profile\/(\d+)/)?.[1], shop = link.match(/depop\.com\/(?!products\/)([\w.-]+)/)?.[1];
+  if (fb) return importProfile(fb, sync);
+  if (shop) return importDepop(shop, sync);
+  throw new Error('Not a Facebook Marketplace profile or Depop shop link.');
+};
+
 chrome.runtime.onMessage.addListener((m, _, reply) => {
-  (m.type === 'profile' ? importProfile(m.sellerId, m.sync) : m.type === 'depop' ? importDepop(m.shop, m.sync) : addCurrent(m.tabId))
+  job = m.server ? { server: m.server, seller: m.seller } : null;
+  (async () => m.type === 'link' ? fromLink(m.link, m.sync) : m.type === 'profile' ? importProfile(m.sellerId, m.sync) : m.type === 'depop' ? importDepop(m.shop, m.sync) : addCurrent(m.tabId))()
     .then(r => { if (m.type !== 'listing') progress(null), status(`Done: ${r.added} added, ${r.updated} updated, ${r.removed} removed, ${r.failed} failed.`); reply({ r }); },
-      e => { badge('!'); progress(null); status(`Error: ${e.message}`); reply({ error: e.message }); });
+      e => { badge('!'); progress(null); status(`Error: ${e.message}`); reply({ error: e.message }); })
+    .finally(() => { job = null; });
   return true;
 });
 

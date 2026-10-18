@@ -77,7 +77,29 @@ export default function Inventory() {
   useEffect(() => { loadSellers(); }, []);
   const current = sellers.find(s => s.seller === who), hasDetails = !!current?.name;
   const delItems = () => confirm(`Delete ${sel.size} items for good? This can't be undone.`) && bulk({ action: 'delete' });
-  useEffect(() => { if (current?.website) setSite(s => ({ ...s, url: current.website })); }, [current?.website]);
+  const link = current?.website || current?.fb_profile;
+  useEffect(() => { if (link) setSite(s => ({ ...s, url: link })); }, [link]);
+  // Facebook and Depop block servers, so those imports run in the WBW Importer Chrome extension (extension/bridge.js).
+  const [ext, setExt] = useState(false);
+  const viaExtension = /facebook\.com|depop\.com/i.test(site.url);
+  useEffect(() => {
+    const on = e => {
+      if (e.source !== window) return;
+      const d = e.data ?? {}, run = patch => setSite(s => ({ ...s, run: { ...s.run, ...patch } }));
+      if (d.wbwExtension) setExt(true);
+      if (d.wbwProgress) run(d.wbwProgress);
+      if (d.wbwDone) { const { r, error } = d.wbwDone; error ? setErr(error) : run({ label: `Done: ${r.added} added, ${r.updated} updated, ${r.removed} removed, ${r.failed} failed`, done: 1, total: 1 }); load(); }
+    };
+    window.addEventListener('message', on);
+    window.postMessage({ wbwPing: true }, location.origin);
+    return () => window.removeEventListener('message', on);
+  }, [tab]);
+  const importViaExtension = sync => {
+    setErr('');
+    if (!ext) return setErr('Facebook and Depop imports run through the WBW Importer Chrome extension. Install it (or reload it at chrome://extensions), then reload this page.');
+    setSite(s => ({ ...s, failed: [], run: { label: 'Started in the Chrome extension — a Facebook/Depop tab will open…', done: 0, total: 0 } }));
+    window.postMessage({ wbwImport: { type: 'link', link: site.url, sync, seller: who } }, location.origin);
+  };
   const saveSeller = () => api('POST', { ...sellerForm, rename_from: sellerForm.created_at && current?.name }, '', '/api/sellers')
     .then(s => { setSellerForm(null); s.name === who ? loadSellers() : switchTo(s.name); }).catch(e => setErr(e.message));
   const switchTo = name => { if (name?.trim()) location.search = `?seller=${encodeURIComponent(name.trim().toLowerCase())}`; };
@@ -160,9 +182,9 @@ export default function Inventory() {
       {!who && !sellerForm && <p className="empty">Pick a seller above, or add one.</p>}
       {who && !hasDetails && !sellerForm && <p className="err">Set up this seller (details and import settings) before importing for them.</p>}
       <div className="site">
-        <input placeholder="Seller's website (set in Seller settings)" value={site.url} onChange={e => setSite({ ...site, url: e.target.value.trim() })} />
-        <button disabled={!site.url || !hasDetails} onClick={() => importSite(false)}>Import</button>
-        <button disabled={!site.url || !hasDetails} onClick={() => importSite(true)}>Sync</button>
+        <input placeholder="Seller's website, Facebook or Depop link (set in Seller settings)" value={site.url} onChange={e => setSite({ ...site, url: e.target.value.trim() })} />
+        <button disabled={!site.url || !hasDetails} onClick={() => viaExtension ? importViaExtension(false) : importSite(false)}>Import</button>
+        <button disabled={!site.url || !hasDetails} onClick={() => viaExtension ? importViaExtension(true) : importSite(true)}>Sync</button>
         {r?.label && <div className="run">{r.total > 0 && <progress value={r.done} max={r.total} />}
           <small>{r.label}{r.total > 0 && r.done < r.total && ` — ${r.done} of ${r.total}`}</small></div>}
         {site.failed.length > 0 && <details className="failed">
