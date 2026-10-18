@@ -153,7 +153,9 @@ export default function Inventory() {
             : kind === 'sync' ? <select value={sellerForm.sync ?? 'off'} onChange={e => setSellerForm({ ...sellerForm, sync: e.target.value })}>
               <option value="off">Off (sync by hand)</option><option value="daily">Daily</option><option value="weekly">Weekly</option></select>
             : <input value={sellerForm[f] ?? ''} onChange={e => setSellerForm({ ...sellerForm, [f]: e.target.value })} />}</label>)}
-        <span><button className="primary" onClick={saveSeller}>Save seller</button><button onClick={() => setSellerForm(null)}>Cancel</button></span>
+        <span><button className="primary" onClick={saveSeller}>Save seller</button><button onClick={() => setSellerForm(null)}>Cancel</button>
+          {sellerForm.created_at && !current?.active && <button onClick={() => confirm(`Delete seller "${current.name}"?`) &&
+            api('DELETE', null, `?name=${encodeURIComponent(current.name)}`, '/api/sellers').then(() => location.assign('/')).catch(e => setErr(e.message))}>Delete seller</button>}</span>
       </div>}
       {!who && !sellerForm && <p className="empty">Pick a seller above, or add one.</p>}
       {who && !hasDetails && !sellerForm && <p className="err">Set up this seller (details and import settings) before importing for them.</p>}
