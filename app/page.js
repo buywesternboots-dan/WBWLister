@@ -40,7 +40,7 @@ const SORTS = {
 const SELLER_FORM = [
   ['h1', 'Details', 'h'], ['name', 'WBW seller name* (the WBW account these items attach to)'], ['display_name', 'Display name*'],
   ['contact', 'Contact person'], ['email', 'Email'], ['phone', 'Phone'], ['location', 'Location (city, state)'],
-  ['h2', 'Import & sync', 'h'], ['website', 'Website or Poshmark closet link (store, collection, or poshmark.com/closet/…)'],
+  ['h2', 'Import & sync', 'h'], ['website', 'Website, Poshmark or eBay link (store, collection, poshmark.com/closet/…, or ebay.com/usr/<username>)'],
   ['fb_profile', 'Facebook Marketplace profile or Depop shop link (imported through the Chrome extension)'], ['sync', 'Automatic sync', 'sync'],
   ['h3', 'Listing style', 'h'], ['notes', 'Notes (how this seller writes listings)', 'area'],
   ['terms', 'Custom terms, one per line: their shorthand = meaning (e.g. BJ = Black Jack, Sz = Size)', 'area'],
@@ -50,7 +50,7 @@ const SELLER_FORM = [
 const CSV = { seller: 'WBW Seller Name', ...Object.fromEntries(FIELDS.map(f => [f, label(f)])), category: 'Category', website_url: 'Seller Website Link', photos: 'Image URLs', source_id: 'Source ID' };
 const cell = v => `"${String(Array.isArray(v) ? v.join('|') : v ?? '').replace(/"/g, '""')}"`;
 const download = rows => {
-  const row = r => ({ ...r, website_url: ['facebook', 'depop', 'poshmark'].includes(r.source) ? '' : r.source_url, wbw_price: r.wbw_price ?? r.price,
+  const row = r => ({ ...r, website_url: ['facebook', 'depop', 'poshmark', 'ebay'].includes(r.source) ? '' : r.source_url, wbw_price: r.wbw_price ?? r.price,
     category: ['boot', 'belt'].includes(r.boot) ? GROUPS[r.boot] : '' });
   const csv = [Object.values(CSV), ...rows.map(r => Object.keys(CSV).map(k => row(r)[k]))].map(r => r.map(cell).join(',')).join('\r\n');
   Object.assign(document.createElement('a'), { href: URL.createObjectURL(new Blob([csv], { type: 'text/csv' })), download: `wbw-import-${new Date().toISOString().slice(0, 10)}.csv` }).click();
@@ -189,7 +189,7 @@ export default function Inventory() {
       {who && !hasDetails && !sellerForm && <p className="err">Set up this seller (details and import settings) before importing for them.</p>}
 
       {hasDetails && <div className="site">
-        <input placeholder="Website, Poshmark, Facebook or Depop link (saved in Seller settings)" value={link} onChange={e => setLink(e.target.value.trim())} />
+        <input placeholder="Website, Poshmark, eBay, Facebook or Depop link (saved in Seller settings)" value={link} onChange={e => setLink(e.target.value.trim())} />
         <button disabled={!link || run?.busy} onClick={() => startImport(false)}>Import</button>
         <button disabled={!link || run?.busy} onClick={() => startImport(true)}>Sync</button>
         {run?.label && <div className="run">{run.total > 0 && <progress value={run.done} max={run.total} />}
@@ -250,7 +250,7 @@ export default function Inventory() {
             </div> : <div className="info" onClick={() => setEdit(i)}>
               <strong>{i.title || 'Untitled'}</strong>
               {i.source_url && <a className="src" href={i.source_url} target="_blank" onClick={e => e.stopPropagation()}>
-                View on {{ facebook: 'Facebook', depop: 'Depop', poshmark: 'Poshmark' }[i.source] ?? i.source}</a>}
+                View on {{ facebook: 'Facebook', depop: 'Depop', poshmark: 'Poshmark', ebay: 'eBay' }[i.source] ?? i.source}</a>}
               {i.boot === 'unsure' && <small>{Math.round((i.boot_score ?? 0) * 100)}% likely a boot</small>}
               {missing(i).length > 0 && <small className="err">Missing: {missing(i).map(label).join(', ')}</small>}
               {unverified(i).length > 0 && <small className="warn">Verify: {unverified(i).map(label).join(', ')}</small>}
