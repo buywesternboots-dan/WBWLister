@@ -3,7 +3,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "node scripts/zip-extension.mjs && next build",
     "start": "next start"
   },
   "dependencies": {

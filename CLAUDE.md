@@ -28,6 +28,7 @@
 - Depop (Cloudflare blocks servers): extension opens the shop once and reads Depop's own listing feed (webapi.depop.com shops/{id}/products, page context) — readDepopShop()/importDepop() in extension/background.js; photos linked (permanent). Seller's Depop link goes in the fb_profile field.
 - Inventory page Import/Sync works for every seller: website links run server-side; Facebook/Depop links are handed to the extension via extension/bridge.js (content script on the app's pages; progress posted back to the page).
 - lib/http.js: shared route helpers (handle, sellerOf).
+- Extension download: scripts/zip-extension.mjs packs extension/ into public/wbw-importer.zip at build; "Chrome extension" link in the page header (with install steps when needed). bridge.js sets the popup's server address on first visit.
 - extension/: Chrome extension (MV3). background.js: page readers (readListing, collectIds, readDepopShop) + one shared importAll loop; one import at a time; messages { type: 'link', link, sync } or { type: 'listing', tabId }. Popup (server URL, password, seller dropdown [fills their saved FB/Depop link], profile link, "Import all from this profile", "Sync with this profile" [re-reads all; source-changed items refreshed; unlisted → Removed], "Add this listing"), right-click "Add to WBW". FB reader uses og meta tags + text labels; untested against real pages.
 
 ## Status
