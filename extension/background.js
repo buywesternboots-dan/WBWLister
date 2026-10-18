@@ -2,7 +2,7 @@ const ITEM = /facebook\.com\/marketplace\/item\/(\d+)/;
 const wait = ms => new Promise(r => setTimeout(r, ms));
 // Runs fn; on failure tries twice more (after 2 s, then 4 s) before giving up.
 const retry = async (fn, n = 1) => { try { return await fn(); } catch (e) { if (n >= 3) throw e; await wait(n * 2000); return retry(fn, n + 1); } };
-const done = n => `Done: ${n.added} added, ${n.updated} updated, ${n.removed} removed, ${n.failed} failed.`;
+const done = n => `Done: ${n.added} new, ${n.updated} changed, ${n.removed} gone (now Pending sold), ${n.failed} failed.`;
 const badge = t => chrome.action.setBadgeText({ text: String(t) });
 // Progress bar state (shown in the popup); status() only logs problems and milestones.
 const progress = p => chrome.storage.local.set({ progress: p });

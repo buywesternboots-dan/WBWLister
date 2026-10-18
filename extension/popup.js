@@ -38,7 +38,7 @@ async function start(message) {
   await chrome.storage.sync.set({ server: $('server').value.trim(), seller: $('seller').value, password: $('password').value });
   if (!$('seller').value) return say('Pick a seller first.');
   const { r, error } = await chrome.runtime.sendMessage(message);
-  say(error || (message.type === 'link' ? `Done: ${r.added} added, ${r.updated} updated, ${r.removed} removed, ${r.failed} failed.` : r.duplicate ? 'Already imported.' : 'Added.'));
+  say(error || (message.type === 'link' ? `Done: ${r.added} new, ${r.updated} changed, ${r.removed} gone (now Pending sold), ${r.failed} failed.` : r.duplicate ? 'Already imported.' : 'Added.'));
 }
 const importLink = sync => {
   const link = $('profileUrl').value.trim();

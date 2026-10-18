@@ -12,7 +12,7 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
 // Runs fn; on failure tries twice more (after 1 s, then 2 s) before giving up.
 const withRetry = async (fn, n = 1) => { try { return await fn(); } catch (e) { if (n >= 3) throw e; await wait(n * 1000); return withRetry(fn, n + 1); } };
 
-const TABS = { review: 'Newly imported', published: 'Exported', removed: 'Removed', archived: 'Archived' };
+const TABS = { review: 'Newly imported', published: 'Exported', pending: 'Pending sold', sold: 'Sold', removed: 'Removed', archived: 'Archived' };
 const GROUPS = { boot: 'Boots', belt: 'Belts', unsure: 'Not sure', other: 'Other' };
 // Item fields: key → label. * = required by WBW.
 const LABELS = { price: 'Price*', wbw_price: 'WBW Price', title: 'Title*', brand: 'Brand*', sized_for: 'Sized for (Men/Women)*', width: 'Width',
@@ -58,7 +58,8 @@ const download = rows => {
 };
 const CONCURRENT = 4; // website products imported at once
 const EXTENSION_LINK = /facebook\.com|depop\.com/i; // these sites block servers, so the Chrome extension imports them
-const done = n => `Done: ${n.added} added, ${n.updated} updated${n.sold != null ? `, ${n.sold} sold (skipped)` : ''}, ${n.removed} removed, ${n.failed} failed`;
+const done = n => `Done: ${n.added} new, ${n.updated} changed${n.sold != null ? `, ${n.sold} already sold (skipped)` : ''}, ${n.removed} gone (now Pending sold), ${n.failed} failed`;
+const daysLeft = i => Math.max(0, 30 - Math.floor((Date.now() - new Date(i.status_at)) / 864e5));
 
 export default function Inventory() {
   const [who, setWho] = useState('');
@@ -162,7 +163,7 @@ export default function Inventory() {
     load(); loadSellers();
   };
 
-  const gone = tab === 'removed' || tab === 'archived';
+  const live = tab === 'review' || tab === 'published';
   const shown = items.filter(i => searchMatch(i, q)).sort(SORTS[sort]);
   const groups = tab === 'review' ? Object.entries(GROUPS).map(([k, l]) => [k, l, shown.filter(i => i.boot === k)]) : [[tab, TABS[tab], shown]];
   const setForm = f => e => setSellerForm({ ...sellerForm, [f]: e.target.value });
@@ -227,14 +228,16 @@ export default function Inventory() {
         <label><input type="checkbox" checked={sel.size > 0 && sel.size === shown.length}
           onChange={() => setSel(sel.size === shown.length ? new Set() : new Set(shown.map(i => i.id)))} /> {sel.size} selected</label>
         {sel.size > 0 && <>
-          {!gone && <span className="adj">
+          {live && <span className="adj">
             <input inputMode="decimal" placeholder="Lower by" value={adj.value} onChange={e => setAdj({ ...adj, value: e.target.value })} />
             <select value={adj.unit} onChange={e => setAdj({ ...adj, unit: e.target.value })}><option>%</option><option>$</option></select>
             <button onClick={lower}>Apply</button>
           </span>}
-          {!gone && <button className="primary" onClick={exportCsv}>Export CSV</button>}
-          {!gone && <button onClick={() => bulk({ action: 'remove' })}>Remove</button>}
-          {gone && <button onClick={() => bulk({ action: 'restore' })}>Restore</button>}
+          {live && <button className="primary" onClick={exportCsv}>Export CSV</button>}
+          {live && <button onClick={() => bulk({ action: 'remove' })}>Remove</button>}
+          {tab === 'pending' && <button className="primary" onClick={() => bulk({ action: 'sold' })}>Mark sold</button>}
+          {tab === 'pending' && <button onClick={() => bulk({ action: 'restore' })}>Still for sale</button>}
+          {!live && tab !== 'pending' && <button onClick={() => bulk({ action: 'restore' })}>Restore</button>}
           {team && <button onClick={() => { const to = prompt('Move the selected items to which seller?'); if (to) bulk({ action: 'move', to }); }}>Move to seller…</button>}
           {team && <button onClick={() => confirm(`Delete ${sel.size} items for good? This can't be undone.`) && bulk({ action: 'delete' })}>Delete</button>}
         </>}
@@ -264,6 +267,8 @@ export default function Inventory() {
               <strong>{i.title || 'Untitled'}</strong>
               {i.source_url && <a className="src" href={i.source_url} target="_blank" onClick={e => e.stopPropagation()}>
                 View on {{ facebook: 'Facebook', depop: 'Depop', poshmark: 'Poshmark', ebay: 'eBay' }[i.source] ?? i.source}</a>}
+              {i.changed_at && <small className="warn">Changed at source — review before it goes back to WBW</small>}
+              {i.status === 'pending' && <small className="warn">Gone from the source — confirm sold, or it's marked sold in {daysLeft(i)} days</small>}
               {i.boot === 'unsure' && <small>{Math.round((i.boot_score ?? 0) * 100)}% likely a boot</small>}
               {missing(i).length > 0 && <small className="err">Missing: {missing(i).map(label).join(', ')}</small>}
               {unverified(i).length > 0 && <small className="warn">Verify: {unverified(i).map(label).join(', ')}</small>}
