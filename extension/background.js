@@ -104,6 +104,8 @@ async function importUrl(url) {
 // Import: new listings only. Sync: re-reads every listing (the server refreshes changed ones, ignores unchanged)
 // and moves items no longer listed to Removed.
 async function importProfile(sellerId, sync) {
+  const known = new Set(await api('GET', null, '?source=facebook')); // first: fails if the seller has no details yet
+  if (sync) known.clear();
   const tab = await chrome.tabs.create({ url: `https://www.facebook.com/marketplace/profile/${sellerId}/` });
   await loaded(tab.id);
   await wait(3000);
@@ -111,8 +113,6 @@ async function importProfile(sellerId, sync) {
   const ids = await run(tab.id, collectIds);
   status(`Found ${ids.length} listings on the profile`);
   if (!ids.length) throw new Error('No listings found on this profile.');
-  const known = new Set(await api('GET', null, '?source=facebook')); // also fails if the seller has no details yet
-  if (sync) known.clear();
   const todo = ids.filter(id => !known.has(id));
   const n = { added: 0, updated: 0, failed: 0, removed: 0 };
   for (let i = 0; i < todo.length; i++) {
