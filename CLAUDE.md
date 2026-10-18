@@ -17,7 +17,7 @@
 ## Folders
 - Repo root: Next.js app (no web/ subfolder).
   - lib/wbw.js: mock WBW layer (Neon Postgres + Vercel Blob). Replace only this file to connect to real WBW. Table auto-creates.
-  - app/api/items/route.js: GET list by status, POST create, PATCH bulk actions. Mock auth: Bearer seller name, default "demo". GET ?sellers lists sellers + counts (page header dropdown, one seller at a time).
+  - app/api/items/route.js: GET list by status, POST create, PATCH bulk actions. Mock auth: Bearer seller name, default "demo". Sellers: sellers table (WBW seller name + details incl. website & FB profile) via app/api/sellers; details required before Import/Sync; page header dropdown, one seller at a time.
   - lib/wbw.js FIELDS = WBW listing fields; enrich() fills them from listing text; values inferred from free text are listed in items.guessed and shown yellow until the seller saves (= verified). CSV columns in app/page.js LABELS/CSV (WBW Seller Name first).
   - app/page.js: inventory page (tabs Newly imported / Exported / Removed / Archived [auto after 30 days in Removed]; groups Boots / Belts / Not sure / Other (items.boot + items.boot_score from classify() in lib/wbw.js; Boots/Belts only when ≥97% sure); group header quick filters Ready / To verify / Missing <field>; search with brand-family & material synonyms; sort most-likely-boot or newest; bulk lower price, Export CSV for WBW import (columns in CSV const; production will connect directly to WBW instead), remove, restore, Move to seller; tap to edit). Each item keeps source_url (seller-website product page → 'Seller Website Link' for WBW to link back; FB listing link for reference).
   - Env: DATABASE_URL, BLOB_READ_WRITE_TOKEN.

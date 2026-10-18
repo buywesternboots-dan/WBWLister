@@ -2,6 +2,13 @@ const $ = id => document.getElementById(id);
 const PROFILE = /marketplace\/profile\/(\d+)/;
 chrome.storage.sync.get(['server', 'seller'], s => { $('server').value = s.server || ''; $('seller').value = s.seller || 'demo'; });
 chrome.tabs.query({ active: true, currentWindow: true }, ([t]) => { if (PROFILE.test(t.url)) $('profileUrl').value = t.url; });
+// Fill the profile link from the seller's saved details.
+$('seller').onchange = async () => {
+  const name = $('seller').value.trim().toLowerCase(), server = $('server').value.trim().replace(/\/$/, '');
+  const s = (await (await fetch(`${server}/api/sellers`)).json().catch(() => [])).find?.(s => s.seller === name);
+  $('status').textContent = s?.name ? '' : 'No details saved for this seller yet — add them on the inventory page first.';
+  if (s?.fb_profile && !$('profileUrl').value) $('profileUrl').value = s.fb_profile;
+};
 
 const show = () => chrome.storage.local.get(['log', 'progress'], s => {
   if (s.log) $('log').textContent = s.log.join('\n');

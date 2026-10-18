@@ -64,7 +64,13 @@ export default function Inventory() {
   const [site, setSite] = useState({ url: '', run: null, failed: [] });
 
   const load = () => api('GET', null, `?status=${tab}`).then(setItems).catch(e => setErr(e.message));
-  useEffect(() => { api('GET', null, '?sellers').then(setSellers).catch(() => {}); }, []);
+  const [sellerForm, setSellerForm] = useState(null); // seller details being added/edited
+  const loadSellers = () => api('GET', null, '', '/api/sellers').then(setSellers).catch(() => {});
+  useEffect(() => { loadSellers(); }, []);
+  const current = sellers.find(s => s.seller === who), hasDetails = !!current?.name;
+  useEffect(() => { if (current?.website) setSite(s => ({ ...s, url: current.website })); }, [current?.website]);
+  const saveSeller = () => api('POST', sellerForm, '', '/api/sellers')
+    .then(s => { setSellerForm(null); s.name === who ? loadSellers() : switchTo(s.name); }).catch(e => setErr(e.message));
   const switchTo = name => { if (name?.trim()) location.search = `?seller=${encodeURIComponent(name.trim().toLowerCase())}`; };
   useEffect(() => { setWho(seller()); setSel(new Set()); setEdit(null); setFilter({}); load(); }, [tab]);
 
@@ -124,20 +130,31 @@ export default function Inventory() {
       <style>{css}</style>
       {Object.entries(CHOICES).map(([f, opts]) => <datalist key={f} id={`dl-${f}`}>{opts.map(o => <option key={o} value={o} />)}</datalist>)}
       <div className="who">
-        Seller: <select value={who} onChange={e => e.target.value === '+' ? switchTo(prompt('New seller name (their WBW seller name):')) : switchTo(e.target.value)}>
+        Seller: <select value={who} onChange={e => e.target.value === '+' ? setSellerForm({}) : switchTo(e.target.value)}>
           {!sellers.some(s => s.seller === who) && <option value={who}>{who}</option>}
           {sellers.map(s => <option key={s.seller} value={s.seller}>{s.seller} — {s.active} items{s.review ? `, ${s.review} new` : ''}</option>)}
           <option value="+">+ New seller…</option>
         </select>
+        <button onClick={() => setSellerForm(current?.name ? current : { name: who })}>{hasDetails ? 'Seller details' : 'Add seller details'}</button>
       </div>
+      {sellerForm && <div className="sellerform">
+        <strong>{sellerForm.created_at ? 'Edit seller' : 'New seller'}</strong>
+        {[['name', 'WBW seller name* (the WBW account these items attach to)'], ['display_name', 'Display name*'], ['contact', 'Contact person'],
+          ['email', 'Email'], ['phone', 'Phone'], ['location', 'Location (city, state)'], ['website', 'Website (for website imports)'],
+          ['fb_profile', 'Facebook Marketplace profile link'], ['notes', 'Notes']].map(([f, l]) =>
+          <label key={f}>{l}<input value={sellerForm[f] ?? ''} disabled={f === 'name' && !!sellerForm.created_at}
+            onChange={e => setSellerForm({ ...sellerForm, [f]: e.target.value })} /></label>)}
+        <span><button className="primary" onClick={saveSeller}>Save seller</button><button onClick={() => setSellerForm(null)}>Cancel</button></span>
+      </div>}
+      {!hasDetails && !sellerForm && <p className="err">Add this seller's details before importing for them.</p>}
       <div className="site">
         <select value={Object.values(SITES).includes(site.url) ? site.url : ''} onChange={e => setSite({ ...site, url: e.target.value })}>
           <option value="">Import from website…</option>
           {Object.entries(SITES).map(([name, url]) => <option key={url} value={url}>{name}</option>)}
         </select>
         <input placeholder="or type a store address" value={site.url} onChange={e => setSite({ ...site, url: e.target.value.trim() })} />
-        <button disabled={!site.url} onClick={() => importSite(false)}>Import</button>
-        <button disabled={!site.url} onClick={() => importSite(true)}>Sync</button>
+        <button disabled={!site.url || !hasDetails} onClick={() => importSite(false)}>Import</button>
+        <button disabled={!site.url || !hasDetails} onClick={() => importSite(true)}>Sync</button>
         {r?.label && <div className="run">{r.total > 0 && <progress value={r.done} max={r.total} />}
           <small>{r.label}{r.total > 0 && r.done < r.total && ` — ${r.done} of ${r.total}`}</small></div>}
         {site.failed.length > 0 && <details className="failed">
@@ -237,6 +254,8 @@ dl{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:4p
 .run{width:100%;display:flex;flex-direction:column;gap:2px}.run progress{width:100%}.run small{color:#6b5a4a}
 .failed{width:100%;font-size:13px;color:#a3261b;max-height:200px;overflow:auto}.failed a{color:inherit}
 .who{display:flex;gap:6px;align-items:center;margin-bottom:12px}.who select{flex:1;min-width:0}
+.sellerform{display:flex;flex-direction:column;gap:6px;padding:12px;margin-bottom:12px;background:#fff;border:1px solid #e6dfd6;border-radius:8px}
+.sellerform label{display:flex;flex-direction:column;font-size:13px;color:#6b5a4a;gap:2px}.sellerform span{display:flex;gap:6px}
 .src{font-size:13px;color:#1f6f6b;align-self:flex-start}
 .err{color:#a3261b!important}.empty{color:#6b5a4a}
 `;

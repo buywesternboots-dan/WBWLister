@@ -8,7 +8,6 @@ const handle = fn => async req => {
 
 export const GET = handle(req => {
   const q = new URL(req.url).searchParams;
-  if (q.has('sellers')) return wbw.getSellers();
   return q.get('source') ? wbw.getSourceIds(seller(req), q.get('source')) : wbw.getItems(seller(req), q.get('status') || 'review');
 });
 
