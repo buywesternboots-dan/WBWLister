@@ -1,5 +1,7 @@
 const ITEM = /facebook\.com\/marketplace\/item\/(\d+)/;
 const wait = ms => new Promise(r => setTimeout(r, ms));
+// Runs fn; on failure tries twice more (after 2 s, then 4 s) before giving up.
+const retry = async (fn, n = 1) => { try { return await fn(); } catch (e) { if (n >= 3) throw e; await wait(n * 2000); return retry(fn, n + 1); } };
 const badge = t => chrome.action.setBadgeText({ text: String(t) });
 // Progress bar state (shown in the popup); status() only logs problems and milestones.
 const progress = p => chrome.storage.local.set({ progress: p });
@@ -116,7 +118,7 @@ async function importProfile(sellerId, sync) {
     badge(todo.length - i);
     progress({ done: i, total: todo.length, label: `${sync ? 'Syncing' : 'Importing'} — ${n.added} added, ${n.updated} updated, ${n.failed} failed` });
     try {
-      const r = await importUrl(`https://www.facebook.com/marketplace/item/${todo[i]}/`);
+      const r = await retry(() => importUrl(`https://www.facebook.com/marketplace/item/${todo[i]}/`));
       if (r.item?.updated) n.updated++; else if (r.item) n.added++;
     } catch (e) { n.failed++; status(`Listing ${todo[i]} failed: ${e.message}`); }
     await wait(3000 + Math.random() * 3000);
@@ -126,7 +128,7 @@ async function importProfile(sellerId, sync) {
   return n;
 }
 
-const addCurrent = async tabId => send(await run(tabId, readListing));
+const addCurrent = async tabId => retry(async () => send(await run(tabId, readListing)));
 
 chrome.runtime.onMessage.addListener((m, _, reply) => {
   (m.type === 'profile' ? importProfile(m.sellerId, m.sync) : addCurrent(m.tabId))

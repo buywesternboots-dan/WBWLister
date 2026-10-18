@@ -46,6 +46,8 @@ const FILTERS = { ready: ['Ready', isReady], verify: ['To verify', i => unverifi
   ...Object.fromEntries(REQUIRED.map(f => [f, [`Missing ${label(f)}`, i => missing(i).includes(f)]])),
   ...Object.fromEntries(ALERT.map(f => [f, [`No ${label(f).toLowerCase()}`, i => !i[f]]])) };
 const CONCURRENT = 4; // website products imported at once
+// Runs fn; on failure tries twice more (after 1 s, then 2 s) before giving up.
+const retry = async (fn, n = 1) => { try { return await fn(); } catch (e) { if (n >= 3) throw e; await new Promise(r => setTimeout(r, n * 1000)); return retry(fn, n + 1); } };
 
 export default function Inventory() {
   const [tab, setTab] = useState('review');
@@ -94,7 +96,7 @@ export default function Inventory() {
         while (next < todo.length && !stop) {
           const url = todo[next++];
           try {
-            const r = await api('POST', { url }, '', '/api/import');
+            const r = await retry(() => api('POST', { url }, '', '/api/import'));
             streak = 0;
             if (r.sold) { n.sold++; listed.delete(slug(url)); } else if (r.item?.updated) n.updated++; else if (r.item) n.added++;
           } catch (e) {
