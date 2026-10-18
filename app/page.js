@@ -127,7 +127,7 @@ export default function Inventory() {
   const importSite = async (sync, only) => {
     setErr(''); setFailed([]); setRunState({ label: 'Reading the store\'s product list…', busy: true });
     try {
-      const { source, urls, known } = only ? { urls: only, known: [] } : await api('GET', null, `?site=${encodeURIComponent(link)}`, '/api/import');
+      const { source, urls, known, items } = only ? { urls: only, known: [] } : await api('GET', null, `?site=${encodeURIComponent(link)}`, '/api/import');
       const slug = u => u.split('/').filter(Boolean).pop(), have = new Set(known);
       const todo = sync ? urls : urls.filter(u => !have.has(u)), listed = new Set(urls.map(slug));
       const n = { added: 0, updated: 0, sold: 0, failed: 0, removed: 0 };
@@ -137,7 +137,7 @@ export default function Inventory() {
         while (next < todo.length && !stop) {
           const url = todo[next++];
           try {
-            const r = await withRetry(() => api('POST', { url }, '', '/api/import'));
+            const r = await withRetry(() => api('POST', { url, item: items?.[url] }, '', '/api/import'));
             streak = 0;
             if (r.sold) { n.sold++; listed.delete(slug(url)); } else if (r.item?.updated) n.updated++; else if (r.item) n.added++;
           } catch (e) {
