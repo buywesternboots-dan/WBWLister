@@ -1,30 +1,29 @@
 import * as wbw from '../../../lib/wbw';
+import { handle, sellerOf } from '../../../lib/http';
 
-// Which seller's items (case-insensitive). The tool itself is password-protected (proxy.js).
-const seller = req => { const s = req.headers.get('authorization')?.replace('Bearer ', '').trim().toLowerCase(); if (!s) throw new Error('Pick a seller first.'); return s; };
-const handle = fn => async req => {
-  try { return Response.json(await fn(req)); }
-  catch (e) { return Response.json({ error: e.message }, { status: 400 }); }
-};
-
+// GET ?status= → the seller's items; GET ?source= → source ids they already have (start of an import).
 export const GET = handle(req => {
   const q = new URL(req.url).searchParams;
-  return q.get('source') ? wbw.getSourceIds(seller(req), q.get('source')) : wbw.getItems(seller(req), q.get('status') || 'review');
+  return q.get('source') ? wbw.getSourceIds(sellerOf(req), q.get('source')) : wbw.getItems(sellerOf(req), q.get('status') || 'review');
 });
 
+// POST item → import one listing (from the extension).
 export const POST = handle(async req => {
-  const item = await wbw.createItem(seller(req), await req.json());
+  const item = await wbw.createItem(sellerOf(req), await req.json());
   return { item, duplicate: !item };
 });
 
+// PATCH { ids, action, … } → bulk actions.
 export const PATCH = handle(async req => {
-  const { ids, action, percent, amount, ...fields } = await req.json();
+  const { ids, action, percent, amount, ...fields } = await req.json(), seller = sellerOf(req);
   if (!ids?.length) throw new Error('Select at least one item.');
-  if (action === 'delete') return { deleted: await wbw.deleteItems(seller(req), ids) };
-  if (action === 'move') return { moved: await wbw.moveItems(seller(req), ids, fields.to) };
-  if (action === 'sync') return { removed: await wbw.syncSource(seller(req), fields.source, ids) };
-  if (action === 'edit') await wbw.updateItems(seller(req), ids, fields);
-  else if (action === 'price') await wbw.lowerPrice(seller(req), ids, percent, amount);
-  else await wbw.setStatus(seller(req), ids, action);
+  switch (action) {
+    case 'delete': return { deleted: await wbw.deleteItems(seller, ids) };
+    case 'move': return { moved: await wbw.moveItems(seller, ids, fields.to) };
+    case 'sync': return { removed: await wbw.syncSource(seller, fields.source, ids) };
+    case 'edit': await wbw.updateItems(seller, ids, fields); break;
+    case 'price': await wbw.lowerPrice(seller, ids, percent, amount); break;
+    default: await wbw.setStatus(seller, ids, action);
+  }
   return { ok: true };
 });

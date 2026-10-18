@@ -2,6 +2,7 @@ const ITEM = /facebook\.com\/marketplace\/item\/(\d+)/;
 const wait = ms => new Promise(r => setTimeout(r, ms));
 // Runs fn; on failure tries twice more (after 2 s, then 4 s) before giving up.
 const retry = async (fn, n = 1) => { try { return await fn(); } catch (e) { if (n >= 3) throw e; await wait(n * 2000); return retry(fn, n + 1); } };
+const done = n => `Done: ${n.added} added, ${n.updated} updated, ${n.removed} removed, ${n.failed} failed.`;
 const badge = t => chrome.action.setBadgeText({ text: String(t) });
 // Progress bar state (shown in the popup); status() only logs problems and milestones.
 const progress = p => chrome.storage.local.set({ progress: p });
@@ -50,10 +51,8 @@ function readListing() {
     sized_for: attrs.sized_for || null,
     color: attrs.color || null,
     material: attrs.material || null,
-    // Size with width from the title (e.g. 10.5EE) beats FB's size field, which has no width.
-    size: title.match(/\b(\d{1,2}(?:\.5)?) ?(EEE|EE|[A-EW])\b/)?.slice(1).join('') || attrs.size || after('size')
-      || description.match(/\bsize:?[ \t]*(\d{1,2}(\.5)?[ \t]?(EEE|EE|[A-EW])?)\b/i)?.[1] || '',
-    photos: Object.values(best).map(b => b.src).slice(0, 30).concat(Object.keys(best).length ? [] : meta('og:image') || []),
+    size: attrs.size || after('size') || null, // the server reads size/width from the title and description too
+    photos: Object.values(best).map(b => b.src).concat(Object.keys(best).length ? [] : meta('og:image') || []),
   };
 }
 
@@ -69,8 +68,6 @@ async function collectIds() {
   }
   return ids();
 }
-
-const run = async (tabId, func, world = 'ISOLATED') => (await chrome.scripting.executeScript({ target: { tabId }, func, world }))[0].result;
 
 // Runs inside a Depop shop page (page context, so Depop's own listing feed answers): every listing for sale → item fields.
 async function readDepopShop() {
@@ -103,17 +100,16 @@ async function readDepopShop() {
   });
 }
 
-// Imports started from the WBW Lister page use that page's server and selected seller instead of the popup's.
+// ---- talking to the WBW Lister server ----
+// Jobs started from the WBW Lister page use that page's server and seller; jobs from the popup use the popup's saved settings.
 let job = null;
 async function api(method, body, q = '') {
-  const saved = await chrome.storage.sync.get(['server', 'seller', 'password']);
-  const { server, seller, password } = { ...saved, ...job };
-  if (!server) throw new Error('Set the WBW server URL in the extension popup.');
+  const { server, seller, password } = { ...(await chrome.storage.sync.get(['server', 'seller', 'password'])), ...job };
+  if (!server) throw new Error('Set the WBW Lister address in the extension popup.');
   const r = await fetch(`${server.replace(/\/$/, '')}/api/items${q}`, {
-    method,
+    method, credentials: 'include', // the page's login cookie, when started from the page
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${seller || ''}`, 'x-app-password': password || '' },
     body: body && JSON.stringify(body),
-    credentials: 'include', // the page's login cookie, when started from the page
   });
   const j = await r.json();
   if (!r.ok) throw new Error(j.error);
@@ -121,100 +117,92 @@ async function api(method, body, q = '') {
 }
 const send = item => api('POST', item);
 
-const loaded = tabId => Promise.race([wait(20000), new Promise(res => chrome.tabs.onUpdated.addListener(function l(id, info) {
-  if (id === tabId && info.status === 'complete') { chrome.tabs.onUpdated.removeListener(l); res(); }
-}))]);
-
-async function importUrl(url) {
-  const tab = await chrome.tabs.create({ url, active: false });
-  await loaded(tab.id);
-  await wait(2500);
-  try {
-    return await send(await run(tab.id, readListing));
-  }
-  finally { chrome.tabs.remove(tab.id); }
+// ---- tabs ----
+const run = async (tabId, func, world = 'ISOLATED') => (await chrome.scripting.executeScript({ target: { tabId }, func, world }))[0].result;
+// Resolves when the tab finishes loading (or after 20 s, whichever is first).
+const loaded = tabId => new Promise(res => {
+  const done = () => { chrome.tabs.onUpdated.removeListener(l); clearTimeout(t); res(); };
+  const l = (id, info) => id === tabId && info.status === 'complete' && done();
+  const t = setTimeout(done, 20000);
+  chrome.tabs.onUpdated.addListener(l);
+});
+// Opens url in a tab, waits for it to settle, runs fn(tabId), always closes the tab.
+async function inTab(url, settle, fn, active = true) {
+  const tab = await chrome.tabs.create({ url, active });
+  try { await loaded(tab.id); await wait(settle); return await fn(tab.id); }
+  finally { chrome.tabs.remove(tab.id).catch(() => {}); }
 }
+const importListing = url => inTab(url, 2500, async id => send(await run(id, readListing)), false);
 
-// Opens the seller's Marketplace profile and imports every listing in it (non-boots land in Unsure).
-// Import: new listings only. Sync: re-reads every listing (the server refreshes changed ones, ignores unchanged)
-// and moves items no longer listed to Removed.
-// Depop: one visit to the shop reads every listing from Depop's feed (no per-listing page visits needed).
-async function importDepop(shop, sync) {
-  const known = new Set(await api('GET', null, '?source=depop')); // first: fails if the seller has no details yet
-  if (sync) known.clear();
-  const tab = await chrome.tabs.create({ url: `https://www.depop.com/${shop}/` });
-  await loaded(tab.id);
-  await wait(4000);
-  status('Reading the Depop shop…');
-  let items;
-  try { items = await run(tab.id, readDepopShop, 'MAIN'); } finally { chrome.tabs.remove(tab.id); }
-  status(`Found ${items.length} listings for sale`);
-  const todo = items.filter(i => !known.has(i.source_id)), n = { added: 0, updated: 0, failed: 0, removed: 0 };
-  for (const [i, item] of todo.entries()) {
+// ---- imports ----
+// Shared loop: importOne(entry) for each entry, retrying twice, with progress in the popup/page. Sync then moves
+// listings that are gone to Removed.
+async function importAll({ source, ids, todo, sync, importOne, pause = 0, name = e => e }) {
+  const n = { added: 0, updated: 0, failed: 0, removed: 0 };
+  for (const [i, entry] of todo.entries()) {
     badge(todo.length - i);
     progress({ done: i, total: todo.length, label: `${sync ? 'Syncing' : 'Importing'} — ${n.added} added, ${n.updated} updated, ${n.failed} failed` });
-    try { const r = await retry(() => send(item)); if (r.item?.updated) n.updated++; else if (r.item) n.added++; }
-    catch (e) { n.failed++; status(`"${item.title.slice(0, 40)}" failed: ${e.message}`); }
+    try { const r = await retry(() => importOne(entry)); if (r.item?.updated) n.updated++; else if (r.item) n.added++; }
+    catch (e) { n.failed++; status(`${name(entry)} failed: ${e.message}`); }
+    if (pause) await wait(pause + Math.random() * pause); // Facebook: human pace
   }
-  if (sync) n.removed = (await api('PATCH', { action: 'sync', source: 'depop', ids: items.map(i => i.source_id) })).removed;
-  badge('');
+  if (sync) n.removed = (await api('PATCH', { action: 'sync', source, ids })).removed;
   return n;
 }
 
-async function importProfile(sellerId, sync) {
-  const known = new Set(await api('GET', null, '?source=facebook')); // first: fails if the seller has no details yet
-  if (sync) known.clear();
-  const tab = await chrome.tabs.create({ url: `https://www.facebook.com/marketplace/profile/${sellerId}/` });
-  await loaded(tab.id);
-  await wait(3000);
-  status('Scanning profile for listings…');
-  const ids = await run(tab.id, collectIds);
+// Facebook: scan the profile for listing ids, then open each listing (human-paced). Import = new only; Sync = re-read all.
+async function importFacebook(profileId, sync) {
+  const known = new Set(await api('GET', null, '?source=facebook')); // first: fails if the seller isn't set up
+  status('Scanning the Facebook profile for listings…');
+  const ids = await inTab(`https://www.facebook.com/marketplace/profile/${profileId}/`, 3000, id => run(id, collectIds));
   status(`Found ${ids.length} listings on the profile`);
   if (!ids.length) throw new Error('No listings found on this profile.');
-  const todo = ids.filter(id => !known.has(id));
-  const n = { added: 0, updated: 0, failed: 0, removed: 0 };
-  for (let i = 0; i < todo.length; i++) {
-    badge(todo.length - i);
-    progress({ done: i, total: todo.length, label: `${sync ? 'Syncing' : 'Importing'} — ${n.added} added, ${n.updated} updated, ${n.failed} failed` });
-    try {
-      const r = await retry(() => importUrl(`https://www.facebook.com/marketplace/item/${todo[i]}/`));
-      if (r.item?.updated) n.updated++; else if (r.item) n.added++;
-    } catch (e) { n.failed++; status(`Listing ${todo[i]} failed: ${e.message}`); }
-    await wait(3000 + Math.random() * 3000);
-  }
-  if (sync) n.removed = (await api('PATCH', { action: 'sync', source: 'facebook', ids })).removed;
-  badge('');
-  return n;
+  return importAll({ source: 'facebook', ids, sync, todo: sync ? ids : ids.filter(id => !known.has(id)), pause: 3000,
+    importOne: id => importListing(`https://www.facebook.com/marketplace/item/${id}/`), name: id => `Listing ${id}` });
 }
 
-const addCurrent = async tabId => retry(async () => send(await run(tabId, readListing)));
+// Depop: one visit to the shop reads every listing from Depop's own feed — no per-listing visits.
+async function importDepop(shop, sync) {
+  const known = new Set(await api('GET', null, '?source=depop')); // first: fails if the seller isn't set up
+  status('Reading the Depop shop…');
+  const items = await inTab(`https://www.depop.com/${shop}/`, 4000, id => run(id, readDepopShop, 'MAIN'));
+  status(`Found ${items.length} listings for sale`);
+  return importAll({ source: 'depop', ids: items.map(i => i.source_id), sync, todo: sync ? items : items.filter(i => !known.has(i.source_id)),
+    importOne: send, name: i => `"${i.title.slice(0, 40)}"` });
+}
 
-// From the page: { type: 'link', link, sync, seller, server } — a Facebook profile or Depop shop link.
-const fromLink = (link, sync) => {
-  const fb = link.match(/marketplace\/profile\/(\d+)/)?.[1], shop = link.match(/depop\.com\/(?!products\/)([\w.-]+)/)?.[1];
-  if (fb) return importProfile(fb, sync);
+// A Facebook Marketplace profile or Depop shop link → the right importer.
+function importLink(link, sync) {
+  const fb = link?.match(/marketplace\/profile\/(\d+)/)?.[1], shop = link?.match(/depop\.com\/(?!products\/)([\w.-]+)/)?.[1];
+  if (fb) return importFacebook(fb, sync);
   if (shop) return importDepop(shop, sync);
-  throw new Error('Not a Facebook Marketplace profile or Depop shop link.');
-};
+  throw new Error('That isn\'t a Facebook Marketplace profile or Depop shop link.');
+}
+const addCurrent = tabId => retry(async () => send(await run(tabId, readListing)));
 
+// Messages: { type: 'link', link, sync } (popup or page) or { type: 'listing', tabId } (popup: add the open listing).
+// Page messages also carry { server, seller }. One import at a time.
+let busy = false;
 chrome.runtime.onMessage.addListener((m, _, reply) => {
+  if (busy && m.type === 'link') return reply({ error: 'An import is already running — wait for it to finish.' });
+  busy = m.type === 'link';
   job = m.server ? { server: m.server, seller: m.seller } : null;
-  (async () => m.type === 'link' ? fromLink(m.link, m.sync) : m.type === 'profile' ? importProfile(m.sellerId, m.sync) : m.type === 'depop' ? importDepop(m.shop, m.sync) : addCurrent(m.tabId))()
-    .then(r => { if (m.type !== 'listing') progress(null), status(`Done: ${r.added} added, ${r.updated} updated, ${r.removed} removed, ${r.failed} failed.`); reply({ r }); },
-      e => { badge('!'); progress(null); status(`Error: ${e.message}`); reply({ error: e.message }); })
-    .finally(() => { job = null; });
+  (async () => m.type === 'link' ? importLink(m.link, m.sync) : addCurrent(m.tabId))()
+    .then(r => { if (m.type === 'link') status(done(r)); reply({ r }); },
+      e => { badge('!'); status(`Error: ${e.message}`); reply({ error: e.message }); })
+    .finally(() => { busy = false; job = null; progress(null); badge(''); });
   return true;
 });
 
+// Right-click "Add to WBW" on a Facebook listing (or a link to one).
 chrome.runtime.onInstalled.addListener(() => chrome.contextMenus.create({
   id: 'wbw', title: 'Add to WBW', contexts: ['link', 'page'], documentUrlPatterns: ['https://*.facebook.com/*'],
 }));
-
 chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   const link = ITEM.test(info.linkUrl || '') ? info.linkUrl : null;
   try {
     if (!link && !ITEM.test(tab.url)) throw new Error();
-    await (link ? importUrl(link) : addCurrent(tab.id));
+    await (link ? importListing(link) : addCurrent(tab.id));
     badge('✓');
   } catch { badge('!'); }
   setTimeout(() => badge(''), 3000);
