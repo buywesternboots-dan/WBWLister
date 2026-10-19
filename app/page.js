@@ -18,7 +18,7 @@ const GROUPS = { boot: 'Boots', belt: 'Belts', unsure: 'Not sure', other: 'Other
 // Item fields: key → label. * = required by WBW.
 const LABELS = { price: 'Price*', wbw_price: 'WBW Price', title: 'Title*', brand: 'Brand*', sized_for: 'Sized for (Men/Women)*', width: 'Width',
   material_type: 'Material type', material: 'Material', made_in: 'Where made', condition: 'Condition*', color: 'Color', sole: 'Sole', heel: 'Heel',
-  toe: 'Toe', size: 'Size', description: 'Description' };
+  toe: 'Toe', size: 'Size', description: 'Description', id_text: 'Model / date codes' };
 const FIELDS = Object.keys(LABELS);
 const REQUIRED = FIELDS.filter(f => LABELS[f].endsWith('*'));
 const ALERT = ['width']; // not required, but shown red when empty so the seller knows it isn't there
@@ -29,7 +29,7 @@ const unverified = i => (i.guessed ?? []).filter(f => i[f]);
 const isReady = i => !missing(i).length && !unverified(i).length;
 const PRESETS = { brand: ['Unbranded', 'Custom'], size: ['Estimated'] }; // one-click values for items that genuinely have none
 // Group header quick filters: Ready, To verify, one per missing required field, and the alert fields.
-const FILTERS = { ready: ['Ready', isReady], verify: ['To verify', i => unverified(i).length > 0],
+const FILTERS = { ready: ['Ready', isReady], idinfo: ['Has ID info', i => i.id_photos?.length > 0], verify: ['To verify', i => unverified(i).length > 0],
   ...Object.fromEntries(REQUIRED.map(f => [f, [`Missing ${label(f)}`, i => !i[f]]])),
   ...Object.fromEntries(ALERT.map(f => [f, [`No ${label(f).toLowerCase()}`, i => !i[f]]])) };
 // Sorts: most likely a boot first, or newest import day first (same day: most likely boot first).
@@ -117,6 +117,7 @@ export default function Inventory() {
   const toggle = id => setSel(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const lower = () => { const v = Number(adj.value); if (v > 0) bulk({ action: 'price', [adj.unit === '%' ? 'percent' : 'amount']: v }); };
   const save = () => act({ ids: [edit.id], action: 'edit', ...Object.fromEntries(FIELDS.map(f => [f, edit[f]])) });
+  const scan = async () => { for (const id of sel) await api('POST', { id }, '', '/api/idcheck').catch(e => setErr(e.message)); load(); };
   const exportCsv = async () => {
     const rows = items.filter(i => sel.has(i.id)), notReady = rows.filter(i => !isReady(i)).length;
     if (notReady && !confirm(`${notReady} of ${rows.length} items aren't ready (missing or unverified fields). Export anyway?`)) return;
@@ -245,6 +246,7 @@ export default function Inventory() {
           {tab === 'pending' && <button className="primary" onClick={() => bulk({ action: 'sold' })}>Mark sold</button>}
           {tab === 'pending' && <button onClick={() => bulk({ action: 'restore' })}>Still for sale</button>}
           {!live && tab !== 'pending' && <button onClick={() => bulk({ action: 'restore' })}>Restore</button>}
+          {team && <button onClick={scan}>Scan photos for ID info</button>}
           {team && <button onClick={() => { const to = prompt('Move the selected items to which seller?'); if (to) bulk({ action: 'move', to }); }}>Move to seller…</button>}
           {team && <button onClick={() => confirm(`Delete ${sel.size} items? Their photos and details stay in the WBW photo archive.`) && bulk({ action: 'delete' })}>Delete</button>}
         </>}
