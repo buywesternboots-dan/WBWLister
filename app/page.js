@@ -64,11 +64,7 @@ const download = (rows, brands = {}, s = {}) => {
 };
 // Copy-ready posts for other marketplaces; "Posted" tracks where and when each was posted.
 function Share({ item, seller, reload }) {
-  const copy = (p, ch) => navigator.clipboard.writeText([p.title, p.body, `Photos:
-${p.photos.join('
-')}`].join('
-
-'))
+  const copy = (p, ch) => navigator.clipboard.writeText([p.title, p.body, `Photos:\n${p.photos.join('\n')}`].join('\n\n'))
     .then(() => confirm('Copied. Mark as posted?') && api('POST', { id: item.id, channel: ch }, '', '/api/posted').then(reload));
   return <div className="share"><h3>Share to other marketplaces</h3>{Object.entries(CHANNELS).map(([ch, name]) => {
     const p = post(ch, item, location.origin, seller);
