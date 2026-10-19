@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { CHOICES, searchMatch } from '../lib/vocab';
 import { altText, photoUrl } from '../lib/seo';
+import { CHANNELS, post } from '../lib/crosspost';
 
 // Selected seller comes from ?seller= (the extension's seller dropdown uses the same names).
 const seller = () => new URLSearchParams(location.search).get('seller') || '';
@@ -61,6 +62,23 @@ const download = (rows, brands = {}, s = {}) => {
   const csv = [Object.values(CSV), ...rows.map(r => Object.keys(CSV).map(k => row(r)[k]))].map(r => r.map(cell).join(',')).join('\r\n');
   Object.assign(document.createElement('a'), { href: URL.createObjectURL(new Blob([csv], { type: 'text/csv' })), download: `wbw-import-${new Date().toISOString().slice(0, 10)}.csv` }).click();
 };
+// Copy-ready posts for other marketplaces; "Posted" tracks where and when each was posted.
+function Share({ item, seller, reload }) {
+  const copy = (p, ch) => navigator.clipboard.writeText(`${p.title}
+
+${p.body}
+
+Photos:
+${p.photos.join('
+')}`)
+    .then(() => confirm('Copied. Mark as posted?') && api('POST', { id: item.id, channel: ch }, '', '/api/posted').then(reload));
+  return <div className="share"><h3>Share to other marketplaces</h3>{Object.entries(CHANNELS).map(([ch, name]) => {
+    const p = post(ch, item, location.origin, seller);
+    return <details key={ch}><summary>{name}{item.posted?.[ch] && ` — posted ${item.posted[ch].slice(0, 10)}`}</summary>
+      <input readOnly value={p.title} /><textarea readOnly rows="8" value={p.body} />
+      <small>{p.photos.length} photo links are included when you copy.</small><button type="button" onClick={() => copy(p, ch)}>Copy post</button></details>;
+  })}</div>;
+}
 const CONCURRENT = 4; // website products imported at once
 const EXTENSION_LINK = /facebook\.com|depop\.com/i; // these sites block servers, so the Chrome extension imports them
 const done = n => `Done: ${n.added} new, ${n.updated} changed${n.sold != null ? `, ${n.sold} already sold (skipped)` : ''}, ${n.removed} gone (now Pending sold), ${n.failed} failed`;
@@ -271,6 +289,7 @@ export default function Inventory() {
                   {PRESETS[f]?.map(p => <button key={p} type="button" className="preset" onClick={() => setEdit({ ...edit, [f]: p })}>{p}</button>)}</span>
                 {f === 'description' ? <textarea rows="4" value={edit[f] ?? ''} onChange={setField(f)} />
                   : <input list={CHOICES[f] && `dl-${f}`} value={edit[f] ?? ''} onChange={setField(f)} />}</label>)}
+              {i.status === 'published' && <Share item={i} seller={current} reload={load} />}
               <span><button className="primary" onClick={save}>Save (marks all verified)</button><button onClick={() => setEdit(null)}>Cancel</button></span>
             </div> : <div className="info" onClick={() => setEdit(i)}>
               <strong>{i.title || 'Untitled'}</strong>
