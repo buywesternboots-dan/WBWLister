@@ -1,7 +1,8 @@
 // Everything needs a login (env APP_PASSWORD signs the session; none set = open, for local dev).
-// An admin and sellers both sign in with an email + PIN and use the one home screen. The browser sends cookie "auth"; the extension sends the same
-// token as x-auth (checked first, so a popup login isn't stuck behind a page cookie). Seller sessions set x-session-seller.
+// An admin and a seller sign in the same way, then each is kept on their own screen. The browser sends cookie "auth";
+// the extension sends the same token as x-auth (checked first). Seller sessions set x-session-seller.
 import { NextResponse } from 'next/server';
+import { redirectFor } from './lib/home';
 import { readSession } from './lib/session';
 
 export async function proxy(req) {
@@ -14,6 +15,8 @@ export async function proxy(req) {
     ? NextResponse.json({ error: 'Please log in.' }, { status: 401 })
     : NextResponse.redirect(new URL('/login', req.url));
   if (who.role === 'seller') headers.set('x-session-seller', who.seller);
+  const to = redirectFor(who.role, req.nextUrl.pathname);
+  if (to) return NextResponse.redirect(new URL(to, req.url));
   return NextResponse.next({ request: { headers } });
 }
 

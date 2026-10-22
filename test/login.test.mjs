@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { isEmail, matchLogin, newPinRecord, normEmail, pinHash, sessionWho } from '../lib/auth';
 import { readSession, sessionToken } from '../lib/session';
-import { sellerOf, teamOnly } from '../lib/http';
-import { HOME, TOOLS, toolsFor } from '../lib/home';
+import { ADMIN_ACTIONS, guardAction, sellerOf, teamOnly } from '../lib/http';
+import { homeFor, redirectFor } from '../lib/home';
 
 const SECRET = 'test-signing-secret';
 const rec = async (email, pin, extra) => ({ email, ...await newPinRecord(pin), ...extra });
@@ -75,16 +75,33 @@ test('a seller session stays on that seller; admin actions reject it', () => {
   assert.equal(sellerOf(headers({ authorization: 'Bearer Bob' })), 'bob');
 });
 
-test('an admin and a seller share one screen; the admin gets every tool', () => {
-  assert.equal(HOME, '/');
-  assert.deepEqual(toolsFor('admin'), TOOLS);
-  assert.deepEqual(TOOLS, ['sellers', 'import', 'review', 'export', 'sync', 'settings']);
-  assert.deepEqual(toolsFor('seller'), ['import', 'review', 'export', 'sync']);
-  assert.deepEqual(toolsFor('team'), []);
-  const page = readFileSync(new URL('../app/page.js', import.meta.url), 'utf8');
-  const login = readFileSync(new URL('../app/login/page.js', import.meta.url), 'utf8');
-  assert.match(page, /toolsFor\(me\?\.role\)/);
-  assert.match(login, /location\.assign\(HOME\)/);
-  assert.equal(page.includes("location.assign('/admin')"), false);
-  assert.equal(login.includes("location.assign('/admin')"), false);
+test('sign-in sends each role to its own screen, and the server keeps them there', () => {
+  assert.equal(homeFor('admin'), '/');
+  assert.equal(homeFor('seller'), '/seller');
+  assert.equal(redirectFor('seller', '/'), '/seller');
+  assert.equal(redirectFor('seller', '/seller'), null);
+  assert.equal(redirectFor('admin', '/seller'), '/');
+  assert.equal(redirectFor('admin', '/'), null);
+  assert.equal(redirectFor('seller', '/api/items'), null);
+  assert.equal(redirectFor('admin', '/api/sellers'), null);
+  const read = p => readFileSync(new URL(`../${p}`, import.meta.url), 'utf8');
+  assert.match(read('app/page.js'), /<Screen admin \/>/);
+  assert.match(read('app/seller/page.js'), /<Screen \/>/);
+  assert.equal(read('app/seller/page.js').includes('<Screen admin'), false);
+  assert.match(read('app/login/page.js'), /homeFor\(j\.role\)/);
+  assert.match(read('proxy.js'), /redirectFor/);
+  assert.match(read('app/screen.js'), /admin && <button onClick=\{\(\) => \{ const to = prompt\('Move the selected items/);
+  assert.match(read('app/screen.js'), /admin && <button onClick=\{\(\) => confirm\(`Delete/);
+});
+
+test('a seller session cannot run admin actions; their own edit and sync can', () => {
+  const seller = headers({ 'x-session-seller': 'ada', authorization: 'Bearer bob' });
+  const admin = headers({});
+  for (const action of ['delete', 'move', 'sellers', 'idcheck', 'backfill']) {
+    assert.equal(ADMIN_ACTIONS.includes(action), true);
+    assert.throws(() => guardAction(seller, action), /Only an admin can do that/);
+    assert.equal(guardAction(admin, action), undefined);
+  }
+  for (const action of ['edit', 'sync', 'publish', 'remove', 'price']) assert.equal(guardAction(seller, action), undefined);
+  assert.throws(() => teamOnly(seller), /Only an admin/);
 });
