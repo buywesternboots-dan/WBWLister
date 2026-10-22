@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
 import { CHOICES, searchMatch } from '../lib/vocab';
+import { canPublish, needsCheck, REQUIRED } from '../lib/publish';
 import { altText, photoUrl } from '../lib/seo';
 import { CHANNELS, post } from '../lib/crosspost';
 
@@ -21,16 +22,16 @@ const LABELS = { price: 'Price*', wbw_price: 'WBW Price', title: 'Title*', brand
   material_type: 'Material type', material: 'Material', made_in: 'Where made', condition: 'Condition*', color: 'Color', sole: 'Sole', heel: 'Heel',
   toe: 'Toe', size: 'Size', description: 'Description', id_text: 'Model / date codes' };
 const FIELDS = Object.keys(LABELS);
-const REQUIRED = FIELDS.filter(f => LABELS[f].endsWith('*'));
-const ALERT = ['width']; // not required, but shown red when empty so the seller knows it isn't there
 const label = f => LABELS[f].replace(/\*$/, '');
 const missing = i => REQUIRED.filter(f => !i[f]);
+const ALERT = ['width']; // not required, but shown red when empty so the seller knows it isn't there
 const flagged = i => [...missing(i), ...ALERT.filter(f => !i[f])];
 const unverified = i => (i.guessed ?? []).filter(f => i[f]);
 const isReady = i => !missing(i).length && !unverified(i).length;
 const PRESETS = { brand: ['Unbranded', 'Custom'], size: ['Estimated'] }; // one-click values for items that genuinely have none
 // Group header quick filters: Ready, To verify, one per missing required field, and the alert fields.
-const FILTERS = { ready: ['Ready', isReady], idinfo: ['Has ID info', i => i.id_photos?.length > 0], verify: ['To verify', i => unverified(i).length > 0],
+const FILTERS = { check: ['Needs a check', needsCheck], approved: ['Approved', i => !needsCheck(i)],
+  ready: ['Ready', isReady], idinfo: ['Has ID info', i => i.id_photos?.length > 0], verify: ['To verify', i => unverified(i).length > 0],
   ...Object.fromEntries(REQUIRED.map(f => [f, [`Missing ${label(f)}`, i => !i[f]]])),
   ...Object.fromEntries(ALERT.map(f => [f, [`No ${label(f).toLowerCase()}`, i => !i[f]]])) };
 // Sorts: most likely a boot first, or newest import day first (same day: most likely boot first).
@@ -130,12 +131,18 @@ export default function Screen({ admin = false }) {
   const toggle = id => setSel(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const lower = () => { const v = Number(adj.value); if (v > 0) bulk({ action: 'price', [adj.unit === '%' ? 'percent' : 'amount']: v }); };
   const save = () => act({ ids: [edit.id], action: 'edit', ...Object.fromEntries(FIELDS.map(f => [f, edit[f]])) });
+  const approve = item => act({ ids: [item.id], action: 'approve', ...(edit?.id === item.id ? Object.fromEntries(FIELDS.map(f => [f, edit[f]])) : {}) });
   const scan = async () => { for (const id of sel) await api('POST', { id }, '', '/api/idcheck').catch(e => setErr(e.message)); load(); };
   const exportCsv = async () => {
-    const rows = items.filter(i => sel.has(i.id)), notReady = rows.filter(i => !isReady(i)).length;
-    if (notReady && !confirm(`${notReady} of ${rows.length} items aren't ready (missing or unverified fields). Export anyway?`)) return;
+    const picked = items.filter(i => sel.has(i.id)), rows = picked.filter(i => !needsCheck(i));
+    if (!rows.length) return setErr(picked.length ? 'Nothing selected has the seller\'s approval yet.' : 'Select an approved item first.');
+    const notReady = rows.filter(i => !isReady(i)).length;
+    if (notReady && !confirm(`${notReady} of ${rows.length} approved items aren't ready (missing or unverified fields). Export anyway?`)) return;
     const names = current?.brand_context === 'off' ? [] : [...new Set(rows.map(r => r.brand).filter(Boolean))];
-    download(rows, names.length ? await api('GET', null, `?names=${encodeURIComponent(names)}`, '/api/brand').catch(() => ({})) : {}, current); if (tab === 'review') bulk({ action: 'publish' });
+    const note = rows.length < picked.length ? `${picked.length - rows.length} still need the seller's check and were left out.` : '';
+    download(rows, names.length ? await api('GET', null, `?names=${encodeURIComponent(names)}`, '/api/brand').catch(() => ({})) : {}, current);
+    if (tab === 'review') api('PATCH', { ids: rows.map(r => r.id), action: 'publish' }).then(() => { setSel(new Set()); setEdit(null); if (note) setErr(note); load(); loadSellers(); }).catch(e => setErr(e.message));
+    else if (note) setErr(note);
   };
   const saveSeller = () => api('POST', { ...sellerForm, rename_from: sellerForm.created_at && current?.name }, '', '/api/sellers')
     .then(s => { setSellerForm(null); s.name === who ? loadSellers() : switchTo(s.name); }).catch(e => setErr(e.message));
@@ -184,7 +191,9 @@ export default function Screen({ admin = false }) {
   };
 
   const live = tab === 'review' || tab === 'published';
+  const role = admin ? 'admin' : 'seller';
   const shown = items.filter(i => searchMatch(i, q)).sort(SORTS[sort]);
+  const unchecked = shown.filter(needsCheck).length;
   const groups = tab === 'review' ? Object.entries(GROUPS).map(([k, l]) => [k, l, shown.filter(i => i.boot === k)]) : [[tab, TABS[tab], shown]];
   const setForm = f => e => setSellerForm({ ...sellerForm, [f]: e.target.value });
   const setField = f => e => setEdit({ ...edit, [f]: e.target.value });
@@ -204,6 +213,7 @@ export default function Screen({ admin = false }) {
         {admin && <a className="src" href="/wbw-importer.zip" download title="Needed for Facebook and Depop imports">Chrome extension{ext ? ' ✓' : ''}</a>}
         <a className="src" href="/login" onClick={e => { e.preventDefault(); fetch('/api/login', { method: 'DELETE' }).then(() => location.assign('/login')); }}>Log out</a>
       </div>
+      {!admin && <p className="help">Your job is to double-check each listing before it goes live, including anything shown in yellow. {canPublish('seller') ? 'After you approve it, you can export it.' : 'After you approve it, the admin publishes it.'}</p>}
       {!ext && EXTENSION_LINK.test(link) && <p className="help">Facebook and Depop import through the WBW Importer Chrome extension:
         1) download it with the <a href="/wbw-importer.zip" download>Chrome extension</a> link and unzip it; 2) open chrome://extensions and turn on
         Developer mode; 3) click Load unpacked and pick the unzipped wbw-importer folder; 4) reload this page.</p>}
@@ -236,6 +246,7 @@ export default function Screen({ admin = false }) {
       </div>}
 
       <nav>{Object.entries(TABS).map(([k, l]) => <button key={k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>{l}</button>)}</nav>
+      {who && shown.length > 0 && <p className={unchecked ? 'warn' : ''}>{unchecked ? `${unchecked} of ${shown.length} still need ${admin ? "the seller's" : 'your'} check.` : `All ${shown.length} here are approved.`}</p>}
       {err && <p className="err">{err}</p>}
 
       <div className="tools">
@@ -254,7 +265,7 @@ export default function Screen({ admin = false }) {
             <select value={adj.unit} onChange={e => setAdj({ ...adj, unit: e.target.value })}><option>%</option><option>$</option></select>
             <button onClick={lower}>Apply</button>
           </span>}
-          {live && <button className="primary" onClick={exportCsv}>Export CSV</button>}
+          {live && canPublish(role) && <button className="primary" onClick={exportCsv}>Export CSV</button>}
           {live && <button onClick={() => bulk({ action: 'remove' })}>Remove</button>}
           {tab === 'pending' && <button className="primary" onClick={() => bulk({ action: 'sold' })}>Mark sold</button>}
           {tab === 'pending' && <button onClick={() => bulk({ action: 'restore' })}>Still for sale</button>}
@@ -272,7 +283,7 @@ export default function Screen({ admin = false }) {
         return <section key={k}>
           <h2>{l} ({list.length})
             {Object.entries(FILTERS).map(([fk, [fl, test]]) => { const c = list.filter(test).length;
-              return (c > 0 || fk === 'ready') && <button key={fk} className={`chip ${fk in LABELS ? 'miss' : ''} ${filter[k] === fk ? 'on' : ''}`}
+              return (c > 0 || fk === 'ready' || fk === 'check') && <button key={fk} className={`chip ${fk in LABELS ? 'miss' : ''} ${fk === 'check' ? 'miss' : ''} ${filter[k] === fk ? 'on' : ''}`}
                 onClick={() => setFilter({ ...filter, [k]: filter[k] === fk ? null : fk })}>{fl} ({c})</button>; })}
           </h2>
           {visible.map(i => <div key={i.id} className="item">
@@ -285,7 +296,10 @@ export default function Screen({ admin = false }) {
                 {f === 'description' ? <textarea rows="4" value={edit[f] ?? ''} onChange={setField(f)} />
                   : <input list={CHOICES[f] && `dl-${f}`} value={edit[f] ?? ''} onChange={setField(f)} />}</label>)}
               {i.status === 'published' && <Share item={i} seller={current} reload={load} />}
-              <span><button className="primary" onClick={save}>Save (marks all verified)</button><button onClick={() => setEdit(null)}>Cancel</button></span>
+              <span><button className="primary" onClick={save}>Save (marks all verified)</button>
+                {!admin && needsCheck(i) && <button type="button" className="primary" onClick={() => approve(i)}>Approve / ready to go live</button>}
+                <button onClick={() => setEdit(null)}>Cancel</button></span>
+              {i.approved_at && <small className="warn">Saving changes clears the approval.</small>}
             </div> : <div className="info" onClick={() => setEdit(i)}>
               <strong>{i.title || 'Untitled'}</strong>
               {i.source_url && <a className="src" href={i.source_url} target="_blank" onClick={e => e.stopPropagation()}>
@@ -295,11 +309,13 @@ export default function Screen({ admin = false }) {
               {i.boot === 'unsure' && <small>{Math.round((i.boot_score ?? 0) * 100)}% likely a boot</small>}
               {missing(i).length > 0 && <small className="err">Missing: {missing(i).map(label).join(', ')}</small>}
               {unverified(i).length > 0 && <small className="warn">Verify: {unverified(i).map(label).join(', ')}</small>}
+              {needsCheck(i) ? <small className="err">{admin ? "Needs the seller's check" : 'Needs your check'}</small> : <small>Approved by {i.approved_by} on {String(i.approved_at).slice(0, 10)}</small>}
               <dl>{FIELDS.filter(f => f !== 'title' && f !== 'description').map(f =>
                 <div key={f} className={flagged(i).includes(f) ? 'err' : unverified(i).includes(f) ? 'guess' : ''}>
                 <dt>{label(f)}</dt><dd>{f.includes('price') && i[f] ? `$${Number(i[f]).toFixed(2)}` : i[f] || '—'}</dd></div>)}</dl>
               {i.description && <p className="desc">{i.description}</p>}
               <small>Tap to edit</small>
+              {!admin && needsCheck(i) && <button type="button" className="primary" onClick={e => { e.stopPropagation(); approve(i); }}>Approve / ready to go live</button>}
             </div>}
           </div>)}
         </section>;

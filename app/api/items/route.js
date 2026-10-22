@@ -1,5 +1,5 @@
 import * as wbw from '../../../lib/wbw';
-import { guardAction, handle, sellerOf } from '../../../lib/http';
+import { guardAction, handle, sellerOf, sessionSeller } from '../../../lib/http';
 
 // GET ?status= → the seller's items; GET ?source= → source ids they already have (start of an import).
 export const GET = handle(req => {
@@ -24,7 +24,10 @@ export const PATCH = handle(async req => {
     case 'sync': return { removed: await wbw.syncSource(seller, fields.source, ids) };
     case 'edit': await wbw.updateItems(seller, ids, fields); break;
     case 'price': await wbw.lowerPrice(seller, ids, percent, amount); break;
-    default: await wbw.setStatus(seller, ids, action);
+    case 'approve':
+      if (!sessionSeller(req)) throw new Error('The seller approves their own listings.');
+      return { approved: await wbw.approveItems(seller, ids, fields) };
+    default: await wbw.setStatus(seller, ids, action, sessionSeller(req) ? 'seller' : 'admin');
   }
   return { ok: true };
 });
