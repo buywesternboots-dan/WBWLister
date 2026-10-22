@@ -22,11 +22,11 @@ export const PATCH = handle(async req => {
     case 'delete': return { deleted: await wbw.deleteItems(seller, ids) };
     case 'move': return { moved: await wbw.moveItems(seller, ids, fields.to) };
     case 'sync': return { removed: await wbw.syncSource(seller, fields.source, ids) };
-    case 'edit': await wbw.updateItems(seller, ids, fields); break;
-    case 'price': await wbw.lowerPrice(seller, ids, percent, amount); break;
+    case 'edit': await wbw.updateItems(seller, ids, fields, sessionSeller(req) ? 'seller' : 'admin'); break;
+    case 'price': await wbw.lowerPrice(seller, ids, percent, amount, sessionSeller(req) ? 'seller' : 'admin'); break;
     case 'approve':
       if (!sessionSeller(req)) throw new Error('The seller approves their own listings.');
-      return { approved: await wbw.approveItems(seller, ids, fields) };
+      return wbw.approveItems(seller, ids, fields);
     default: return { ok: true, ...(await wbw.setStatus(seller, ids, action, sessionSeller(req) ? 'seller' : 'admin') ?? {}) };
   }
   return { ok: true };
