@@ -132,6 +132,7 @@ export default function Screen({ admin = false }) {
   const lower = () => { const v = Number(adj.value); if (v > 0) bulk({ action: 'price', [adj.unit === '%' ? 'percent' : 'amount']: v }); };
   const save = () => act({ ids: [edit.id], action: 'edit', ...Object.fromEntries(FIELDS.map(f => [f, edit[f]])) });
   const approve = item => act({ ids: [item.id], action: 'approve', ...(edit?.id === item.id ? Object.fromEntries(FIELDS.map(f => [f, edit[f]])) : {}) });
+  const push = item => act({ ids: [item.id], action: 'publish' });
   const scan = async () => { for (const id of sel) await api('POST', { id }, '', '/api/idcheck').catch(e => setErr(e.message)); load(); };
   const exportCsv = async () => {
     const picked = items.filter(i => sel.has(i.id)), rows = picked.filter(i => !needsCheck(i));
@@ -213,7 +214,8 @@ export default function Screen({ admin = false }) {
         {admin && <a className="src" href="/wbw-importer.zip" download title="Needed for Facebook and Depop imports">Chrome extension{ext ? ' ✓' : ''}</a>}
         <a className="src" href="/login" onClick={e => { e.preventDefault(); fetch('/api/login', { method: 'DELETE' }).then(() => location.assign('/login')); }}>Log out</a>
       </div>
-      {!admin && <p className="help">Your job is to double-check each listing before it goes live, including anything shown in yellow. {canPublish('seller') ? 'After you approve it, you can export it.' : 'After you approve it, the admin publishes it.'}</p>}
+      {!admin && <p className="help">Your job is to double-check each listing before it goes live, including anything shown in yellow. Approve one, then push that one live. The admin can push it too. Push only marks it exported here — WBW is not connected yet.</p>}
+      {admin && who && <p className="help">Push live is one approved item at a time, and the seller can push it too. It only marks the item exported here — WBW is not connected yet.</p>}
       {!ext && EXTENSION_LINK.test(link) && <p className="help">Facebook and Depop import through the WBW Importer Chrome extension:
         1) download it with the <a href="/wbw-importer.zip" download>Chrome extension</a> link and unzip it; 2) open chrome://extensions and turn on
         Developer mode; 3) click Load unpacked and pick the unzipped wbw-importer folder; 4) reload this page.</p>}
@@ -298,6 +300,7 @@ export default function Screen({ admin = false }) {
               {i.status === 'published' && <Share item={i} seller={current} reload={load} />}
               <span><button className="primary" onClick={save}>Save (marks all verified)</button>
                 {!admin && needsCheck(i) && <button type="button" className="primary" onClick={() => approve(i)}>Approve / ready to go live</button>}
+                {!needsCheck(i) && i.status === 'review' && <button type="button" className="primary" onClick={() => push(i)}>Push live</button>}
                 <button onClick={() => setEdit(null)}>Cancel</button></span>
               {i.approved_at && <small className="warn">Saving changes clears the approval.</small>}
             </div> : <div className="info" onClick={() => setEdit(i)}>
@@ -316,6 +319,7 @@ export default function Screen({ admin = false }) {
               {i.description && <p className="desc">{i.description}</p>}
               <small>Tap to edit</small>
               {!admin && needsCheck(i) && <button type="button" className="primary" onClick={e => { e.stopPropagation(); approve(i); }}>Approve / ready to go live</button>}
+              {!needsCheck(i) && i.status === 'review' && <button type="button" className="primary" onClick={e => { e.stopPropagation(); push(i); }}>Push live</button>}
             </div>}
           </div>)}
         </section>;

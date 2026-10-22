@@ -27,7 +27,7 @@ export const PATCH = handle(async req => {
     case 'approve':
       if (!sessionSeller(req)) throw new Error('The seller approves their own listings.');
       return { approved: await wbw.approveItems(seller, ids, fields) };
-    default: await wbw.setStatus(seller, ids, action, sessionSeller(req) ? 'seller' : 'admin');
+    default: return { ok: true, ...(await wbw.setStatus(seller, ids, action, sessionSeller(req) ? 'seller' : 'admin') ?? {}) };
   }
   return { ok: true };
 });
