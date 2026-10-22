@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
 import { CHOICES, searchMatch } from '../lib/vocab';
+import { MEASUREMENT_KEYS, MEASUREMENT_LABELS } from '../lib/measure';
 import { altText, photoUrl } from '../lib/seo';
 import { CHANNELS, post } from '../lib/crosspost';
 
@@ -19,7 +20,7 @@ const GROUPS = { boot: 'Boots', belt: 'Belts', unsure: 'Not sure', other: 'Other
 // Item fields: key → label. * = required by WBW.
 const LABELS = { price: 'Price*', wbw_price: 'WBW Price', title: 'Title*', brand: 'Brand*', sized_for: 'Sized for (Men/Women)*', width: 'Width',
   material_type: 'Material type', material: 'Material', made_in: 'Where made', condition: 'Condition*', color: 'Color', sole: 'Sole', heel: 'Heel',
-  toe: 'Toe', size: 'Size', description: 'Description', id_text: 'Model / date codes' };
+  toe: 'Toe', size: 'Size', ...MEASUREMENT_LABELS, description: 'Description', id_text: 'Model / date codes' };
 const FIELDS = Object.keys(LABELS);
 const REQUIRED = FIELDS.filter(f => LABELS[f].endsWith('*'));
 const ALERT = ['width']; // not required, but shown red when empty so the seller knows it isn't there
@@ -53,7 +54,8 @@ const SELLER_FORM = [
   ['defaults', 'Defaults, one per line: field = value, used when a listing doesn\'t say (e.g. sized_for = Women, made_in = USA)', 'area'],
 ];
 // Export: WBW import CSV columns, in WBW's order (until the direct WBW connection replaces it).
-const CSV = { seller: 'WBW Seller Name', ...Object.fromEntries(FIELDS.map(f => [f, label(f)])), category: 'Category', website_url: 'Seller Website Link', photos: 'Image URLs', alts: 'Image Alt Text', brand_context: 'Brand Context', brand_link: 'Brand Page Link', seller_context: 'Seller Context', source_id: 'Source ID' };
+// Measurement columns are appended so the existing WBW column order stays put. Names are provisional (lib/measure.js).
+const CSV = { seller: 'WBW Seller Name', ...Object.fromEntries(FIELDS.filter(f => !MEASUREMENT_KEYS.includes(f)).map(f => [f, label(f)])), category: 'Category', website_url: 'Seller Website Link', photos: 'Image URLs', alts: 'Image Alt Text', brand_context: 'Brand Context', brand_link: 'Brand Page Link', seller_context: 'Seller Context', source_id: 'Source ID', ...MEASUREMENT_LABELS };
 const cell = v => `"${String(Array.isArray(v) ? v.join('|') : v ?? '').replace(/"/g, '""')}"`;
 const download = (rows, brands = {}, s = {}) => {
   const row = r => ({ ...r, seller_context: s.display_name ? `Sold by ${s.display_name}${s.location ? ` of ${s.location}` : ''}.` : '', brand_context: brands[r.brand] ? `${brands[r.brand].text} ${[r.material, r.size && `size ${r.size}`].filter(Boolean).join(', ')}.` : '', brand_link: brands[r.brand]?.link ?? '', website_url: ['facebook', 'depop', 'poshmark', 'ebay'].includes(r.source) ? '' : r.source_url, wbw_price: r.wbw_price ?? r.price,
@@ -278,11 +280,12 @@ export default function Inventory() {
             <input type="checkbox" checked={sel.has(i.id)} onChange={() => toggle(i.id)} />
             {i.photos[0] ? <img src={i.photos[0]} alt="" loading="lazy" /> : <div className="noimg" />}
             {edit?.id === i.id ? <div className="form">
-              {FIELDS.map(f => <label key={f} className={unverified(i).includes(f) ? 'guess' : flagged(i).includes(f) ? 'miss' : ''}>
+              {FIELDS.flatMap(f => [f === MEASUREMENT_KEYS[0] && <strong key="meas" className="meas-h">Measurements <small>inches — blank if the listing doesn't say</small></strong>,
+                <label key={f} className={unverified(i).includes(f) ? 'guess' : flagged(i).includes(f) ? 'miss' : ''}>
                 <span>{LABELS[f]}{unverified(i).includes(f) && ' — auto-filled, verify'}
                   {PRESETS[f]?.map(p => <button key={p} type="button" className="preset" onClick={() => setEdit({ ...edit, [f]: p })}>{p}</button>)}</span>
                 {f === 'description' ? <textarea rows="4" value={edit[f] ?? ''} onChange={setField(f)} />
-                  : <input list={CHOICES[f] && `dl-${f}`} value={edit[f] ?? ''} onChange={setField(f)} />}</label>)}
+                  : <input list={CHOICES[f] && `dl-${f}`} inputMode={MEASUREMENT_KEYS.includes(f) ? 'decimal' : undefined} value={edit[f] ?? ''} onChange={setField(f)} />}</label>].filter(Boolean))}
               {i.status === 'published' && <Share item={i} seller={current} reload={load} />}
               <span><button className="primary" onClick={save}>Save (marks all verified)</button><button onClick={() => setEdit(null)}>Cancel</button></span>
             </div> : <div className="info" onClick={() => setEdit(i)}>
@@ -294,9 +297,13 @@ export default function Inventory() {
               {i.boot === 'unsure' && <small>{Math.round((i.boot_score ?? 0) * 100)}% likely a boot</small>}
               {missing(i).length > 0 && <small className="err">Missing: {missing(i).map(label).join(', ')}</small>}
               {unverified(i).length > 0 && <small className="warn">Verify: {unverified(i).map(label).join(', ')}</small>}
-              <dl>{FIELDS.filter(f => f !== 'title' && f !== 'description').map(f =>
+              <dl>{FIELDS.filter(f => f !== 'title' && f !== 'description' && !MEASUREMENT_KEYS.includes(f)).map(f =>
                 <div key={f} className={flagged(i).includes(f) ? 'err' : unverified(i).includes(f) ? 'guess' : ''}>
                 <dt>{label(f)}</dt><dd>{f.includes('price') && i[f] ? `$${Number(i[f]).toFixed(2)}` : i[f] || '—'}</dd></div>)}</dl>
+              <strong className="meas-h">Measurements</strong>
+              <dl className="meas">{MEASUREMENT_KEYS.map(f =>
+                <div key={f} className={unverified(i).includes(f) ? 'guess' : ''}>
+                <dt>{label(f)}</dt><dd>{i[f] || '—'}</dd></div>)}</dl>
               {i.description && <p className="desc">{i.description}</p>}
               <small>Tap to edit</small>
             </div>}
@@ -333,6 +340,8 @@ dl{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:4p
 .desc{font-size:13px;color:#4a3d31;margin:4px 0;white-space:pre-line;max-height:4.2em;overflow:hidden}
 .src{font-size:13px;color:#1f6f6b;align-self:flex-start}
 .guess{background:#fff3c4;border-radius:4px;padding:0 4px}.miss{background:#fde8e6;border-radius:4px;padding:0 4px}
+.meas-h{font-size:12px;font-weight:600;color:#6b5a4a;margin:8px 0 0}.meas-h small{font-weight:400}
+dl.meas{padding:4px;border:1px dashed #e6dfd6;border-radius:6px}
 .preset{margin-left:6px;padding:0 6px;font-size:12px}
 .help{font-size:13px;color:#6b5a4a;background:#fff;border:1px solid #e6dfd6;border-radius:8px;padding:10px}
 .warn{color:#8a5a00!important}.err{color:#a3261b!important}.empty{color:#6b5a4a}
