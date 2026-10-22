@@ -104,11 +104,11 @@ async function readDepopShop() {
 // Jobs started from the WBW Lister page use that page's server and seller; jobs from the popup use the popup's saved settings.
 let job = null;
 async function api(method, body, q = '') {
-  const { server, seller, password } = { ...(await chrome.storage.sync.get(['server', 'seller', 'password'])), ...job };
+  const { server, seller, token } = { ...(await chrome.storage.sync.get(['server', 'seller', 'token'])), ...job };
   if (!server) throw new Error('Set the WBW Lister address in the extension popup.');
   const r = await fetch(`${server.replace(/\/$/, '')}/api/items${q}`, {
     method, credentials: 'include', // the page's login cookie, when started from the page
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${seller || ''}`, 'x-app-password': password || '' },
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${seller || ''}`, 'x-auth': token || '' },
     body: body && JSON.stringify(body),
   });
   const j = await r.json();

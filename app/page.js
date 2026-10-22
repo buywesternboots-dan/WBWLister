@@ -41,10 +41,10 @@ const SORTS = {
 // Seller settings form: [field, label, kind] (kind: h = heading, area = multi-line, sync = sync choice, else one line).
 const SELLER_FORM = [
   ['h1', 'Details', 'h'], ['name', 'WBW seller name* (the WBW account these items attach to)'], ['display_name', 'Display name*'],
-  ['contact', 'Contact person'], ['email', 'Email'], ['phone', 'Phone'], ['location', 'Location (city, state)'],
+  ['contact', 'Contact person'], ['email', 'Email (sign-in username)'], ['phone', 'Phone'], ['location', 'Location (city, state)'],
   ['h2', 'Import & sync', 'h'], ['website', 'Website, Poshmark or eBay link (store, collection, poshmark.com/closet/…, or ebay.com/usr/<username>)'],
   ['fb_profile', 'Facebook Marketplace profile or Depop shop link (imported through the Chrome extension)'], ['sync', 'Automatic sync', 'sync'],
-  ['login_password', 'Seller login password (lets them log in to review their items; leave blank to keep the current one)', 'password'],
+  ['login_password', 'PIN or password (their sign-in; leave blank to keep the current one)', 'password'],
   ['h4', 'Shipping & returns (Google feed; blank = marketplace default, no returns)', 'h'], ['ship_price', 'Shipping price (USD)'], ['handle_days', 'Handling time (business days)'],
   ['return_days', 'Return window in days (blank = final sale)'],
   ['brand_context', 'Brand context on WBW listings (from the WBW brand page)', 'toggle'],

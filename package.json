@@ -4,7 +4,8 @@
   "scripts": {
     "dev": "next dev",
     "build": "node scripts/zip-extension.mjs && next build",
-    "start": "next start"
+    "start": "next start",
+    "test": "node --import ./test/register.mjs --test test/login.test.mjs"
   },
   "dependencies": {
     "next": "^16.4.0",
