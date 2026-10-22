@@ -1,5 +1,5 @@
 // Everything needs a login (env APP_PASSWORD signs the session; none set = open, for local dev).
-// Team and sellers both sign in with an email + PIN. The browser sends cookie "auth"; the extension sends the same
+// An admin and sellers both sign in with an email + PIN and use the one home screen. The browser sends cookie "auth"; the extension sends the same
 // token as x-auth (checked first, so a popup login isn't stuck behind a page cookie). Seller sessions set x-session-seller.
 import { NextResponse } from 'next/server';
 import { readSession } from './lib/session';

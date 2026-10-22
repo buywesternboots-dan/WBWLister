@@ -1,8 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { isEmail, matchLogin, newPinRecord, normEmail, pinHash, sessionWho } from '../lib/auth';
 import { readSession, sessionToken } from '../lib/session';
 import { sellerOf, teamOnly } from '../lib/http';
+import { HOME, TOOLS, toolsFor } from '../lib/home';
 
 const SECRET = 'test-signing-secret';
 const rec = async (email, pin, extra) => ({ email, ...await newPinRecord(pin), ...extra });
@@ -24,16 +26,16 @@ test('PIN is stored as a salted hash, never as the PIN itself', async () => {
   assert.equal(await pinHash(a.salt, ' 1234 '), a.hash);
 });
 
-test('team and seller sign in with email + PIN; a wrong PIN, unknown email, or seller name does not', async () => {
-  const team = await rec('team@shop.test', '1', { role: 'team' });
+test('admin and seller sign in with email + PIN; a wrong PIN, unknown email, or seller name does not', async () => {
+  const admin = await rec('admin@shop.test', '1', { role: 'admin' });
   const seller = await rec('Ada@Shop.test', '4321', { role: 'seller', seller: 'ada' });
-  assert.deepEqual(await matchLogin('team@shop.test', '1', [team, seller]), { role: 'team' });
-  assert.deepEqual(await matchLogin('ada@shop.test', '4321', [team, seller]), { role: 'seller', seller: 'ada' });
-  assert.equal(await matchLogin('ada@shop.test', 'nope', [team, seller]), null);
-  assert.equal(await matchLogin('other@shop.test', '4321', [team, seller]), null);
-  assert.equal(await matchLogin('ada', '4321', [team, seller]), null);
-  assert.equal(await matchLogin('  ', '4321', [team, seller]), null);
-  assert.equal(await matchLogin('ada@shop.test', '   ', [team, seller]), null);
+  assert.deepEqual(await matchLogin('admin@shop.test', '1', [admin, seller]), { role: 'admin' });
+  assert.deepEqual(await matchLogin('ada@shop.test', '4321', [admin, seller]), { role: 'seller', seller: 'ada' });
+  assert.equal(await matchLogin('ada@shop.test', 'nope', [admin, seller]), null);
+  assert.equal(await matchLogin('other@shop.test', '4321', [admin, seller]), null);
+  assert.equal(await matchLogin('ada', '4321', [admin, seller]), null);
+  assert.equal(await matchLogin('  ', '4321', [admin, seller]), null);
+  assert.equal(await matchLogin('ada@shop.test', '   ', [admin, seller]), null);
 });
 
 test('two sellers sharing an email and PIN cannot sign in; the one PIN that matches still can', async () => {
@@ -44,18 +46,19 @@ test('two sellers sharing an email and PIN cannot sign in; the one PIN that matc
   assert.deepEqual(await matchLogin('a@b.co', '2222', [ada, bea]), { role: 'seller', seller: 'bea' });
 });
 
-test('a matching team login wins when a seller uses the same email and PIN', async () => {
-  const team = await rec('a@b.co', '1111', { role: 'team' });
+test('a matching admin login wins when a seller uses the same email and PIN', async () => {
+  const admin = await rec('a@b.co', '1111', { role: 'admin' });
   const seller = await rec('a@b.co', '1111', { role: 'seller', seller: 'ada' });
   const other = await rec('a@b.co', '2222', { role: 'seller', seller: 'ada' });
-  assert.deepEqual(await matchLogin('A@B.co', '1111', [seller, team]), { role: 'team' });
-  assert.deepEqual(await matchLogin('a@b.co', '2222', [team, other]), { role: 'seller', seller: 'ada' });
+  assert.deepEqual(await matchLogin('A@B.co', '1111', [seller, admin]), { role: 'admin' });
+  assert.deepEqual(await matchLogin('a@b.co', '2222', [admin, other]), { role: 'seller', seller: 'ada' });
 });
 
 test('the session token carries the seller name and rejects a forged name or secret', async () => {
   const who = await matchLogin('ada@shop.test', '1234', [await rec('ada@shop.test', '1234', { role: 'seller', seller: 'ada' })]);
   assert.equal(sessionWho(who), 'seller:ada');
-  assert.equal(sessionWho({ role: 'team' }), 'admin');
+  assert.equal(sessionWho({ role: 'admin' }), 'admin');
+  assert.equal((await readSession(await sessionToken('admin', SECRET), SECRET)).seller, undefined);
   const token = await sessionToken(sessionWho(who), SECRET);
   assert.deepEqual(await readSession(token, SECRET), { role: 'seller', seller: 'ada' });
   assert.equal(await readSession(token, 'other-secret'), null);
@@ -64,10 +67,24 @@ test('the session token carries the seller name and rejects a forged name or sec
   assert.deepEqual(await readSession(await sessionToken('admin', SECRET), SECRET), { role: 'admin' });
 });
 
-test('a seller session stays on that seller; team-only actions reject it', () => {
+test('a seller session stays on that seller; admin actions reject it', () => {
   assert.equal(sellerOf(headers({ 'x-session-seller': 'ada', authorization: 'Bearer bob' })), 'ada');
   assert.throws(() => sellerOf(headers({})), /Pick a seller first/);
-  assert.throws(() => teamOnly(headers({ 'x-session-seller': 'ada' })), /Only the team can do that/);
+  assert.throws(() => teamOnly(headers({ 'x-session-seller': 'ada' })), /Only an admin can do that/);
   assert.equal(teamOnly(headers({})), undefined);
   assert.equal(sellerOf(headers({ authorization: 'Bearer Bob' })), 'bob');
+});
+
+test('an admin and a seller share one screen; the admin gets every tool', () => {
+  assert.equal(HOME, '/');
+  assert.deepEqual(toolsFor('admin'), TOOLS);
+  assert.deepEqual(TOOLS, ['sellers', 'import', 'review', 'export', 'sync', 'settings']);
+  assert.deepEqual(toolsFor('seller'), ['import', 'review', 'export', 'sync']);
+  assert.deepEqual(toolsFor('team'), []);
+  const page = readFileSync(new URL('../app/page.js', import.meta.url), 'utf8');
+  const login = readFileSync(new URL('../app/login/page.js', import.meta.url), 'utf8');
+  assert.match(page, /toolsFor\(me\?\.role\)/);
+  assert.match(login, /location\.assign\(HOME\)/);
+  assert.equal(page.includes("location.assign('/admin')"), false);
+  assert.equal(login.includes("location.assign('/admin')"), false);
 });

@@ -1,5 +1,6 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
+import { toolsFor } from '../lib/home';
 import { CHOICES, searchMatch } from '../lib/vocab';
 import { altText, photoUrl } from '../lib/seo';
 import { CHANNELS, post } from '../lib/crosspost';
@@ -95,21 +96,21 @@ export default function Inventory() {
   const [failed, setFailed] = useState([]);
   const [ext, setExt] = useState(false); // WBW Importer extension present on this page
   const [err, setErr] = useState('');
-  const [me, setMe] = useState({ role: 'team' }); // a seller's own login is locked to their items
-  const team = me.role === 'team';
+  const [me, setMe] = useState(null); // admin: every tool on this page; a seller stays here, locked to their items
+  const admin = toolsFor(me?.role).includes('sellers');
 
   const current = sellers.find(s => s.seller === who), hasDetails = !!current?.name;
   const setRun = patch => setRunState(r => ({ ...r, ...patch }));
   const loadSellers = () => api('GET', null, '', '/api/sellers').then(setSellers).catch(e => setErr(e.message));
-  // A seller's login is always their own items (the server enforces it); the team picks a seller via ?seller=.
-  const load = () => (seller() || me.seller ? api('GET', null, `?status=${tab}`).then(setItems).catch(e => setErr(e.message)) : setItems([]));
+  // A seller's login is always their own items (the server enforces it); an admin picks a seller via ?seller=.
+  const load = () => (seller() || me?.seller ? api('GET', null, `?status=${tab}`).then(setItems).catch(e => setErr(e.message)) : setItems([]));
   const loadRef = useRef(load); loadRef.current = load;
 
   useEffect(() => {
     api('GET', null, '', '/api/me').then(m => { setMe(m); if (m.seller) setWho(m.seller); }).catch(() => {});
     setWho(seller()); loadSellers();
   }, []);
-  useEffect(() => { setSel(new Set()); setEdit(null); setFilter({}); load(); }, [tab, me.seller]);
+  useEffect(() => { setSel(new Set()); setEdit(null); setFilter({}); load(); }, [tab, me?.seller]);
   useEffect(() => { setLink(current?.website || current?.fb_profile || ''); }, [current?.website, current?.fb_profile]);
   // Facebook/Depop imports run in the extension (extension/bridge.js); it reports progress back here.
   useEffect(() => {
@@ -194,13 +195,13 @@ export default function Inventory() {
       {Object.entries(CHOICES).map(([f, opts]) => <datalist key={f} id={`dl-${f}`}>{opts.map(o => <option key={o} value={o} />)}</datalist>)}
 
       <div className="who">
-        {!team ? <strong>{current?.display_name ?? who}</strong> : <>Seller: <select value={who} onChange={e => switchTo(e.target.value)}>
+        {!admin ? <strong>{current?.display_name ?? who}</strong> : <>Seller: <select value={who} onChange={e => switchTo(e.target.value)}>
           {!current && <option value={who}>{who || 'Pick a seller…'}</option>}
           {sellers.map(s => <option key={s.seller} value={s.seller}>{s.display_name ?? s.seller} — {s.active} items{s.review ? `, ${s.review} new` : ''}</option>)}
         </select>
         {who && <button onClick={() => setSellerForm(hasDetails ? current : { name: who, sync: 'off' })}>{hasDetails ? 'Seller settings' : 'Set up seller'}</button>}
         <button className="primary" onClick={() => setSellerForm({ sync: 'off' })}>+ Add seller</button></>}
-        {team && <a className="src" href="/wbw-importer.zip" download title="Needed for Facebook and Depop imports">Chrome extension{ext ? ' ✓' : ''}</a>}
+        {admin && <a className="src" href="/wbw-importer.zip" download title="Needed for Facebook and Depop imports">Chrome extension{ext ? ' ✓' : ''}</a>}
         <a className="src" href="/login" onClick={e => { e.preventDefault(); fetch('/api/login', { method: 'DELETE' }).then(() => location.assign('/login')); }}>Log out</a>
       </div>
       {!ext && EXTENSION_LINK.test(link) && <p className="help">Facebook and Depop import through the WBW Importer Chrome extension:
@@ -219,8 +220,8 @@ export default function Inventory() {
         <span><button className="primary" onClick={saveSeller}>Save seller</button><button onClick={() => setSellerForm(null)}>Cancel</button>
           {sellerForm.created_at && !current?.active && <button onClick={deleteSeller}>Delete seller</button>}</span>
       </div>}
-      {team && !who && !sellerForm && <p className="empty">Pick a seller above, or add one.</p>}
-      {team && who && !hasDetails && !sellerForm && <p className="err">Set up this seller (details and import settings) before importing for them.</p>}
+      {admin && !who && !sellerForm && <p className="empty">Pick a seller above, or add one.</p>}
+      {admin && who && !hasDetails && !sellerForm && <p className="err">Set up this seller (details and import settings) before importing for them.</p>}
 
       {hasDetails && <div className="site">
         <input placeholder="Website, Poshmark, eBay, Facebook or Depop link (saved in Seller settings)" value={link} onChange={e => setLink(e.target.value.trim())} />
@@ -258,9 +259,9 @@ export default function Inventory() {
           {tab === 'pending' && <button className="primary" onClick={() => bulk({ action: 'sold' })}>Mark sold</button>}
           {tab === 'pending' && <button onClick={() => bulk({ action: 'restore' })}>Still for sale</button>}
           {!live && tab !== 'pending' && <button onClick={() => bulk({ action: 'restore' })}>Restore</button>}
-          {team && <button onClick={scan}>Scan photos for ID info</button>}
-          {team && <button onClick={() => { const to = prompt('Move the selected items to which seller?'); if (to) bulk({ action: 'move', to }); }}>Move to seller…</button>}
-          {team && <button onClick={() => confirm(`Delete ${sel.size} items? Their photos and details stay in the WBW photo archive.`) && bulk({ action: 'delete' })}>Delete</button>}
+          {admin && <button onClick={scan}>Scan photos for ID info</button>}
+          {admin && <button onClick={() => { const to = prompt('Move the selected items to which seller?'); if (to) bulk({ action: 'move', to }); }}>Move to seller…</button>}
+          {admin && <button onClick={() => confirm(`Delete ${sel.size} items? Their photos and details stay in the WBW photo archive.`) && bulk({ action: 'delete' })}>Delete</button>}
         </>}
       </div>}
 
