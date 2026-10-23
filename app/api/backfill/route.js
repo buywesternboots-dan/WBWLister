@@ -1,6 +1,13 @@
-import { handle, teamOnly } from '../../../lib/http';
+import { actorFrom } from '../../../lib/access';
+import { handle, HttpError } from '../../../lib/http';
 import { backfillPhotos } from '../../../lib/wbw';
 
-// Team only: POST repeatedly until { left: 0 } to copy source photo links (R2, else Blob). No-op when neither store is configured.
-export const POST = handle(req => { teamOnly(req); return backfillPhotos(); });
+export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
+
+// Admin only. POST until { left: 0 } copies source photo links (R2, else Blob). No-op when neither store is configured.
+export const POST = handle(async req => {
+  const who = await actorFrom(req);
+  if (who.role !== 'admin') throw new HttpError('Only an admin can do that.', 403);
+  return backfillPhotos();
+});
