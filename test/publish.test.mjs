@@ -13,7 +13,8 @@ test('approving a listing publishes it immediately through the mock export', () 
   assert.deepEqual(live.guessed, []);
   assert.equal(needsCheck(live), false);
   assert.deepEqual(pushStub([live]), { export: 'stub', sync: 'stub', pushed: 1 });
-  assert.throws(() => approvalRecord('ada'), /sign-in email/);
+  assert.throws(() => approvalRecord('ada'), /sign-in email or phone/);
+  assert.equal(approvalRecord('+15551230000').approved_by, '+15551230000');
 });
 
 test('a listing needs the seller check until it has an approver, and a seller edit clears that', () => {

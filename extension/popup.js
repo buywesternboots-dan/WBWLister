@@ -8,7 +8,7 @@ async function signIn() {
   const server = $('server').value.trim().replace(/\/$/, '');
   const email = $('email').value.trim(), pin = $('pin').value;
   if (!server || !email || !pin) return '';
-  const r = await fetch(`${server}/api/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, pin }) }).catch(() => null);
+  const r = await fetch(`${server}/api/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password: pin }) }).catch(() => null);
   const j = await r?.json().catch(() => ({})) ?? {};
   if (!r?.ok || !j.token) { say(j.error || 'Could not sign in.'); await chrome.storage.sync.remove('token'); return ''; }
   await chrome.storage.sync.set({ server, email, pin, token: j.token });
@@ -47,7 +47,7 @@ show(); chrome.storage.onChanged.addListener(show);
 
 async function start(message) {
   if (!await signIn()) {
-    if (!$('server').value.trim() || !$('email').value.trim() || !$('pin').value) say('Enter the server address, email, and PIN.');
+    if (!$('server').value.trim() || !$('email').value.trim() || !$('pin').value) say('Enter the server address, email or phone, and password.');
     return;
   }
   await chrome.storage.sync.set({ seller: $('seller').value });

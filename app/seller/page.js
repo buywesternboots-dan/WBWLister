@@ -7,7 +7,10 @@ import { homeFor } from '../../lib/home';
 export default function SellerHome() {
   const [ok, setOk] = useState(false);
   useEffect(() => {
-    fetch('/api/me').then(r => r.json()).then(m => m.role === 'seller' ? setOk(true) : location.replace(homeFor('admin'))).catch(() => location.replace(homeFor('admin')));
+    fetch('/api/me').then(r => r.ok ? r.json() : null).then(m => {
+      if (m?.role === 'seller') setOk(true);
+      else location.replace(m?.role === 'admin' ? homeFor('admin') : '/login');
+    }).catch(() => location.replace('/login'));
   }, []);
   return ok ? <Screen /> : null;
 }

@@ -42,10 +42,9 @@ const SORTS = {
 // Seller settings form: [field, label, kind] (kind: h = heading, area = multi-line, sync = sync choice, else one line).
 const SELLER_FORM = [
   ['h1', 'Details', 'h'], ['name', 'WBW seller name* (the WBW account these items attach to)'], ['display_name', 'Display name*'],
-  ['contact', 'Contact person'], ['email', 'Email (sign-in username)'], ['phone', 'Phone'], ['location', 'Location (city, state)'],
+  ['contact', 'Contact person'], ['email', 'Email'], ['phone', 'Phone'], ['location', 'Location (city, state)'],
   ['h2', 'Import & sync', 'h'], ['website', 'Website, Poshmark or eBay link (store, collection, poshmark.com/closet/…, or ebay.com/usr/<username>)'],
   ['fb_profile', 'Facebook Marketplace profile or Depop shop link (imported through the Chrome extension)'], ['sync', 'Automatic sync', 'sync'],
-  ['login_password', 'PIN or password (their sign-in; leave blank to keep the current one)', 'password'],
   ['h4', 'Shipping & returns (Google feed; blank = marketplace default, no returns)', 'h'], ['ship_price', 'Shipping price (USD)'], ['handle_days', 'Handling time (business days)'],
   ['return_days', 'Return window in days (blank = final sale)'],
   ['brand_context', 'Brand context on WBW listings (from the WBW brand page)', 'toggle'],
@@ -224,13 +223,13 @@ export default function Screen({ admin = false }) {
 
       {admin && sellerForm && <div className="panel">
         <strong>{sellerForm.created_at ? 'Edit seller' : 'New seller'}</strong>
+        <small>{sellerForm.has_login ? 'This seller registered a password.' : 'Sellers set their own password on the sign-in page (email or phone). This form does not set one.'}</small>
         {SELLER_FORM.map(([f, l, kind]) => kind === 'h' ? <h3 key={f}>{l}</h3> :
           <label key={f}>{l}{kind === 'area' ? <textarea rows="3" value={sellerForm[f] ?? ''} onChange={setForm(f)} />
             : kind === 'toggle' ? <select value={sellerForm[f] ?? 'on'} onChange={setForm(f)}><option value="on">On</option><option value="off">Off</option></select>
             : kind === 'sync' ? <select value={sellerForm.sync ?? 'off'} onChange={setForm(f)}>
               <option value="off">Off (sync by hand)</option><option value="daily">Daily</option><option value="weekly">Weekly</option></select>
-            : <input type={kind === 'password' ? 'password' : 'text'} autoComplete="new-password" value={sellerForm[f] ?? ''} onChange={setForm(f)}
-              placeholder={kind === 'password' ? (sellerForm.has_login ? 'Login set — type to change' : 'No login yet') : ''} />}</label>)}
+            : <input value={sellerForm[f] ?? ''} onChange={setForm(f)} />}</label>)}
         <span><button className="primary" onClick={saveSeller}>Save seller</button><button onClick={() => setSellerForm(null)}>Cancel</button>
           {sellerForm.created_at && !current?.active && <button onClick={deleteSeller}>Delete seller</button>}</span>
       </div>}
