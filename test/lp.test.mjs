@@ -131,19 +131,33 @@ describe('List Perfectly mapping', () => {
     for (const f of ['brand', 'color', 'size', 'width', 'material']) assert.equal(item.guessed.includes(f), false, f);
   });
 
-  it('keys a row by SKU plus the main image filename, so a title or price edit stays the same item', () => {
+  it('keys a row by the Date the listing was created, so a title or price edit stays the same item', () => {
+    const date = '2024-01-01 00:00:01';
     const image = 'https://media.listperfectly.com/20261019-153819_b299628f-4e83_CI.jpeg';
     const file = '20261019-153819_b299628f-4e83_CI.jpeg';
-    const a = mappedItem(row({ SKU: '_  bin#', Date: '2024-01-01 00:00:01', Title: 'One', Price: '10', 'Main Image': image }));
-    const edited = mappedItem(row({ SKU: '_  bin#', Date: '2024-06-01 00:00:02', Title: 'Renamed', Price: '99', 'Main Image': image }));
-    const other = mappedItem(row({ SKU: '_  bin#', Title: 'Other photo', 'Main Image': 'https://media.listperfectly.com/other.jpeg' }));
-    assert.equal(a.source_id, edited.source_id);
-    assert.equal(a.source_id, `_  bin# ${file}`);
-    assert.notEqual(a.source_id, other.source_id);
-    const blank = mappedItem(row({ SKU: '', 'Main Image': '', Date: '2024-05-01 09:00:00', Title: 'No sku' }));
-    assert.equal(blank.source_id, createHash('sha1').update('2024-05-01 09:00:00\nNo sku').digest('hex'));
+    const a = mappedItem(row({ SKU: '_  bin#', Date: date, Title: 'One', Price: '10', 'Main Image': image }));
+    const edited = mappedItem(row({ SKU: 'other-bin', Date: date, Title: 'Renamed', Price: '99', 'Main Image': 'https://media.listperfectly.com/other.jpeg' }));
+    assert.equal(a.source_id, date);
+    assert.equal(edited.source_id, date);
+    const shared = mapLpCsv(csvOf([
+      row({ SKU: '_  bin#', Date: date, Title: 'One', 'Main Image': image }),
+      row({ SKU: '20_  bin#007', Date: date, Title: 'Two', 'Main Image': 'https://media.listperfectly.com/other.jpeg' }),
+    ]));
+    assert.equal(shared[0].source_id, `${date} _  bin# ${file}`);
+    assert.equal(shared[1].source_id, `${date} 20_  bin#007 other.jpeg`);
+    assert.notEqual(shared[0].source_id, shared[1].source_id);
+    const blank = mappedItem(row({ SKU: '', 'Main Image': '', Date: '', Title: 'No sku' }));
+    assert.equal(blank.source_id, createHash('sha1').update('\nNo sku').digest('hex'));
     assert.equal(lpSourceId({ SKU: 'only-sku' }), 'only-sku');
     assert.equal(lpSourceId({ SKU: '', 'Main Image': image }), file);
+  });
+
+  it('keeps the US size line when the Size column is a European number', () => {
+    const euro = mappedItem(row({ Size: '44', Description: "US Men's size:  11D" })).item;
+    assert.equal(euro.size, '11');
+    assert.equal(euro.width, 'D');
+    const us = mappedItem(row({ Size: '9.5', Description: "US Men's size: 9D" })).item;
+    assert.equal(us.size, '9.5');
   });
 
   it('keeps marketplace names, drops unsafe photo URLs, and dedupes the main image', () => {
@@ -192,21 +206,34 @@ describe('List Perfectly privacy and sync', () => {
     }
     const mapped = JSON.stringify(mapLpCsv(text));
     for (const secret of SECRET.split(' ')) assert.equal(mapped.includes(secret), false, secret);
+    for (const r of parseCsv(fixture)) for (const k of LP_PRIVATE) assert.equal(String(r[k] ?? '').trim(), '', k);
+  });
+
+  it('inserts every unsold row that shares a SKU when each Date is different', async () => {
+    const db = memory();
+    const rows = Array.from({ length: 40 }, (_, i) => row({
+      SKU: '_  LVI  bin#', 'Main Image': '', 'Image Gallery': '', Title: `Boot ${i}`,
+      Date: `2024-06-01 00:00:${String(i).padStart(2, '0')}`, SOLD: '', Quantity: '1',
+    }));
+    const opened = await runLpImport(csvOf(rows), db);
+    assert.equal(opened.new, 40);
+    assert.equal(new Set(db.rows.map(r => r.source_id)).size, 40);
   });
 
   it('imports new rows, skips sold rows the first time, and syncs changes without clobbering verified fields', async () => {
     const db = memory();
+    const NEW = '2024-01-02 03:04:05', GONE = '2024-03-01 00:00:00', SOLD_ON = '2024-05-01 00:00:00';
     const first = csvOf([
-      row({ SKU: 'new-boot', Price: '100' }),
-      row({ SKU: 'gone-later', Title: 'Will leave', Date: '2024-03-01 00:00:00' }),
-      row({ SKU: 'sold-already', SOLD: 'SOLD', 'Sold Price': 'SOLDPRICE-SECRET' }),
+      row({ SKU: 'new-boot', Price: '100', Date: NEW }),
+      row({ SKU: 'gone-later', Title: 'Will leave', Date: GONE }),
+      row({ SKU: 'sold-already', Date: SOLD_ON, SOLD: 'SOLD', 'Sold Price': 'SOLDPRICE-SECRET' }),
     ]);
     const opened = await runLpImport(first, db);
     assert.deepEqual({ ...opened, sourceIds: opened.sourceIds.length }, { new: 2, updated: 0, sold: 0, skipped: 1, sourceIds: 3 });
     assert.equal(db.rows.length, 2);
     assert.equal(db.rows.every(r => r.photos[0].startsWith('https://media.listperfectly.com/')), true);
 
-    const kept = db.rows.find(r => r.source_id.startsWith('new-boot'));
+    const kept = db.rows.find(r => r.source_id === NEW);
     kept.verified = ['brand'];
     kept.brand = 'Kept Brand';
     kept.wbw_price = '90';
@@ -214,9 +241,9 @@ describe('List Perfectly privacy and sync', () => {
     kept.photos = ['https://blob.vercel-storage.com/kept.jpg'];
 
     const second = csvOf([
-      row({ SKU: 'new-boot', Price: '80', Brand: 'Other Brand', eBay: 'eBay' }),
+      row({ SKU: 'new-boot', Price: '80', Brand: 'Other Brand', eBay: 'eBay', Date: NEW }),
       row({ SKU: 'brand-new', Title: 'Added', Date: '2024-04-01 00:00:00' }),
-      row({ SKU: 'sold-already', SOLD: 'SOLD' }),
+      row({ SKU: 'sold-already', Date: SOLD_ON, SOLD: 'SOLD' }),
       row({ SKU: 'qty-zero', Title: 'Empty', Quantity: '0', Date: '2024-04-02 00:00:00' }),
     ]);
     // qty-zero was never imported, so it is skipped rather than created as sold.
@@ -233,9 +260,9 @@ describe('List Perfectly privacy and sync', () => {
     assert.equal(updated.status, 'review');
     assert.ok(updated.changed_at);
     assert.equal(db.rows.some(r => r.title === 'Added'), true);
-    assert.equal(db.rows.some(r => String(r.source_id).startsWith('sold-already')), false);
+    assert.equal(db.rows.some(r => r.source_id === SOLD_ON), false);
 
-    const live = db.rows.find(r => r.source_id.startsWith('gone-later'));
+    const live = db.rows.find(r => r.source_id === GONE);
     live.status = 'published';
     const soldFile = csvOf([row({ SKU: 'gone-later', Title: 'Will leave', Date: '2024-03-01 00:00:00', SOLD: 'SOLD' })]);
     const sold = await runLpImport(soldFile, db);
@@ -247,7 +274,7 @@ describe('List Perfectly privacy and sync', () => {
     assert.equal(db.rows.find(r => r.id === live.id).status, 'review');
 
     const ids = again.sourceIds;
-    const missing = missingFromLp(db.rows.map(r => ({ ...r, status: r.id === live.id ? 'review' : r.status })), ids.filter(id => !id.startsWith('gone-later')));
+    const missing = missingFromLp(db.rows.map(r => ({ ...r, status: r.id === live.id ? 'review' : r.status })), ids.filter(id => id !== GONE));
     assert.deepEqual(missing, [live.id]);
     const same = await runLpImport(second, db);
     assert.equal(same.new, 0);
