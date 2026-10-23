@@ -169,7 +169,8 @@ export default function Inventory() {
             if (r.sold) { n.sold++; listed.delete(slug(url)); } else if (r.item?.updated) n.updated++; else if (r.item) n.added++;
           } catch (e) {
             n.failed++; setFailed(f => [...f, { url, error: e.message }]);
-            if (++streak >= 5) stop = e.message;
+            // A Blob quota/storage error stays on Retry failed and does not stop the run.
+            if (!/vercel blob|storage quota|quota exceeded/i.test(e.message ?? '') && ++streak >= 5) stop = e.message;
           }
           setRun({ done: n.added + n.updated + n.sold + n.failed });
         }
@@ -229,7 +230,7 @@ export default function Inventory() {
         {run?.label && <div className="run">{run.total > 0 && <progress value={run.done} max={run.total} />}
           <small>{run.label}{run.total > 0 && run.done < run.total && ` — ${run.done} of ${run.total}`}</small></div>}
         {failed.length > 0 && <details className="failed">
-          <summary>{failed.length} failed <button disabled={run?.busy} onClick={() => importSite(false, failed.map(f => f.url))}>Retry failed</button></summary>
+          <summary>{failed.length} failed <button type="button" disabled={run?.busy} onClick={e => { e.preventDefault(); e.stopPropagation(); importSite(false, failed.map(f => f.url)); }}>Retry failed</button></summary>
           {failed.map(f => <div key={f.url}><a href={f.url} target="_blank">{f.url.split('/').pop()}</a> — {f.error}</div>)}
         </details>}
       </div>}
