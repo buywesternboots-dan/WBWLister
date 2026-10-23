@@ -128,7 +128,9 @@ test('photo hosts are checked by hostname, and private addresses are not fetched
   assert.equal(imageType('image/gif'), 'image/gif');
   assert.equal(imageType('image/avif'), 'image/avif');
   await assert.rejects(() => safeFetch('http://192.0.2.1/', { timeout: 50, resolve: async () => ['192.0.2.1'] }), /timed out/);
-  assert.match(read('lib/wbw.js'), /safeFetch\(src, \{ image: true \}\)/);
+  assert.match(read('lib/storage.js'), /doFetch = safeFetch/);
+  assert.match(read('lib/wbw.js'), /copyPhoto\(/);
+  assert.equal(read('lib/storage.js').includes('dns/promises'), false);
   assert.match(read('lib/sites.js'), /safeFetch\(url\)/);
   const img = read('app/img/[id]/[n]/[name]/route.js');
   assert.match(img, /safeFetch\(src, \{ image: true \}\)/);
