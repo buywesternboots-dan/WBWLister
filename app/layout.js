@@ -1,4 +1,4 @@
-export const metadata = { title: 'WBW Inventory' };
+export const metadata = { title: 'BootLister' };
 export default function RootLayout({ children }) {
   return <html lang="en"><body>{children}</body></html>;
 }

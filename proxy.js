@@ -1,20 +1,28 @@
-// Everything needs a login (env APP_PASSWORD; none set = open, for local dev):
-// - team: the team password (browser cookie, or the Chrome extension's x-app-password header) — the full tool;
-// - seller: their own login (Seller settings) — locked to their items; the seller is passed on as x-session-seller.
+// Deployed with no admin password: closed (503). Local dev with no password: open.
+// Otherwise a signed session is required. Staff and sellers each stay on their own screen.
+// The browser sends cookie "auth"; the extension sends the same token as x-auth (checked first).
+// API routes also check the session themselves (lib/access.js) — they do not trust x-session-seller.
 import { NextResponse } from 'next/server';
-import { readSession } from './lib/session';
+import { decide } from './lib/gate';
 
 export async function proxy(req) {
-  const secret = process.env.APP_PASSWORD;
   const headers = new Headers(req.headers);
-  headers.delete('x-session-seller'); // only this proxy may set it
-  if (!secret) return NextResponse.next({ request: { headers } });
-  const who = req.headers.get('x-app-password') === secret ? { role: 'admin' } : await readSession(req.cookies.get('auth')?.value, secret);
-  if (!who) return req.nextUrl.pathname.startsWith('/api/')
-    ? NextResponse.json({ error: 'Please log in.' }, { status: 401 })
-    : NextResponse.redirect(new URL('/login', req.url));
-  if (who.role === 'seller') headers.set('x-session-seller', who.seller);
+  headers.delete('x-session-seller'); // only this proxy may set it; routes still ignore it
+  let decision;
+  try {
+    decision = await decide(req.nextUrl.pathname, req.headers.get('x-auth') || req.cookies.get('auth')?.value);
+  } catch {
+    return req.nextUrl.pathname.startsWith('/api/')
+      ? NextResponse.json({ error: 'Please log in.' }, { status: 401 })
+      : NextResponse.redirect(new URL('/login', req.url));
+  }
+  if (decision.type === 'closed') return req.nextUrl.pathname.startsWith('/api/')
+    ? NextResponse.json({ error: decision.error }, { status: 503 })
+    : new NextResponse(decision.error, { status: 503, headers: { 'Content-Type': 'text/plain; charset=utf-8' } });
+  if (decision.type === 'json') return NextResponse.json({ error: decision.error }, { status: decision.status });
+  if (decision.type === 'redirect') return NextResponse.redirect(new URL(decision.to, req.url));
+  if (decision.who?.role === 'seller') headers.set('x-session-seller', decision.who.seller);
   return NextResponse.next({ request: { headers } });
 }
 
-export const config = { matcher: ['/((?!login|api/login|img|feed|_next|favicon).*)'] };
+export const config = { matcher: ['/((?!login|api/login|api/register|img|feed|_next|favicon).*)'] };

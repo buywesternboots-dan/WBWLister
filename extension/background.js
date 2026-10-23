@@ -100,16 +100,20 @@ async function readDepopShop() {
   });
 }
 
-// ---- talking to the WBW Lister server ----
-// Jobs started from the WBW Lister page use that page's server and seller; jobs from the popup use the popup's saved settings.
+// ---- talking to the BootLister server ----
+// The session token is sent only when the request origin is the server saved in the popup. A page cannot point it elsewhere.
 let job = null;
+const sameOrigin = (saved, dest) => { try { return !!saved && !!dest && new URL(saved).origin === new URL(dest).origin; } catch { return false; } };
 async function api(method, body, q = '') {
-  const { server, seller, password } = { ...(await chrome.storage.sync.get(['server', 'seller', 'password'])), ...job };
-  if (!server) throw new Error('Set the WBW Lister address in the extension popup.');
-  const r = await fetch(`${server.replace(/\/$/, '')}/api/items${q}`, {
+  const saved = await chrome.storage.sync.get(['server', 'seller', 'token']);
+  const server = String(job?.server || saved.server || '').replace(/\/$/, '');
+  const seller = job?.seller || saved.seller || '';
+  if (!server) throw new Error('Set the BootLister address in the extension popup.');
+  const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${seller}` };
+  if (saved.token && sameOrigin(saved.server, server)) headers['x-auth'] = saved.token;
+  const r = await fetch(`${server}/api/items${q}`, {
     method, credentials: 'include', // the page's login cookie, when started from the page
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${seller || ''}`, 'x-app-password': password || '' },
-    body: body && JSON.stringify(body),
+    headers, body: body && JSON.stringify(body),
   });
   const j = await r.json();
   if (!r.ok) throw new Error(j.error);
@@ -194,9 +198,9 @@ chrome.runtime.onMessage.addListener((m, _, reply) => {
   return true;
 });
 
-// Right-click "Add to WBW" on a Facebook listing (or a link to one).
+// Right-click "Add to BootLister" on a Facebook listing (or a link to one).
 chrome.runtime.onInstalled.addListener(() => chrome.contextMenus.create({
-  id: 'wbw', title: 'Add to WBW', contexts: ['link', 'page'], documentUrlPatterns: ['https://*.facebook.com/*'],
+  id: 'bootlister', title: 'Add to BootLister', contexts: ['link', 'page'], documentUrlPatterns: ['https://*.facebook.com/*'],
 }));
 chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   const link = ITEM.test(info.linkUrl || '') ? info.linkUrl : null;
