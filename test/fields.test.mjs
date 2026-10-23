@@ -115,5 +115,8 @@ Asking price: $400
     assert.equal(heel.heel_height, '2');
     assert.equal(heel.heel, 'Stockman heel');
     assert.equal(enrich({ title: 'Boots', description: 'Made in El Paso, Texas' }).made_in, 'El Paso, Texas');
+    assert.equal(enrich({ title: 'Boots', description: 'Made in Mexico, bought in 2019' }).made_in, 'Mexico');
+    assert.equal(enrich({ title: 'Boots', description: 'Made in USA, size 10 D' }).made_in, 'USA');
+    assert.equal(enrich({ title: 'Boots', description: 'Made in the U.S.A.' }).made_in, 'USA');
   });
 });

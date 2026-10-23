@@ -1,14 +1,26 @@
-// Public photo URL with an SEO filename: serves the seller's photo unchanged (pixels), with XMP keywords/credit added and long cache.
+// Public photo URL with an SEO filename. Pixels stay as stored; XMP keywords/credit are added.
+// Only our Blob store or R2 is treated as already copied. Anything else is fetched through safeFetch.
 import { getItem } from '../../../../../lib/wbw';
-import { allowedPhotoUrl } from '../../../../../lib/net';
+import { allowedPhotoUrl, imageType, safeFetch } from '../../../../../lib/net';
 import { withXmp } from '../../../../../lib/seo';
 
-export async function GET(req, { params }) {
+export async function GET(_req, { params }) {
   const { id, n } = await params;
-  const item = /^\d+$/.test(id) ? await getItem(id) : null, src = item?.photos[n - 1];
-  if (!src || !allowedPhotoUrl(src)) return new Response('Not found', { status: 404 });
-  const r = await fetch(src, { headers: { 'User-Agent': 'Mozilla/5.0' } });
-  if (!r.ok) return new Response('Not found', { status: 404 });
-  return new Response(withXmp(Buffer.from(await r.arrayBuffer()), item, +n), {
-    headers: { 'Content-Type': r.headers.get('content-type') || 'image/jpeg', 'Cache-Control': 'public, max-age=31536000, immutable' } });
+  const item = /^\d+$/.test(id) ? await getItem(id) : null;
+  const src = item?.photos?.[n - 1];
+  if (!src) return new Response('Not found', { status: 404 });
+  const stored = allowedPhotoUrl(src);
+  let got, type;
+  try {
+    got = await safeFetch(src, { image: true });
+    type = imageType(got.contentType);
+  } catch { return new Response('Not found', { status: 404 }); }
+  return new Response(withXmp(got.body, item, +n), {
+    headers: {
+      'Content-Type': type,
+      'X-Content-Type-Options': 'nosniff',
+      'Content-Security-Policy': "default-src 'none'; sandbox",
+      'Cache-Control': stored ? 'public, max-age=31536000, immutable' : 'public, max-age=3600',
+    },
+  });
 }
