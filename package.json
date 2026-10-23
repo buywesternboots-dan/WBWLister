@@ -8,10 +8,10 @@
     "test": "node --experimental-detect-module --import ./test/register.mjs --test test/*.test.mjs"
   },
   "dependencies": {
-    "next": "^16.4.0",
-    "react": "^19.3.0",
-    "react-dom": "^19.3.0",
     "@neondatabase/serverless": "^1.2.0",
-    "@vercel/blob": "^2.8.1"
+    "@vercel/blob": "^2.8.1",
+    "next": "^16.4.3",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0"
   }
 }

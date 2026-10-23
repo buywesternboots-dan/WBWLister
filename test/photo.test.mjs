@@ -1,7 +1,8 @@
 import { test, mock, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
+import { createServer } from 'node:http';
 import { importPhoto } from '../lib/wbw.js';
-import { isBlobPhoto, isBlockedIp, readSourcePhoto } from '../app/img/[id]/[n]/[name]/route.js';
+import { isBlobPhoto, isBlockedIp, readSourcePhoto, pinnedFetch, sniffImage, PHOTO_HEADERS } from '../app/img/[id]/[n]/[name]/route.js';
 
 const realFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = realFetch; });
@@ -117,6 +118,72 @@ test('a source photo fetch stops at 15 MB', async () => {
   await assert.rejects(readSourcePhoto('https://cdn.example/big.jpg', {
     ...pub, fetch: async () => ({ ok: true, status: 200, headers: headers({ 'content-type': 'image/jpeg' }), body }),
   }), /too big/);
+});
+
+test('CGNAT, multicast, reserved, NAT64 and 6to4 addresses are blocked', () => {
+  for (const ip of ['100.64.0.1', '224.0.0.1', '240.0.0.1', '198.18.0.1', 'ff02::1', '64:ff9b::7f00:1', '2002:7f00:1::', '::ffff:100.64.0.1', '::ffff:169.254.169.254'])
+    assert.equal(isBlockedIp(ip), true, ip);
+  for (const ip of ['100.63.255.255', '2606:4700:4700::1111'])
+    assert.equal(isBlockedIp(ip), false, ip);
+});
+
+const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xd9]);
+const photo = (type, bytes) => readSourcePhoto('https://cdn.example/a.jpg', {
+  ...pub,
+  fetch: async () => ({ ok: true, status: 200, headers: headers({ 'content-type': type }), body: bodyOf(bytes) }),
+});
+
+test('the served type comes from the bytes', async () => {
+  await assert.rejects(photo('image/jpeg', Buffer.from('<!DOCTYPE html><html></html>')), /type/);
+  await assert.rejects(photo('application/octet-stream', Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"></svg>')), /type/);
+  await assert.rejects(photo('application/xml', jpeg), /type/);
+  const ok = await photo('application/octet-stream', jpeg);
+  assert.equal(ok.type, 'image/jpeg');
+  assert.deepEqual(ok.body, jpeg);
+  assert.equal(sniffImage(jpeg), 'image/jpeg');
+  assert.equal(sniffImage(Buffer.from('<svg/>')), null);
+});
+
+test('photo responses send nosniff and a sandbox content security policy', () => {
+  assert.equal(PHOTO_HEADERS['X-Content-Type-Options'], 'nosniff');
+  assert.equal(PHOTO_HEADERS['Content-Security-Policy'], "default-src 'none'; sandbox");
+});
+
+test('the lookup is pinned to the checked address', async () => {
+  let pin;
+  await readSourcePhoto('https://cdn.example/a.jpg', {
+    lookup: async () => [{ address: '93.184.216.34', family: 4 }],
+    fetch: async (_url, opt) => { pin = opt.lookup; return { ok: true, status: 200, headers: headers({ 'content-type': 'image/jpeg' }), body: bodyOf(jpeg) }; },
+  });
+  const all = await new Promise((resolve, reject) => pin('cdn.example', { all: true }, (err, addrs) => err ? reject(err) : resolve(addrs)));
+  assert.deepEqual(all, [{ address: '93.184.216.34', family: 4 }]);
+  const one = await new Promise((resolve, reject) => pin('cdn.example', {}, (err, address, family) => err ? reject(err) : resolve({ address, family })));
+  assert.deepEqual(one, { address: '93.184.216.34', family: 4 });
+});
+
+test('pinnedFetch uses the pinned lookup and does not follow a 302', async () => {
+  let hits = 0;
+  const server = createServer((_req, res) => { hits += 1; res.writeHead(302, { Location: 'http://127.0.0.1/secret' }); res.end(); });
+  await new Promise(r => server.listen(0, '127.0.0.1', r));
+  const { port } = server.address();
+  try {
+    let looked = 0;
+    const lookup = (hostname, options, cb) => {
+      looked += 1;
+      const done = typeof options === 'function' ? options : cb;
+      const addr = { address: '127.0.0.1', family: 4 };
+      if (options?.all) done(null, [addr]);
+      else done(null, addr.address, addr.family);
+    };
+    const res = await pinnedFetch(`http://pinned.invalid:${port}/photo.jpg`, { lookup });
+    assert.equal(res.status, 302);
+    assert.equal(res.headers.get('location'), 'http://127.0.0.1/secret');
+    assert.equal(looked, 1);
+    assert.equal(hits, 1);
+    await res.body.cancel();
+  } finally {
+    await new Promise(r => server.close(r));
+  }
 });
 
 test('a source photo fetch stops at 15 seconds', async () => {
