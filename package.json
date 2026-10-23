@@ -5,12 +5,13 @@
     "dev": "next dev",
     "build": "node scripts/zip-extension.mjs && next build",
     "start": "next start",
-    "test": "node --import ./test/register.mjs --test test/*.test.mjs"
+    "test": "node --import ./test/register.mjs --test --test-concurrency=1 test/*.test.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1156.0",
     "@neondatabase/serverless": "^1.2.0",
-    "next": "^16.4.0",
+    "@vercel/blob": "^2.8.2",
+    "next": "^16.4.3",
     "react": "^19.3.0",
     "react-dom": "^19.3.0"
   }
