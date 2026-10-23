@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { CHOICES, searchMatch } from '../lib/vocab';
 import { needsCheck, REQUIRED } from '../lib/publish';
+import { csvCell } from '../lib/csv';
 import { altText, photoUrl } from '../lib/seo';
 import { CHANNELS, post } from '../lib/crosspost';
 
@@ -56,14 +57,13 @@ const SELLER_FORM = [
 ];
 // Export: every field on the WBW "Sell a pair" form, then the extra columns this import still needs.
 const SIZED = { Men: "Men's", Women: "Women's", Kids: 'Kids' };
-const CSV = { seller: 'WBW Seller Name', photos: 'Photos', title: 'Listing title', wbw_price: 'Asking price', brand: 'Brand', sized_for: 'Sized for', size: 'Size', size_estimated: 'Size estimated', condition: 'Condition', width: 'Width', material_type: 'Material type', material: 'Material / hide', material_cut: 'Material specifics (cut)', made_in: 'Where made', color: 'Color', keywords: 'Keywords', sole_length: 'Sole length (in)', sole_width: 'Sole width (in)', heel_height: 'Heel height (in)', shaft_circ: 'Shaft circumference (in)', shaft_height: 'Shaft height (in)', sole: 'Sole', heel: 'Heel', toe: 'Toe', description: 'Description', price: 'Source price', id_text: 'Model / date codes', category: 'Category', website_url: 'Seller Website Link', alts: 'Image Alt Text', brand_context: 'Brand Context', brand_link: 'Brand Page Link', seller_context: 'Seller Context', source_id: 'Source ID' };
-const cell = v => `"${String(Array.isArray(v) ? v.join('|') : v ?? '').replace(/"/g, '""')}"`;
+const CSV = { photos: 'Photos', title: 'Listing title', wbw_price: 'Asking price', brand: 'Brand', sized_for: 'Sized for', size: 'Size', size_estimated: 'Size estimated', condition: 'Condition', width: 'Width', material_type: 'Material type', material: 'Material / hide', material_cut: 'Material specifics (cut)', made_in: 'Where made', color: 'Color', keywords: 'Keywords', sole_length: 'Sole length', sole_width: 'Sole width', heel_height: 'Heel height', shaft_circ: 'Shaft circumference', shaft_height: 'Shaft height', sole: 'Sole', heel: 'Heel', toe: 'Toe', description: 'Description', seller: 'WBW Seller Name', price: 'Source price', id_text: 'Model / date codes', category: 'Category', website_url: 'Seller Website Link', alts: 'Image Alt Text', brand_context: 'Brand Context', brand_link: 'Brand Page Link', seller_context: 'Seller Context', source_id: 'Source ID' };
 const download = (rows, brands = {}, s = {}) => {
   const row = r => ({ ...r, seller_context: s.display_name ? `Sold by ${s.display_name}${s.location ? ` of ${s.location}` : ''}.` : '', brand_context: brands[r.brand] ? `${brands[r.brand].text} ${[r.material, r.size && `size ${r.size}`].filter(Boolean).join(', ')}.` : '', brand_link: brands[r.brand]?.link ?? '', website_url: ['facebook', 'depop', 'poshmark', 'ebay'].includes(r.source) ? '' : r.source_url, wbw_price: r.wbw_price ?? r.price,
     sized_for: SIZED[r.sized_for] ?? r.sized_for, size_estimated: r.size_estimated || (/^estimated$/i.test(String(r.size ?? '')) ? 'Yes' : ''), category: ['boot', 'belt'].includes(r.boot) ? GROUPS[r.boot] : '',
     photos: r.photos.map((_, n) => photoUrl(location.origin, r, n + 1)), alts: r.photos.map((_, n) => altText(r, n + 1)) });
-  const csv = [Object.values(CSV), ...rows.map(r => Object.keys(CSV).map(k => row(r)[k]))].map(r => r.map(cell).join(',')).join('\r\n');
-  Object.assign(document.createElement('a'), { href: URL.createObjectURL(new Blob([csv], { type: 'text/csv' })), download: `wbw-import-${new Date().toISOString().slice(0, 10)}.csv` }).click();
+  const csv = [Object.values(CSV), ...rows.map(r => Object.keys(CSV).map(k => row(r)[k]))].map(r => r.map(csvCell).join(',')).join('\r\n');
+  Object.assign(document.createElement('a'), { href: URL.createObjectURL(new Blob([csv], { type: 'text/csv' })), download: `bootlister-export-${new Date().toISOString().slice(0, 10)}.csv` }).click();
 };
 // Copy-ready posts for other marketplaces; "Posted" tracks where and when each was posted.
 function Share({ item, seller, reload }) {
@@ -86,6 +86,7 @@ export default function Screen({ admin = false }) {
   const [who, setWho] = useState('');
   const [sellers, setSellers] = useState([]);
   const [sellerForm, setSellerForm] = useState(null); // seller being added/edited
+  const [inviteCode, setInviteCode] = useState('');
   const [tab, setTab] = useState('review');
   const [items, setItems] = useState([]);
   const [sel, setSel] = useState(new Set());
@@ -226,7 +227,10 @@ export default function Screen({ admin = false }) {
 
       {admin && sellerForm && <div className="panel">
         <strong>{sellerForm.created_at ? 'Edit seller' : 'New seller'}</strong>
-        <small>{sellerForm.has_login ? 'This seller registered a password.' : 'Sellers set their own password on the sign-in page (email or phone). This form does not set one.'}</small>
+        <small>{sellerForm.has_login ? 'This seller has a password. Setting a new one logs out their other sessions.' : 'This seller has no password yet. Set one here, or create an invite code they type on the sign-in page. Registration will not take over this seller.'}</small>
+        <label>Initial password<input type="password" autoComplete="new-password" value={sellerForm.password ?? ''} onChange={setForm('password')} /></label>
+        <button type="button" onClick={() => api('POST', { ...sellerForm, password: sellerForm.password || undefined, issue_invite: true, rename_from: sellerForm.created_at && current?.name }, '', '/api/sellers').then(s => { setInviteCode(s.invite); setSellerForm({ ...s, password: '' }); }).catch(e => setErr(e.message))}>Create invite code</button>
+        {inviteCode && <p className="warn">Invite code, shown once: {inviteCode}. It expires in 7 days. They choose “Have an invite code?” on the sign-in page. Nothing is emailed.</p>}
         {SELLER_FORM.map(([f, l, kind]) => kind === 'h' ? <h3 key={f}>{l}</h3> :
           <label key={f}>{l}{kind === 'area' ? <textarea rows="3" value={sellerForm[f] ?? ''} onChange={setForm(f)} />
             : kind === 'toggle' ? <select value={sellerForm[f] ?? 'on'} onChange={setForm(f)}><option value="on">On</option><option value="off">Off</option></select>

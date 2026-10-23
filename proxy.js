@@ -8,7 +8,14 @@ import { decide } from './lib/gate';
 export async function proxy(req) {
   const headers = new Headers(req.headers);
   headers.delete('x-session-seller'); // only this proxy may set it; routes still ignore it
-  const decision = await decide(req.nextUrl.pathname, req.headers.get('x-auth') || req.cookies.get('auth')?.value);
+  let decision;
+  try {
+    decision = await decide(req.nextUrl.pathname, req.headers.get('x-auth') || req.cookies.get('auth')?.value);
+  } catch {
+    return req.nextUrl.pathname.startsWith('/api/')
+      ? NextResponse.json({ error: 'Please log in.' }, { status: 401 })
+      : NextResponse.redirect(new URL('/login', req.url));
+  }
   if (decision.type === 'closed') return req.nextUrl.pathname.startsWith('/api/')
     ? NextResponse.json({ error: decision.error }, { status: 503 })
     : new NextResponse(decision.error, { status: 503, headers: { 'Content-Type': 'text/plain; charset=utf-8' } });

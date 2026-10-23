@@ -3,8 +3,8 @@
   "name": "BootLister",
   "version": "0.1",
   "permissions": ["contextMenus", "scripting", "tabs", "storage"],
-  "host_permissions": ["https://*.facebook.com/*", "https://*.depop.com/*", "https://*.vercel.app/*", "http://localhost:3000/*"],
+  "host_permissions": ["https://*.facebook.com/*", "https://*.depop.com/*", "https://bootlister.vercel.app/*", "https://wbw-lister.vercel.app/*", "http://localhost/*", "http://127.0.0.1/*"],
   "background": { "service_worker": "background.js" },
-  "content_scripts": [{ "matches": ["https://*.vercel.app/*", "http://localhost:3000/*"], "js": ["bridge.js"] }],
+  "content_scripts": [{ "matches": ["https://bootlister.vercel.app/*", "https://wbw-lister.vercel.app/*", "http://localhost/*", "http://127.0.0.1/*"], "js": ["bridge.js"] }],
   "action": { "default_popup": "popup.html" }
 }

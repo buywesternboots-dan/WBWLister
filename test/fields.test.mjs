@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { describe, it } from 'node:test';
 import { enrich } from '../lib/wbw.js';
 
-const HEADERS = ['Photos', 'Listing title', 'Asking price', 'Brand', 'Sized for', 'Size', 'Size estimated', 'Condition', 'Width', 'Material type', 'Material / hide', 'Material specifics (cut)', 'Where made', 'Color', 'Keywords', 'Sole length (in)', 'Sole width (in)', 'Heel height (in)', 'Shaft circumference (in)', 'Shaft height (in)', 'Sole', 'Heel', 'Toe', 'Description'];
+const HEADERS = ['Photos', 'Listing title', 'Asking price', 'Brand', 'Sized for', 'Size', 'Size estimated', 'Condition', 'Width', 'Material type', 'Material / hide', 'Material specifics (cut)', 'Where made', 'Color', 'Keywords', 'Sole length', 'Sole width', 'Heel height', 'Shaft circumference', 'Shaft height', 'Sole', 'Heel', 'Toe', 'Description', 'WBW Seller Name'];
 
 describe('WBW sell-a-pair fields', () => {
   it('exports every field from the WBW listing form', () => {
@@ -15,6 +15,9 @@ describe('WBW sell-a-pair fields', () => {
       assert.ok(i > at, h);
       at = i;
     }
+    assert.equal(cols.includes('(in)'), false);
+    assert.match(src, /bootlister-export-/);
+    assert.equal(src.includes('wbw-import-'), false);
   });
 
   it('fills every field the listing actually states', () => {
@@ -39,7 +42,7 @@ Leather sole. Riding heel.`,
     assert.equal(e.toe, 'Square toe');
     assert.equal(e.heel, 'Riding heel');
     assert.equal(e.sole, 'Leather');
-    assert.equal(e.made_in, 'Leon');
+    assert.equal(e.made_in, 'Leon, Mexico');
     assert.equal(e.condition, 'Broken In');
     assert.equal(e.sole_length, '12.1');
     assert.equal(e.sole_width, '4.25');
@@ -96,5 +99,21 @@ Asking price: $400
     assert.equal(quiet.heel_height, null);
     assert.equal(quiet.width, null);
     assert.equal(quiet.sized_for, 'Men');
+  });
+
+  it('reads a trailing size, a width letter, shaft and calf measurements, and a place with a comma', () => {
+    assert.equal(enrich({ title: 'Boots 9.5', description: '' }).size, '9.5');
+    assert.equal(enrich({ title: 'Boots 8', description: '' }).size, '8');
+    const sized = enrich({ title: 'Boots', description: 'Size 7.5 B' });
+    assert.equal(sized.size, '7.5');
+    assert.equal(sized.width, 'B');
+    assert.equal(enrich({ title: 'Boots', description: '13-inch shaft' }).shaft_height, '13');
+    assert.equal(enrich({ title: 'Boots', description: '13 inches tall' }).shaft_height, '13');
+    assert.equal(enrich({ title: 'Boots', description: '14" tall shaft' }).shaft_height, '14');
+    assert.equal(enrich({ title: 'Boots', description: '15" calf' }).shaft_circ, '15');
+    const heel = enrich({ title: 'Boots', description: '2" stockman heel' });
+    assert.equal(heel.heel_height, '2');
+    assert.equal(heel.heel, 'Stockman heel');
+    assert.equal(enrich({ title: 'Boots', description: 'Made in El Paso, Texas' }).made_in, 'El Paso, Texas');
   });
 });

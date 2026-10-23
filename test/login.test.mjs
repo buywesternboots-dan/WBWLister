@@ -63,37 +63,39 @@ test('register and sign in by email or by phone; a wrong password does not', asy
   assert.equal(ada.hash.includes('ada-secret'), false);
   assert.match(ada.hash, /^scrypt\$/);
   assert.equal(bea.phone, '+15552223333');
-  assert.deepEqual(await matchSeller(records, 'ada@shop.test', 'ada-secret'), { role: 'seller', seller: 'adas-boots' });
-  assert.deepEqual(await matchSeller(records, '5552223333', 'bea-secret'), { role: 'seller', seller: 'bea-boots' });
-  assert.deepEqual(await matchSeller(records, '+1 555 222 3333', 'bea-secret'), { role: 'seller', seller: 'bea-boots' });
+  assert.deepEqual(await matchSeller(records, 'ada@shop.test', 'ada-secret'), { role: 'seller', seller: 'adas-boots', version: 0 });
+  assert.deepEqual(await matchSeller(records, '5552223333', 'bea-secret'), { role: 'seller', seller: 'bea-boots', version: 0 });
+  assert.deepEqual(await matchSeller(records, '+1 555 222 3333', 'bea-secret'), { role: 'seller', seller: 'bea-boots', version: 0 });
   assert.equal(await matchSeller(records, 'ada@shop.test', 'wrong-password'), null);
   assert.equal(await matchSeller(records, '5552223333', 'ada-secret'), null);
   assert.equal(await matchSeller(records, 'other@shop.test', 'bea-secret'), null);
-  await assert.rejects(() => add({ display_name: 'Other', email: 'ada@shop.test', password: 'another-secret' }), /already registered/);
+  await assert.rejects(() => add({ display_name: 'Other', email: 'ada@shop.test', password: 'another-secret' }), /already on a seller/);
   await assert.rejects(() => add({ display_name: 'Nope', password: 'long-enough' }), /email or a phone/);
   await assert.rejects(() => add({ display_name: 'Nope', email: 'a@b.co', password: 'short' }), /at least 8/);
 });
 
-test('registering claims a seller that has no scrypt password yet', async () => {
+test('registering does not claim a seller that has no password yet', async () => {
   const records = [{ name: 'ada', email: 'ada@shop.test', phone: null, hash: 'old-sha', salt: 's', display_name: 'Ada' }];
-  const { row, claim } = await registerSeller(records, { display_name: 'Ada Boots', email: 'ADA@shop.test', password: 'new-secret' });
-  assert.equal(claim, true);
-  assert.equal(row.name, 'ada');
-  assert.match(row.hash, /^scrypt\$/);
-  records[0] = row;
-  assert.deepEqual(await matchSeller(records, 'ada@shop.test', 'new-secret'), { role: 'seller', seller: 'ada' });
-  assert.equal(await matchSeller(records, 'ada@shop.test', 'old-sha'), null);
+  await assert.rejects(() => registerSeller(records, { display_name: 'Ada Boots', email: 'ADA@shop.test', password: 'new-secret' }), /already on a seller/);
+  assert.equal(records[0].hash, 'old-sha');
+  assert.equal(records[0].name, 'ada');
+  const phone = [{ name: 'bea', email: null, phone: '+15552223333', hash: '', salt: '', display_name: 'Bea' }];
+  await assert.rejects(() => registerSeller(phone, { display_name: 'Bea', phone: '5552223333', password: 'bea-secret' }), /already on a seller/);
+  assert.equal(phone[0].hash, '');
 });
 
 test('the session token carries the seller name and rejects a forged name or secret', async () => {
   assert.equal(sessionWho({ role: 'seller', seller: 'ada' }), 'seller:ada');
   assert.equal(sessionWho({ role: 'admin' }), 'admin');
   const token = await sessionToken('seller:ada', SECRET);
-  assert.deepEqual(await readSession(token, SECRET), { role: 'seller', seller: 'ada' });
+  assert.equal(token.startsWith('bootlister.'), true);
+  assert.deepEqual(await readSession(token, SECRET), { role: 'seller', seller: 'ada', version: 0 });
   assert.equal(await readSession(token, 'other-secret'), null);
-  const forged = `${encodeURIComponent('seller:bob')}.${token.split('.')[1]}`;
+  const forged = `bootlister.${btoa(JSON.stringify({ w: 'seller:bob', e: Date.now() + 1000, v: 0 }))}.${token.split('.')[2]}`;
   assert.equal(await readSession(forged, SECRET), null);
-  assert.deepEqual(await readSession(await sessionToken('admin', SECRET), SECRET), { role: 'admin' });
+  assert.deepEqual(await readSession(await sessionToken('admin', SECRET), SECRET), { role: 'admin', version: 0 });
+  assert.equal(await readSession('%%%', SECRET), null);
+  assert.equal(await readSession('bootlister.@@@.nope', SECRET), null);
 });
 
 test('a seller session stays on that seller; a different Bearer name is rejected', () => {

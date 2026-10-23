@@ -176,7 +176,7 @@ test('seller A cannot read or modify seller B through the items API', async () =
   assert.equal(adminEdit.status, 403);
   assert.equal(items.rows[1].title, 'Bea boot');
 
-  const forged = `${encodeURIComponent('seller:' + regB.seller)}.${tokenA.split('.')[1]}`;
+  const forged = `bootlister.${Buffer.from(JSON.stringify({ w: 'seller:' + regB.seller, e: Date.now() + 864e5, v: 0 })).toString('base64url')}.${tokenA.split('.')[2]}`;
   const forgedRead = await itemsResponse(new Request('http://localhost/api/items?status=review', { headers: { cookie: `auth=${forged}` } }), items, ENV);
   assert.equal(forgedRead.status, 401);
 

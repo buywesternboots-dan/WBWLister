@@ -1,17 +1,27 @@
 const $ = id => document.getElementById(id);
 const IMPORTABLE = /marketplace\/profile\/\d+|depop\.com\/(?!products\/)[\w.-]+/;
 const say = t => { $('status').textContent = t; };
+const originOf = url => { try { return new URL(url).origin; } catch { return ''; } };
 
 // Seller dropdown from the server; picking a seller fills in their saved Facebook/Depop link.
+// The password is never written to chrome.storage. Only the session token is kept.
 let sellers = [];
 async function signIn() {
   const server = $('server').value.trim().replace(/\/$/, '');
-  const email = $('email').value.trim(), pin = $('pin').value;
-  if (!server || !email || !pin) return '';
-  const r = await fetch(`${server}/api/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password: pin }) }).catch(() => null);
+  const email = $('email').value.trim(), password = $('pin').value;
+  if (!server) return '';
+  await chrome.storage.sync.remove('pin');
+  if (!password) {
+    const saved = await chrome.storage.sync.get(['token', 'server']);
+    if (saved.token && originOf(saved.server) === originOf(server)) return saved.token;
+    return '';
+  }
+  if (!email) return '';
+  const r = await fetch(`${server}/api/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password }) }).catch(() => null);
   const j = await r?.json().catch(() => ({})) ?? {};
   if (!r?.ok || !j.token) { say(j.error || 'Could not sign in.'); await chrome.storage.sync.remove('token'); return ''; }
-  await chrome.storage.sync.set({ server, email, pin, token: j.token });
+  await chrome.storage.sync.set({ server, email, token: j.token });
+  $('pin').value = '';
   return j.token;
 }
 async function loadSellers(selected) {
@@ -29,8 +39,9 @@ $('seller').onchange = () => {
   say(s && !s.fb_profile ? 'No Facebook/Depop link saved for this seller — add it in Seller settings, or paste one here.' : '');
 };
 $('server').onchange = $('email').onchange = $('pin').onchange = () => loadSellers($('seller').value);
-chrome.storage.sync.get(['server', 'seller', 'email', 'pin'], s => {
-  $('server').value = s.server || ''; $('email').value = s.email || ''; $('pin').value = s.pin || '';
+chrome.storage.sync.remove('pin');
+chrome.storage.sync.get(['server', 'seller', 'email'], s => {
+  $('server').value = s.server || ''; $('email').value = s.email || '';
   loadSellers(s.seller);
 });
 // On a Facebook profile or Depop shop page, use it.
