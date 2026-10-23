@@ -150,6 +150,8 @@ test('the extension only talks to the saved BootLister hosts and does not store 
   const popup = read('extension/popup.js');
   assert.match(popup, /remove\('pin'\)/);
   assert.equal(/storage\.sync\.set\(\{[^}]*\bpin\b/.test(popup), false);
+  assert.equal(popup.includes('innerHTML'), false);
+  assert.match(popup, /createElement\('option'\)/);
 });
 
 test('csv cells that start with a formula character are quoted as text', () => {
