@@ -18,9 +18,11 @@ const withRetry = async (fn, n = 1) => { try { return await fn(); } catch (e) { 
 const TABS = { review: 'Newly imported', published: 'Exported', pending: 'Pending sold', sold: 'Sold', removed: 'Removed', archived: 'Archived' };
 const GROUPS = { boot: 'Boots', belt: 'Belts', unsure: 'Not sure', other: 'Other' };
 // Item fields: key → label. * = required by WBW.
-const LABELS = { price: 'Price*', wbw_price: 'WBW Price', title: 'Title*', brand: 'Brand*', sized_for: 'Sized for (Men/Women)*', width: 'Width',
-  material_type: 'Material type', material: 'Material', made_in: 'Where made', condition: 'Condition*', color: 'Color', sole: 'Sole', heel: 'Heel',
-  toe: 'Toe', size: 'Size', description: 'Description', id_text: 'Model / date codes' };
+const LABELS = { title: 'Listing title*', wbw_price: 'Asking price', price: 'Source price*', brand: 'Brand*', sized_for: 'Sized for*', size: 'Size',
+  size_estimated: 'Size estimated', condition: 'Condition*', width: 'Width', material_type: 'Material type', material: 'Material / hide',
+  material_cut: 'Material specifics (cut)', made_in: 'Where made', color: 'Color', keywords: 'Keywords',
+  sole_length: 'Sole length (in)', sole_width: 'Sole width (in)', heel_height: 'Heel height (in)', shaft_circ: 'Shaft circumference (in)', shaft_height: 'Shaft height (in)',
+  sole: 'Sole', heel: 'Heel', toe: 'Toe', description: 'Description', id_text: 'Model / date codes' };
 const FIELDS = Object.keys(LABELS);
 const label = f => LABELS[f].replace(/\*$/, '');
 const missing = i => REQUIRED.filter(f => !i[f]);
@@ -52,12 +54,13 @@ const SELLER_FORM = [
   ['terms', 'Custom terms, one per line: their shorthand = meaning (e.g. BJ = Black Jack, Sz = Size)', 'area'],
   ['defaults', 'Defaults, one per line: field = value, used when a listing doesn\'t say (e.g. sized_for = Women, made_in = USA)', 'area'],
 ];
-// Export: WBW import CSV columns, in WBW's order (until the direct WBW connection replaces it).
-const CSV = { seller: 'WBW Seller Name', ...Object.fromEntries(FIELDS.map(f => [f, label(f)])), category: 'Category', website_url: 'Seller Website Link', photos: 'Image URLs', alts: 'Image Alt Text', brand_context: 'Brand Context', brand_link: 'Brand Page Link', seller_context: 'Seller Context', source_id: 'Source ID' };
+// Export: every field on the WBW "Sell a pair" form, then the extra columns this import still needs.
+const SIZED = { Men: "Men's", Women: "Women's", Kids: 'Kids' };
+const CSV = { seller: 'WBW Seller Name', photos: 'Photos', title: 'Listing title', wbw_price: 'Asking price', brand: 'Brand', sized_for: 'Sized for', size: 'Size', size_estimated: 'Size estimated', condition: 'Condition', width: 'Width', material_type: 'Material type', material: 'Material / hide', material_cut: 'Material specifics (cut)', made_in: 'Where made', color: 'Color', keywords: 'Keywords', sole_length: 'Sole length (in)', sole_width: 'Sole width (in)', heel_height: 'Heel height (in)', shaft_circ: 'Shaft circumference (in)', shaft_height: 'Shaft height (in)', sole: 'Sole', heel: 'Heel', toe: 'Toe', description: 'Description', price: 'Source price', id_text: 'Model / date codes', category: 'Category', website_url: 'Seller Website Link', alts: 'Image Alt Text', brand_context: 'Brand Context', brand_link: 'Brand Page Link', seller_context: 'Seller Context', source_id: 'Source ID' };
 const cell = v => `"${String(Array.isArray(v) ? v.join('|') : v ?? '').replace(/"/g, '""')}"`;
 const download = (rows, brands = {}, s = {}) => {
   const row = r => ({ ...r, seller_context: s.display_name ? `Sold by ${s.display_name}${s.location ? ` of ${s.location}` : ''}.` : '', brand_context: brands[r.brand] ? `${brands[r.brand].text} ${[r.material, r.size && `size ${r.size}`].filter(Boolean).join(', ')}.` : '', brand_link: brands[r.brand]?.link ?? '', website_url: ['facebook', 'depop', 'poshmark', 'ebay'].includes(r.source) ? '' : r.source_url, wbw_price: r.wbw_price ?? r.price,
-    category: ['boot', 'belt'].includes(r.boot) ? GROUPS[r.boot] : '',
+    sized_for: SIZED[r.sized_for] ?? r.sized_for, size_estimated: r.size_estimated || (/^estimated$/i.test(String(r.size ?? '')) ? 'Yes' : ''), category: ['boot', 'belt'].includes(r.boot) ? GROUPS[r.boot] : '',
     photos: r.photos.map((_, n) => photoUrl(location.origin, r, n + 1)), alts: r.photos.map((_, n) => altText(r, n + 1)) });
   const csv = [Object.values(CSV), ...rows.map(r => Object.keys(CSV).map(k => row(r)[k]))].map(r => r.map(cell).join(',')).join('\r\n');
   Object.assign(document.createElement('a'), { href: URL.createObjectURL(new Blob([csv], { type: 'text/csv' })), download: `wbw-import-${new Date().toISOString().slice(0, 10)}.csv` }).click();
@@ -313,7 +316,7 @@ export default function Screen({ admin = false }) {
               {missing(i).length > 0 && <small className="err">Missing: {missing(i).map(label).join(', ')}</small>}
               {unverified(i).length > 0 && <small className="warn">Verify: {unverified(i).map(label).join(', ')}</small>}
               {needsCheck(i) ? <small className="err">{admin ? "Needs the seller's check" : 'Needs your check'}</small> : <small>Approved by {i.approved_by} on {String(i.approved_at).slice(0, 10)}</small>}
-              <dl>{FIELDS.filter(f => f !== 'title' && f !== 'description').map(f =>
+              <dl>{FIELDS.filter(f => f !== 'title' && f !== 'description' && (i[f] || flagged(i).includes(f) || ['wbw_price', 'price', 'brand', 'sized_for', 'size', 'condition', 'material'].includes(f))).map(f =>
                 <div key={f} className={flagged(i).includes(f) ? 'err' : unverified(i).includes(f) ? 'guess' : ''}>
                 <dt>{label(f)}</dt><dd>{f.includes('price') && i[f] ? `$${Number(i[f]).toFixed(2)}` : i[f] || '—'}</dd></div>)}</dl>
               {i.description && <p className="desc">{i.description}</p>}
