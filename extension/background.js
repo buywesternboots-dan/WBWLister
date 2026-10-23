@@ -100,12 +100,12 @@ async function readDepopShop() {
   });
 }
 
-// ---- talking to the WBW Lister server ----
-// Jobs started from the WBW Lister page use that page's server and seller; jobs from the popup use the popup's saved settings.
+// ---- talking to the BootLister server ----
+// Jobs started from the BootLister page use that page's server and seller; jobs from the popup use the popup's saved settings.
 let job = null;
 async function api(method, body, q = '') {
   const { server, seller, token } = { ...(await chrome.storage.sync.get(['server', 'seller', 'token'])), ...job };
-  if (!server) throw new Error('Set the WBW Lister address in the extension popup.');
+  if (!server) throw new Error('Set the BootLister address in the extension popup.');
   const r = await fetch(`${server.replace(/\/$/, '')}/api/items${q}`, {
     method, credentials: 'include', // the page's login cookie, when started from the page
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${seller || ''}`, 'x-auth': token || '' },
@@ -194,9 +194,9 @@ chrome.runtime.onMessage.addListener((m, _, reply) => {
   return true;
 });
 
-// Right-click "Add to WBW" on a Facebook listing (or a link to one).
+// Right-click "Add to BootLister" on a Facebook listing (or a link to one).
 chrome.runtime.onInstalled.addListener(() => chrome.contextMenus.create({
-  id: 'wbw', title: 'Add to WBW', contexts: ['link', 'page'], documentUrlPatterns: ['https://*.facebook.com/*'],
+  id: 'bootlister', title: 'Add to BootLister', contexts: ['link', 'page'], documentUrlPatterns: ['https://*.facebook.com/*'],
 }));
 chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   const link = ITEM.test(info.linkUrl || '') ? info.linkUrl : null;

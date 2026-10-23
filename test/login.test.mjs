@@ -129,6 +129,12 @@ test('sign-in sends each role to its own screen, and the server keeps them there
   assert.equal(read('app/seller/page.js').includes('<Screen admin'), false);
   assert.match(read('app/login/page.js'), /homeFor\(j\.role\)/);
   assert.match(read('app/login/page.js'), /api\/register/);
+  assert.match(read('app/login/page.js'), /BootLister/);
+  assert.match(read('app/layout.js'), /title: 'BootLister'/);
+  assert.match(read('extension/manifest.json'), /"name": "BootLister"/);
+  assert.equal(read('app/login/page.js').includes('WBW Lister'), false);
+  assert.equal(read('app/layout.js').includes('WBW Inventory'), false);
+  assert.equal(read('package.json').includes('wbwlister'), false);
   assert.match(read('lib/gate.js'), /redirectFor/);
   assert.match(read('proxy.js'), /decision\.type === 'redirect'/);
   assert.match(read('app/screen.js'), /admin && <button onClick=\{\(\) => \{ const to = prompt\('Move the selected items/);

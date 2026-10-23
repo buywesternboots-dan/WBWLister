@@ -94,7 +94,7 @@ export default function Screen({ admin = false }) {
   const [link, setLink] = useState(''); // import source for the selected seller
   const [run, setRunState] = useState(null); // import progress: { label, done, total, busy }
   const [failed, setFailed] = useState([]);
-  const [ext, setExt] = useState(false); // WBW Importer extension present on this page
+  const [ext, setExt] = useState(false); // BootLister extension present on this page
   const [err, setErr] = useState('');
   const [me, setMe] = useState(null);
 
@@ -156,7 +156,7 @@ export default function Screen({ admin = false }) {
   const startImport = (sync, only) => (EXTENSION_LINK.test(link) ? importViaExtension(sync) : importSite(sync, only));
   const importViaExtension = sync => {
     setErr('');
-    if (!ext) return setErr('Facebook and Depop imports run through the WBW Importer Chrome extension. Install it (or reload it at chrome://extensions), then reload this page.');
+    if (!ext) return setErr('Facebook and Depop imports run through the BootLister Chrome extension. Install it (or reload it at chrome://extensions), then reload this page.');
     setFailed([]); setRunState({ label: 'Started in the Chrome extension — a Facebook/Depop tab will open…', busy: true });
     window.postMessage({ wbwImport: { type: 'link', link, sync, seller: who } }, location.origin);
   };
@@ -212,14 +212,14 @@ export default function Screen({ admin = false }) {
         </select>
         {who && <button onClick={() => setSellerForm(hasDetails ? current : { name: who, sync: 'off' })}>{hasDetails ? 'Seller settings' : 'Set up seller'}</button>}
         <button className="primary" onClick={() => setSellerForm({ sync: 'off' })}>+ Add seller</button></>}
-        {admin && <a className="src" href="/wbw-importer.zip" download title="Needed for Facebook and Depop imports">Chrome extension{ext ? ' ✓' : ''}</a>}
+        {admin && <a className="src" href="/bootlister.zip" download title="Needed for Facebook and Depop imports">Chrome extension{ext ? ' ✓' : ''}</a>}
         <a className="src" href="/login" onClick={e => { e.preventDefault(); fetch('/api/login', { method: 'DELETE' }).then(() => location.assign('/login')); }}>Log out</a>
       </div>
       {!admin && <p className="help">Your job is to double-check each listing before it goes live, including anything shown in yellow. When you approve it, it is published right away. It is marked exported here — WBW is not connected yet, so nothing is sent to the live site.</p>}
       {admin && who && <p className="help">When a seller approves a listing, it is published here right away. You can still see and edit every listing. Export CSV is the file for WBW. Nothing is sent to the live site yet.</p>}
-      {!ext && EXTENSION_LINK.test(link) && <p className="help">Facebook and Depop import through the WBW Importer Chrome extension:
-        1) download it with the <a href="/wbw-importer.zip" download>Chrome extension</a> link and unzip it; 2) open chrome://extensions and turn on
-        Developer mode; 3) click Load unpacked and pick the unzipped wbw-importer folder; 4) reload this page.</p>}
+      {!ext && EXTENSION_LINK.test(link) && <p className="help">Facebook and Depop import through the BootLister Chrome extension:
+        1) download it with the <a href="/bootlister.zip" download>Chrome extension</a> link and unzip it; 2) open chrome://extensions and turn on
+        Developer mode; 3) click Load unpacked and pick the unzipped bootlister folder; 4) reload this page.</p>}
 
       {admin && sellerForm && <div className="panel">
         <strong>{sellerForm.created_at ? 'Edit seller' : 'New seller'}</strong>

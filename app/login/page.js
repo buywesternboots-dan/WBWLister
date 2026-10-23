@@ -22,7 +22,7 @@ export default function Login() {
     setErr(j.error || 'Could not sign in.');
   };
   return <form onSubmit={submit} style={{ maxWidth: 420, margin: '12vh auto', display: 'flex', flexDirection: 'column', gap: 8, font: '16px system-ui', padding: 16 }}>
-    <strong>WBW Lister</strong>
+    <strong>BootLister</strong>
     {reg && <input name="shop" placeholder="Shop name" required autoFocus style={field} />}
     <input name="email" type={reg ? 'email' : 'text'} placeholder={reg ? 'Email (or leave blank and use phone)' : 'Email, phone, or admin'} autoComplete="username" required={!reg} autoFocus={!reg} style={field} />
     {reg && <input name="phone" type="tel" placeholder="Phone (or leave blank and use email)" autoComplete="tel" style={field} />}
@@ -30,7 +30,7 @@ export default function Login() {
     <button style={{ ...field, background: '#1f6f6b', color: '#fff', borderColor: '#1f6f6b' }}>{reg ? 'Create account' : 'Log in'}</button>
     <button type="button" onClick={() => { setReg(!reg); setErr(''); }} style={{ ...field, background: '#fff' }}>{reg ? 'Have an account? Log in' : 'New seller? Create an account'}</button>
     <small style={{ color: '#6b5a4a' }}>
-      Sellers register with an email or a phone number and a password, then only see their own items. Approving a listing marks it exported here — nothing is sent to the live site yet. WBW staff sign in with the username admin and the admin password. In production the site stays closed until that password is set (ADMIN_PASSWORD, or APP_PASSWORD if that is the one configured).
+      Sellers register with an email or a phone number and a password, then only see their own items. Approving a listing marks it exported here — nothing is sent to the live site yet. Staff sign in with the username admin and the admin password. In production the site stays closed until that password is set (ADMIN_PASSWORD, or APP_PASSWORD if that is the one configured).
     </small>
     {err && <small style={{ color: '#a3261b' }}>{err}</small>}
   </form>;

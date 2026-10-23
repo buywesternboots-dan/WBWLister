@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "WBW Importer",
+  "name": "BootLister",
   "version": "0.1",
   "permissions": ["contextMenus", "scripting", "tabs", "storage"],
   "host_permissions": ["https://*.facebook.com/*", "https://*.depop.com/*", "https://*.vercel.app/*", "http://localhost:3000/*"],

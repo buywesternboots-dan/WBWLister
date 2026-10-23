@@ -1,4 +1,4 @@
-// Runs on the WBW Lister page: lets the page start Facebook/Depop imports here (those sites block servers, so they run
+// Runs on the BootLister page: lets the page start Facebook/Depop imports here (those sites block servers, so they run
 // in this browser) and shows their progress on the page.
 const post = m => window.postMessage(m, location.origin);
 chrome.storage.sync.get('server', s => s.server || chrome.storage.sync.set({ server: location.origin })); // first visit sets the popup's address
