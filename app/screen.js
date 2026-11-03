@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { CHOICES, displayWidth, searchMatch } from '../lib/vocab';
 import { needsCheck, REQUIRED } from '../lib/publish';
+import { missingFields, unverifiedFields, exportReady, toggleVisibleSelection } from '../lib/review';
 import { csvCell, packCsvChunks } from '../lib/csv';
 import { altText, photoUrl } from '../lib/seo';
 import { CHANNELS, post } from '../lib/crosspost';
@@ -26,16 +27,16 @@ const LABELS = { title: 'Listing title*', wbw_price: 'Asking price', price: 'Sou
   sole: 'Sole', heel: 'Heel', toe: 'Toe', description: 'Description', id_text: 'Model / date codes' };
 const FIELDS = Object.keys(LABELS);
 const label = f => LABELS[f].replace(/\*$/, '');
-const missing = i => REQUIRED.filter(f => !i[f]);
+const missing = missingFields;
 const ALERT = ['width']; // not required, but shown red when empty so the seller knows it isn't there
 const flagged = i => [...missing(i), ...ALERT.filter(f => !i[f])];
-const unverified = i => (i.guessed ?? []).filter(f => i[f]);
-const isReady = i => !missing(i).length && !unverified(i).length;
+const unverified = unverifiedFields;
+const isReady = exportReady;
 const PRESETS = { brand: ['Unbranded', 'Custom'], size: ['Estimated'] }; // one-click values for items that genuinely have none
 // Group header quick filters: Ready, To verify, one per missing required field, and the alert fields.
 const FILTERS = { check: ['Needs a check', needsCheck], approved: ['Approved', i => !needsCheck(i)],
-  ready: ['Ready', isReady], idinfo: ['Has ID info', i => i.id_photos?.length > 0], verify: ['To verify', i => unverified(i).length > 0],
-  ...Object.fromEntries(REQUIRED.map(f => [f, [`Missing ${label(f)}`, i => !i[f]]])),
+  ready: ['Ready to export', isReady], complete: ['Fields complete', i => !missing(i).length && !unverified(i).length], idinfo: ['Has ID info', i => i.id_photos?.length > 0], verify: ['To verify', i => unverified(i).length > 0],
+  ...Object.fromEntries(REQUIRED.map(f => [f, [`Missing ${label(f)}`, i => missing(i).includes(f)]])),
   ...Object.fromEntries(ALERT.map(f => [f, [`No ${label(f).toLowerCase()}`, i => !i[f]]])) };
 // Sorts: most likely a boot first, or newest import day first (same day: most likely boot first).
 const SORTS = {
@@ -144,7 +145,7 @@ export default function Screen({ admin = false }) {
   const scan = async () => { for (const id of sel) await api('POST', { id }, '', '/api/idcheck').catch(e => setErr(e.message)); load(); };
   const exportCsv = async () => {
     const picked = items.filter(i => sel.has(i.id)), rows = picked.filter(i => !needsCheck(i));
-    if (!rows.length) return setErr(picked.length ? 'Nothing selected has the seller\'s approval yet.' : 'Select an approved item first.');
+    if (!rows.length) return setErr(picked.length ? 'Approve the selected items first, then export their CSV. Saving verified fields does not approve an item.' : 'Select an approved item first, then choose Export CSV.');
     const notReady = rows.filter(i => !isReady(i)).length;
     if (notReady && !confirm(`${notReady} of ${rows.length} approved items aren't ready (missing or unverified fields). Export anyway?`)) return;
     const names = current?.brand_context === 'off' ? [] : [...new Set(rows.map(r => r.brand).filter(Boolean))];
@@ -326,6 +327,9 @@ export default function Screen({ admin = false }) {
               return (c > 0 || fk === 'ready' || fk === 'check') && <button key={fk} className={`chip ${fk in LABELS ? 'miss' : ''} ${fk === 'check' ? 'miss' : ''} ${filter[k] === fk ? 'on' : ''}`}
                 onClick={() => setFilter({ ...filter, [k]: filter[k] === fk ? null : fk })}>{fl} ({c})</button>; })}
           </h2>
+          {visible.length > 0 && <button type="button" className="group-select" onClick={() => setSel(s => toggleVisibleSelection(s, visible))}>
+            {visible.every(i => sel.has(i.id)) ? 'Deselect' : 'Select all'} {l.toLowerCase()} ({visible.length})
+          </button>}
           {visible.map(i => <div key={i.id} className="item">
             <input type="checkbox" checked={sel.has(i.id)} onChange={() => toggle(i.id)} />
             {i.photos[0] ? <img src={i.photos[0]} alt="" loading="lazy" /> : <div className="noimg" />}
@@ -335,8 +339,9 @@ export default function Screen({ admin = false }) {
                   {PRESETS[f]?.map(p => <button key={p} type="button" className="preset" onClick={() => setEdit({ ...edit, [f]: p })}>{p}</button>)}</span>
                 {f === 'description' ? <textarea rows="4" value={edit[f] ?? ''} onChange={setField(f)} />
                   : <input list={CHOICES[f] && `dl-${f}`} value={(f === 'width' ? displayWidth(edit[f]) : edit[f]) ?? ''} onChange={setField(f)} />}</label>)}
+              {needsCheck(i) && <p className="warn">Save verified fields to keep your edits. Choose {admin ? 'Approve for seller' : 'Approve / ready to go live'} to finish review and enable CSV export. Approval here does not send the item to Western Boot World; import the exported CSV there.</p>}
               {i.status === 'published' && <Share item={i} seller={current} reload={load} />}
-              <span><button className="primary" onClick={save}>Save (marks all verified)</button>
+              <span><button className="primary" onClick={save}>Save verified fields</button>
                 {needsCheck(i) && <button type="button" className="primary" onClick={() => approve(i)}>{admin ? 'Approve for seller' : 'Approve / ready to go live'}</button>}
                 <button onClick={() => setEdit(null)}>Cancel</button></span>
               {!admin && i.approved_at && <small className="warn">Saving changes takes it off the exported list until you approve it again.</small>}
@@ -350,7 +355,7 @@ export default function Screen({ admin = false }) {
               {i.boot === 'unsure' && <small>{Math.round((i.boot_score ?? 0) * 100)}% likely a boot</small>}
               {missing(i).length > 0 && <small className="err">Missing: {missing(i).map(label).join(', ')}</small>}
               {unverified(i).length > 0 && <small className="warn">Verify: {unverified(i).map(label).join(', ')}</small>}
-              {needsCheck(i) ? <small className="err">{admin ? "Needs the seller's check" : 'Needs your check'}</small> : <small>Approved by {i.approved_by} on {String(i.approved_at).slice(0, 10)}</small>}
+              {needsCheck(i) ? <small className="warn">{missing(i).length || unverified(i).length ? 'Review the flagged fields, then approve to export.' : 'Fields complete — approval is still required to export.'}</small> : <small>Approved by {i.approved_by} on {String(i.approved_at).slice(0, 10)}</small>}
               <dl>{FIELDS.filter(f => f !== 'title' && f !== 'description' && (i[f] || flagged(i).includes(f) || ['wbw_price', 'price', 'brand', 'sized_for', 'size', 'condition', 'material'].includes(f))).map(f =>
                 <div key={f} className={flagged(i).includes(f) ? 'err' : unverified(i).includes(f) ? 'guess' : ''}>
                 <dt>{label(f)}</dt><dd>{f.includes('price') && i[f] ? `$${Number(i[f]).toFixed(2)}` : i[f] || '—'}</dd></div>)}</dl>
@@ -384,7 +389,7 @@ label{display:flex;flex-direction:column;font-size:13px;color:#6b5a4a;gap:2px}
 .bar{position:sticky;top:0;padding:10px 0;background:#faf8f5;z-index:1}.bar label{flex-direction:row;align-items:center;gap:6px;font-size:16px}
 .adj{display:flex;gap:4px}.adj input{width:90px}
 h2{font-size:15px;margin:20px 0 8px;color:#6b5a4a;display:flex;flex-wrap:wrap;gap:6px;align-items:center}
-.chip{font-size:12px;padding:2px 8px;border-radius:12px}.chip.miss{color:#a3261b;border-color:#e3b3ad}.chip.on{background:#1f6f6b;border-color:#1f6f6b;color:#fff}
+.group-select{margin-bottom:8px}.chip{font-size:12px;padding:2px 8px;border-radius:12px}.chip.miss{color:#a3261b;border-color:#e3b3ad}.chip.on{background:#1f6f6b;border-color:#1f6f6b;color:#fff}
 .item{display:flex;gap:12px;align-items:flex-start;padding:10px;background:#fff;border:1px solid #e6dfd6;border-radius:8px;margin-bottom:8px}
 .item img,.noimg{width:72px;height:72px;object-fit:cover;border-radius:6px;background:#eee;flex-shrink:0}
 .info{display:flex;flex-direction:column;cursor:pointer;flex:1;min-width:0}.info small{color:#8a7a6a}
