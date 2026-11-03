@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { describe, it } from 'node:test';
+import { post } from '../lib/crosspost.js';
+import { altText } from '../lib/seo.js';
+import { displayWidth } from '../lib/vocab.js';
 import { enrich } from '../lib/wbw.js';
 
 const HEADERS = ['Photos', 'Listing title', 'Asking price', 'Brand', 'Sized for', 'Size', 'Size estimated', 'Condition', 'Width', 'Material type', 'Material / hide', 'Material specifics (cut)', 'Where made', 'Color', 'Keywords', 'Sole length', 'Sole width', 'Heel height', 'Shaft circumference', 'Shaft height', 'Sole', 'Heel', 'Toe', 'Description', 'WBW Seller Name'];
@@ -118,5 +121,48 @@ Asking price: $400
     assert.equal(enrich({ title: 'Boots', description: 'Made in Mexico, bought in 2019' }).made_in, 'Mexico');
     assert.equal(enrich({ title: 'Boots', description: 'Made in USA, size 10 D' }).made_in, 'USA');
     assert.equal(enrich({ title: 'Boots', description: 'Made in the U.S.A.' }).made_in, 'USA');
+  });
+
+  it('keeps a narrow multi-A width exact, and the sell-a-pair column shows A', () => {
+    const cases = [
+      [{ title: 'Boots 9 AAA' }, 'AAA'],
+      [{ title: 'Boots', size: '9 AAA' }, 'AAA'],
+      [{ title: 'Boots', description: 'Size: 8.5 AA' }, 'AA'],
+      [{ title: 'Boots', size: '9AAAA' }, 'AAAA'],
+      [{ title: 'Boots', description: 'Size: 9 double A' }, 'AA'],
+      [{ title: 'Boots', description: 'Size: 9 triple A' }, 'AAA'],
+      [{ title: 'Boots', description: 'Size: 9 quadruple A' }, 'AAAA'],
+      [{ title: 'Boots', description: 'Size: 9 quad A' }, 'AAAA'],
+      [{ title: 'Boots', description: 'Size: 9 2A' }, 'AA'],
+      [{ title: 'Boots', description: 'Size: 9 3A' }, 'AAA'],
+      [{ title: 'Boots', description: 'Size: 9 4A' }, 'AAAA'],
+      [{ title: 'Boots', description: 'Width: double A' }, 'AA'],
+      [{ title: 'Boots 10EE' }, 'EE'],
+      [{ title: 'Boots', description: 'Size: 10 4E' }, '4E'],
+      [{ title: 'Boots', description: 'Size: 11 EEEE' }, 'EEEE'],
+      [{ title: 'Boots', description: 'Width: M' }, 'M'],
+      [{ title: 'Boots', description: 'Width: W' }, 'W'],
+      [{ title: 'Boots', description: 'Width: N' }, 'N'],
+    ];
+    for (const [raw, width] of cases) assert.equal(enrich(raw).width, width, JSON.stringify(raw));
+    const stored = enrich({ title: 'Lucchese cowboy boots', size: '9AAA', description: 'US Men\'s size: 9 triple A' });
+    assert.equal(stored.width, 'AAA');
+    assert.equal(displayWidth(stored.width), 'A');
+    assert.equal(displayWidth('AA'), 'A');
+    assert.equal(displayWidth('AAAA'), 'A');
+    assert.equal(displayWidth('N'), 'N');
+    assert.equal(displayWidth('EE'), 'EE');
+    assert.equal(displayWidth('4E'), '4E');
+    const src = readFileSync(new URL('../app/screen.js', import.meta.url), 'utf8');
+    assert.match(src, /width: displayWidth\(r\.width\)/);
+    assert.match(src, /f === 'width' \? displayWidth\(edit\[f\]\)/);
+    assert.match(readFileSync(new URL('../lib/vocab.js', import.meta.url), 'utf8'), /width: \['M', 'A', 'B', 'C', 'D', 'E', 'EE', 'EEE', 'W'\]/);
+    const listing = { ...stored, photos: ['https://example.com/a.jpg'], id: 1, boot: 'boot', wbw_price: 200 };
+    assert.match(altText(listing, 1), /AAA width/);
+    const shared = post('craigslist', listing, 'http://localhost', {});
+    assert.match(shared.title, /AAA/);
+    assert.match(shared.body, /Width: AAA/);
+    for (const file of ['lib/seo.js', 'lib/crosspost.js', 'lib/ebay.js'])
+      assert.equal(readFileSync(new URL(`../${file}`, import.meta.url), 'utf8').includes('displayWidth'), false, file);
   });
 });

@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
-import { CHOICES, searchMatch } from '../lib/vocab';
+import { CHOICES, displayWidth, searchMatch } from '../lib/vocab';
 import { needsCheck, REQUIRED } from '../lib/publish';
 import { csvCell, packCsvChunks } from '../lib/csv';
 import { altText, photoUrl } from '../lib/seo';
@@ -61,6 +61,7 @@ const CSV = { photos: 'Photos', title: 'Listing title', wbw_price: 'Asking price
 const download = (rows, brands = {}, s = {}) => {
   const row = r => ({ ...r, seller_context: s.display_name ? `Sold by ${s.display_name}${s.location ? ` of ${s.location}` : ''}.` : '', brand_context: brands[r.brand] ? `${brands[r.brand].text} ${[r.material, r.size && `size ${r.size}`].filter(Boolean).join(', ')}.` : '', brand_link: brands[r.brand]?.link ?? '', website_url: ['facebook', 'depop', 'poshmark', 'ebay'].includes(r.source) ? '' : r.source_url, wbw_price: r.wbw_price ?? r.price,
     sized_for: SIZED[r.sized_for] ?? r.sized_for, size_estimated: r.size_estimated || (/^estimated$/i.test(String(r.size ?? '')) ? 'Yes' : ''), category: ['boot', 'belt'].includes(r.boot) ? GROUPS[r.boot] : '',
+    width: displayWidth(r.width),
     photos: r.photos.map((_, n) => photoUrl(location.origin, r, n + 1)), alts: r.photos.map((_, n) => altText(r, n + 1)) });
   const csv = [Object.values(CSV), ...rows.map(r => Object.keys(CSV).map(k => row(r)[k]))].map(r => r.map(csvCell).join(',')).join('\r\n');
   Object.assign(document.createElement('a'), { href: URL.createObjectURL(new Blob([csv], { type: 'text/csv' })), download: `bootlister-export-${new Date().toISOString().slice(0, 10)}.csv` }).click();
@@ -204,7 +205,7 @@ export default function Screen({ admin = false }) {
     try {
       const parts = packCsvChunks(await file.text());
       if (!parts.length) throw new Error('No listings found in that CSV.');
-      const totals = { new: 0, updated: 0, sold: 0, skipped: 0 }, seen = [];
+      const totals = { new: 0, updated: 0, sold: 0, notCowboy: 0, skipped: 0 }, seen = [];
       const total = parts.reduce((n, p) => n + p.count, 0);
       setRun({ label: 'Importing List Perfectly CSV', done: 0, total });
       let doneRows = 0;
@@ -216,7 +217,7 @@ export default function Screen({ admin = false }) {
         setRun({ done: doneRows });
       }
       totals.sold += (await api('POST', { done: true, sourceIds: seen }, '', '/api/import/lp')).removed || 0;
-      setRunState({ label: `${totals.new} new, ${totals.updated} updated, ${totals.sold} sold or removed, ${totals.skipped} skipped` });
+      setRunState({ label: `${totals.new} new, ${totals.updated} updated, ${totals.sold} sold or removed, ${totals.notCowboy} not cowboy boots, ${totals.skipped} skipped` });
     } catch (e) { setRunState(null); setErr(e.message); }
     load(); loadSellers();
   };
@@ -331,7 +332,7 @@ export default function Screen({ admin = false }) {
                 <span>{LABELS[f]}{unverified(i).includes(f) && ' — auto-filled, verify'}
                   {PRESETS[f]?.map(p => <button key={p} type="button" className="preset" onClick={() => setEdit({ ...edit, [f]: p })}>{p}</button>)}</span>
                 {f === 'description' ? <textarea rows="4" value={edit[f] ?? ''} onChange={setField(f)} />
-                  : <input list={CHOICES[f] && `dl-${f}`} value={edit[f] ?? ''} onChange={setField(f)} />}</label>)}
+                  : <input list={CHOICES[f] && `dl-${f}`} value={(f === 'width' ? displayWidth(edit[f]) : edit[f]) ?? ''} onChange={setField(f)} />}</label>)}
               {i.status === 'published' && <Share item={i} seller={current} reload={load} />}
               <span><button className="primary" onClick={save}>Save (marks all verified)</button>
                 {!admin && needsCheck(i) && <button type="button" className="primary" onClick={() => approve(i)}>Approve / ready to go live</button>}

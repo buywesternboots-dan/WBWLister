@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { describe, it } from 'node:test';
 import { packCsvChunks, parseCsv } from '../lib/csv.js';
 import { lpApi } from '../lib/lp-api.js';
-import { LP_PRIVATE, lpPhotoUrl, lpSourceId, mapLpCsv, mappedItem, missingFromLp, planLp, runLpImport } from '../lib/lp.js';
+import { LP_PRIVATE, isCowboyBoot, lpPhotoUrl, lpSourceId, mapLpCsv, mappedItem, missingFromLp, planLp, runLpImport } from '../lib/lp.js';
 import { allowedPhotoUrl } from '../lib/net.js';
 import { sessionToken } from '../lib/session.js';
 import { enrich } from '../lib/wbw.js';
@@ -178,17 +178,61 @@ describe('List Perfectly mapping', () => {
 });
 
 describe('List Perfectly privacy and sync', () => {
-  it('imports every unsold sample row, including ones that share a bin code', async () => {
+  it('imports unsold cowboy boots from the sample and counts the other rows', async () => {
     const db = memory();
     const opened = await runLpImport(fixture, db);
-    assert.equal(opened.new, 20);
-    assert.equal(opened.skipped, 5);
-    assert.equal(new Set(db.rows.map(r => r.source_id)).size, 20);
+    assert.equal(opened.new, 2);
+    assert.equal(opened.notCowboy, 19);
+    assert.equal(opened.skipped, 4);
+    assert.equal(new Set(db.rows.map(r => r.source_id)).size, 2);
     const again = await runLpImport(fixture, db);
     assert.equal(again.new, 0);
     assert.equal(again.updated, 0);
-    assert.equal(again.skipped, 25);
+    assert.equal(again.notCowboy, 19);
+    assert.equal(again.skipped, 6);
     assert.equal(JSON.stringify(db.rows).includes('Cost of Goods'), false);
+  });
+
+  it('keeps cowboy boots and drops dress shoes and other boots', () => {
+    for (const Title of [
+      'Jo Ghost ... Western Dress Shoes',
+      'Cole Haan ... Chelsea Boots',
+      'Florsheim ... Ankle Zip Boots',
+      'John Varvatos ... Combat Boots',
+      'Frye ... Ankle Boots',
+    ]) assert.equal(isCowboyBoot({ Title }), false, Title);
+    for (const Title of [
+      'Cuero Womens ... Ankle Cowboy Western Booties',
+      'Tony Lama ... Cowgirl Boots',
+      'Corral ... Heeled Boots',
+      'Lucchese Classics ... Cowboy Boots',
+    ]) assert.equal(isCowboyBoot({ Title }), true, Title);
+    assert.equal(isCowboyBoot({ Title: 'Heeled Boots', Brand: 'Corral' }), true);
+    assert.equal(isCowboyBoot({ Title: 'Ankle Boots', Brand: 'Frye' }), false);
+  });
+
+  it('leaves a stored listing alone when its row is no longer a cowboy boot, and does not create other shoes', async () => {
+    const db = memory();
+    const date = '2024-07-01 00:00:01';
+    const opened = await runLpImport(csvOf([row({ Title: 'Lucchese cowboy boots', Date: date, Price: '245' })]), db);
+    assert.equal(opened.new, 1);
+    const kept = db.rows[0];
+    const again = await runLpImport(csvOf([row({ Title: 'Cole Haan Chelsea Boots', Brand: 'Cole Haan', Date: date, Price: '10' })]), db);
+    assert.equal(again.notCowboy, 1);
+    assert.equal(again.new, 0);
+    assert.equal(again.updated, 0);
+    assert.equal(again.sold, 0);
+    assert.equal(db.rows.length, 1);
+    assert.equal(db.rows[0].title, kept.title);
+    assert.equal(db.rows[0].price, kept.price);
+    assert.equal(db.rows[0].status, 'review');
+    assert.equal(again.sourceIds.includes(date), true);
+    assert.deepEqual(missingFromLp(db.rows, again.sourceIds), []);
+    const fresh = memory();
+    const dropped = await runLpImport(csvOf([row({ Title: 'Frye Ankle Boots', Brand: 'Frye', Date: '2024-07-02 00:00:02' })]), fresh);
+    assert.equal(dropped.new, 0);
+    assert.equal(dropped.notCowboy, 1);
+    assert.equal(fresh.rows.length, 0);
   });
 
   it('never stores notes, cost, sold price, shipping, other costs, or profit', async () => {
@@ -225,11 +269,11 @@ describe('List Perfectly privacy and sync', () => {
     const NEW = '2024-01-02 03:04:05', GONE = '2024-03-01 00:00:00', SOLD_ON = '2024-05-01 00:00:00';
     const first = csvOf([
       row({ SKU: 'new-boot', Price: '100', Date: NEW }),
-      row({ SKU: 'gone-later', Title: 'Will leave', Date: GONE }),
+      row({ SKU: 'gone-later', Title: 'Will leave cowboy boots', Date: GONE }),
       row({ SKU: 'sold-already', Date: SOLD_ON, SOLD: 'SOLD', 'Sold Price': 'SOLDPRICE-SECRET' }),
     ]);
     const opened = await runLpImport(first, db);
-    assert.deepEqual({ ...opened, sourceIds: opened.sourceIds.length }, { new: 2, updated: 0, sold: 0, skipped: 1, sourceIds: 3 });
+    assert.deepEqual({ ...opened, sourceIds: opened.sourceIds.length }, { new: 2, updated: 0, sold: 0, notCowboy: 0, skipped: 1, sourceIds: 3 });
     assert.equal(db.rows.length, 2);
     assert.equal(db.rows.every(r => r.photos[0].startsWith('https://media.listperfectly.com/')), true);
 
@@ -242,9 +286,9 @@ describe('List Perfectly privacy and sync', () => {
 
     const second = csvOf([
       row({ SKU: 'new-boot', Price: '80', Brand: 'Other Brand', eBay: 'eBay', Date: NEW }),
-      row({ SKU: 'brand-new', Title: 'Added', Date: '2024-04-01 00:00:00' }),
+      row({ SKU: 'brand-new', Title: 'Added cowboy boots', Date: '2024-04-01 00:00:00' }),
       row({ SKU: 'sold-already', Date: SOLD_ON, SOLD: 'SOLD' }),
-      row({ SKU: 'qty-zero', Title: 'Empty', Quantity: '0', Date: '2024-04-02 00:00:00' }),
+      row({ SKU: 'qty-zero', Title: 'Empty cowboy boots', Quantity: '0', Date: '2024-04-02 00:00:00' }),
     ]);
     // qty-zero was never imported, so it is skipped rather than created as sold.
     const again = await runLpImport(second, db);
@@ -259,17 +303,17 @@ describe('List Perfectly privacy and sync', () => {
     assert.deepEqual(updated.photos, ['https://blob.vercel-storage.com/kept.jpg']);
     assert.equal(updated.status, 'review');
     assert.ok(updated.changed_at);
-    assert.equal(db.rows.some(r => r.title === 'Added'), true);
+    assert.equal(db.rows.some(r => r.title === 'Added cowboy boots'), true);
     assert.equal(db.rows.some(r => r.source_id === SOLD_ON), false);
 
     const live = db.rows.find(r => r.source_id === GONE);
     live.status = 'published';
-    const soldFile = csvOf([row({ SKU: 'gone-later', Title: 'Will leave', Date: '2024-03-01 00:00:00', SOLD: 'SOLD' })]);
+    const soldFile = csvOf([row({ SKU: 'gone-later', Title: 'Will leave cowboy boots', Date: '2024-03-01 00:00:00', SOLD: 'SOLD' })]);
     const sold = await runLpImport(soldFile, db);
     assert.equal(sold.sold, 1);
     assert.equal(db.rows.find(r => r.id === live.id).status, 'pending');
 
-    const back = await runLpImport(csvOf([row({ SKU: 'gone-later', Title: 'Will leave', Date: '2024-03-01 00:00:00', Quantity: '1', SOLD: '' })]), db);
+    const back = await runLpImport(csvOf([row({ SKU: 'gone-later', Title: 'Will leave cowboy boots', Date: '2024-03-01 00:00:00', Quantity: '1', SOLD: '' })]), db);
     assert.equal(back.updated, 1);
     assert.equal(db.rows.find(r => r.id === live.id).status, 'review');
 
@@ -279,8 +323,8 @@ describe('List Perfectly privacy and sync', () => {
     const same = await runLpImport(second, db);
     assert.equal(same.new, 0);
     assert.equal(same.updated, 0);
-    const zeroed = db.rows.find(r => r.title === 'Added');
-    const zero = await runLpImport(csvOf([row({ SKU: 'brand-new', Title: 'Added', Date: '2024-04-01 00:00:00', Quantity: '0' })]), db);
+    const zeroed = db.rows.find(r => r.title === 'Added cowboy boots');
+    const zero = await runLpImport(csvOf([row({ SKU: 'brand-new', Title: 'Added cowboy boots', Date: '2024-04-01 00:00:00', Quantity: '0' })]), db);
     assert.equal(zero.sold, 1);
     assert.equal(db.rows.find(r => r.id === zeroed.id).status, 'pending');
   });
@@ -337,5 +381,6 @@ describe('List Perfectly upload access', () => {
     assert.match(body, /backfillPhotos/);
     assert.match(read('app/screen.js'), /Import List Perfectly CSV/);
     assert.match(read('app/screen.js'), /sold or removed/);
+    assert.match(read('app/screen.js'), /not cowboy boots/);
   });
 });
