@@ -30,8 +30,19 @@ async function loadSellers(selected) {
   if (!server || !token) return;
   sellers = await fetch(`${server}/api/sellers`, { headers: { 'x-auth': token } }).then(r => r.json()).catch(() => []);
   if (!Array.isArray(sellers)) { say(sellers.error ?? 'Could not load sellers.'); sellers = []; return; }
-  $('seller').innerHTML = '<option value="">Pick a seller…</option>' + sellers.filter(s => s.name).map(s => `<option value="${s.name}">${s.display_name}</option>`).join('');
-  $('seller').value = selected || '';
+  const sel = $('seller');
+  sel.replaceChildren();
+  const blank = document.createElement('option');
+  blank.value = '';
+  blank.textContent = 'Pick a seller…';
+  sel.append(blank);
+  for (const s of sellers.filter(s => s.name)) {
+    const opt = document.createElement('option');
+    opt.value = s.name;
+    opt.textContent = s.display_name ?? '';
+    sel.append(opt);
+  }
+  sel.value = selected || '';
 }
 $('seller').onchange = () => {
   const s = sellers.find(s => s.name === $('seller').value);
