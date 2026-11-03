@@ -185,7 +185,8 @@ export default function Screen({ admin = false }) {
             if (r.sold) { n.sold++; listed.delete(slug(url)); } else if (r.item?.updated) n.updated++; else if (r.item) n.added++;
           } catch (e) {
             n.failed++; setFailed(f => [...f, { url, error: e.message }]);
-            if (++streak >= 5) stop = e.message;
+            // A Blob quota/storage error stays on Retry failed and does not stop the run.
+            if (!/vercel blob|storage quota|quota exceeded/i.test(e.message ?? '') && ++streak >= 5) stop = e.message;
           }
           setRun({ done: n.added + n.updated + n.sold + n.failed });
         }
@@ -241,14 +242,14 @@ export default function Screen({ admin = false }) {
         </select>
         {who && <button onClick={() => setSellerForm(hasDetails ? current : { name: who, sync: 'off' })}>{hasDetails ? 'Seller settings' : 'Set up seller'}</button>}
         <button className="primary" onClick={() => setSellerForm({ sync: 'off' })}>+ Add seller</button></>}
-        {admin && <a className="src" href="/bootlister.zip" download title="Needed for Facebook and Depop imports">Chrome extension{ext ? ' ✓' : ''}</a>}
+        {admin && <a className="src" href="/wbw-importer.zip" download title="Needed for Facebook and Depop imports">Chrome extension{ext ? ' ✓' : ''}</a>}
         <a className="src" href="/login" onClick={e => { e.preventDefault(); fetch('/api/login', { method: 'DELETE' }).then(() => location.assign('/login')); }}>Log out</a>
       </div>
       {!admin && <p className="help">Your job is to double-check each listing before it goes live, including anything shown in yellow. When you approve it, it is published right away. It is marked exported here — WBW is not connected yet, so nothing is sent to the live site.</p>}
       {admin && who && <p className="help">When a seller approves a listing, it is published here right away. You can still see and edit every listing. Export CSV is the file for WBW. Nothing is sent to the live site yet.</p>}
       {!ext && EXTENSION_LINK.test(link) && <p className="help">Facebook and Depop import through the BootLister Chrome extension:
-        1) download it with the <a href="/bootlister.zip" download>Chrome extension</a> link and unzip it; 2) open chrome://extensions and turn on
-        Developer mode; 3) click Load unpacked and pick the unzipped bootlister folder; 4) reload this page.</p>}
+        1) download it with the <a href="/wbw-importer.zip" download>Chrome extension</a> link and unzip it; 2) open chrome://extensions and turn on
+        Developer mode; 3) click Load unpacked and pick the unzipped wbw-importer folder; 4) reload this page.</p>}
 
       {admin && sellerForm && <div className="panel">
         <strong>{sellerForm.created_at ? 'Edit seller' : 'New seller'}</strong>
@@ -278,7 +279,7 @@ export default function Screen({ admin = false }) {
           <input type="file" accept=".csv,text/csv" disabled={run?.busy} onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) importLp(f); }} />
         </label>
         {failed.length > 0 && <details className="failed">
-          <summary>{failed.length} failed <button disabled={run?.busy} onClick={() => importSite(false, failed.map(f => f.url))}>Retry failed</button></summary>
+          <summary>{failed.length} failed <button type="button" disabled={run?.busy} onClick={e => { e.preventDefault(); e.stopPropagation(); importSite(false, failed.map(f => f.url)); }}>Retry failed</button></summary>
           {failed.map(f => <div key={f.url}><a href={f.url} target="_blank">{f.url.split('/').pop()}</a> — {f.error}</div>)}
         </details>}
       </div>}

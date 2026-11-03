@@ -128,22 +128,24 @@ test('photo hosts are checked by hostname, and private addresses are not fetched
   assert.equal(imageType('image/gif'), 'image/gif');
   assert.equal(imageType('image/avif'), 'image/avif');
   await assert.rejects(() => safeFetch('http://192.0.2.1/', { timeout: 50, resolve: async () => ['192.0.2.1'] }), /timed out/);
-  assert.match(read('lib/wbw.js'), /safeFetch\(src, \{ image: true \}\)/);
+  assert.match(read('lib/wbw.js'), /resolvePublic\(u\.hostname\)/);
+  assert.match(read('lib/wbw.js'), /catch \{ return src; \}/);
   assert.match(read('lib/sites.js'), /safeFetch\(url\)/);
   const img = read('app/img/[id]/[n]/[name]/route.js');
-  assert.match(img, /safeFetch\(src, \{ image: true \}\)/);
+  assert.match(img, /readSourcePhoto\(src\)/);
   assert.match(img, /X-Content-Type-Options': 'nosniff'/);
   assert.match(img, /default-src 'none'; sandbox/);
-  assert.equal(img.includes('!allowedPhotoUrl'), false);
   assert.match(read('lib/wbw.js'), /ENRICH_V = 12/);
 });
 
 test('the extension only talks to the saved BootLister hosts and does not store the password', () => {
   const manifest = JSON.parse(read('extension/manifest.json'));
-  const hosts = ['https://bootlister.vercel.app/*', 'https://wbw-lister.vercel.app/*', 'http://localhost/*', 'http://127.0.0.1/*'];
+  const hosts = ['https://wbw-lister.vercel.app/*', 'https://bootlister.vercel.app/*'];
   assert.deepEqual(manifest.content_scripts[0].matches, hosts);
   for (const host of hosts) assert.equal(manifest.host_permissions.includes(host), true);
   assert.equal(manifest.host_permissions.includes('https://*.vercel.app/*'), false);
+  assert.equal(manifest.host_permissions.includes('http://localhost:3000/*'), false);
+  assert.equal(manifest.content_scripts[0].matches.includes('http://localhost:3000/*'), false);
   const bg = read('extension/background.js');
   assert.match(bg, /sameOrigin\(saved\.server, server\)/);
   assert.equal(bg.includes("'x-auth': token"), false);

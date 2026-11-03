@@ -154,7 +154,7 @@ test('deployed with no admin password is closed; local dev with none stays open'
   assert.equal(siteMode({ NODE_ENV: 'production', APP_PASSWORD: 'x' }), 'on');
   assert.equal(siteMode({ NODE_ENV: 'production', ADMIN_PASSWORD: '   ' }), 'closed');
   assert.match(read('proxy.js'), /decide\(/);
-  assert.match(read('proxy.js'), /api\/register/);
+  assert.match(read('lib/gate.js'), /\/api\/register/);
   assert.equal(read('proxy.js').includes('if (!secret) return NextResponse.next'), false);
   assert.equal(read('lib/wbw.js').includes('TEAM_PIN'), false);
   assert.equal(read('lib/wbw.js').includes('ensureTeamLogin'), false);
@@ -170,13 +170,14 @@ test('every /api route checks the signed session or the site gate', () => {
   for (const f of files) assert.match(readFileSync(f, 'utf8'), /actorFrom|sellerContext|itemsResponse|loginResponse|registerResponse/, f);
 });
 
-test('the proxy fails closed in production without an admin password and stays open in local dev', async () => {
+test('the proxy fails closed without a session, including local dev', async () => {
   const closedApi = await decide('/api/items', '', { NODE_ENV: 'production' });
   const closedPage = await decide('/', '', { VERCEL_ENV: 'preview' });
   assert.equal(closedApi.status, 503);
   assert.equal(closedApi.error, CLOSED);
   assert.equal(closedPage.type, 'closed');
-  assert.deepEqual(await decide('/', '', { NODE_ENV: 'development' }), { type: 'next' });
+  assert.deepEqual(await decide('/', '', { NODE_ENV: 'development' }), { type: 'redirect', to: '/login' });
+  assert.deepEqual(await decide('/api/items', '', { NODE_ENV: 'development' }), { type: 'json', status: 401, error: 'Please log in.' });
   const locked = { NODE_ENV: 'production', ADMIN_PASSWORD: 'staff-secret' };
   assert.deepEqual(await decide('/api/items', '', locked), { type: 'json', status: 401, error: 'Please log in.' });
   assert.deepEqual(await decide('/', '', locked), { type: 'redirect', to: '/login' });

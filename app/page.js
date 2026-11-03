@@ -1,17 +1,14 @@
-'use client';
-import { useEffect, useState } from 'react';
+import { cookies } from 'next/headers';
+import { redirect } from 'next/navigation';
 import Screen from './screen';
-import { homeFor } from '../lib/home';
+import { sessionSecret } from '../lib/gate';
+import { readSession } from '../lib/session';
 
-// Admin interface: every tool on this one screen. A seller session is sent to the seller interface.
-export default function AdminHome() {
-  const [ok, setOk] = useState(false);
-  useEffect(() => {
-    fetch('/api/me').then(r => r.ok ? r.json() : null).then(m => {
-      if (m?.role === 'seller') location.replace(homeFor('seller'));
-      else if (m?.role === 'admin') setOk(true);
-      else location.replace('/login');
-    }).catch(() => location.replace('/login'));
-  }, []);
-  return ok ? <Screen admin /> : null;
+// Admin screen. Logged-out visitors are sent to /login before any HTML is rendered.
+export default async function Page() {
+  const jar = await cookies();
+  const who = await readSession(jar.get('auth')?.value, sessionSecret());
+  if (!who) redirect('/login');
+  if (who.role === 'seller') redirect('/seller');
+  return <Screen admin />;
 }
