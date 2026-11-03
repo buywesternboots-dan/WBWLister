@@ -304,6 +304,7 @@ export default function Screen({ admin = false }) {
             <select value={adj.unit} onChange={e => setAdj({ ...adj, unit: e.target.value })}><option>%</option><option>$</option></select>
             <button onClick={lower}>Apply</button>
           </span>}
+          {admin && <button className="primary" onClick={() => bulk({ action: 'approve' })}>Approve selected</button>}
           {admin && live && <button className="primary" onClick={exportCsv}>Export CSV</button>}
           {live && <button onClick={() => bulk({ action: 'remove' })}>Remove</button>}
           {tab === 'pending' && <button className="primary" onClick={() => bulk({ action: 'sold' })}>Mark sold</button>}
@@ -336,7 +337,7 @@ export default function Screen({ admin = false }) {
                   : <input list={CHOICES[f] && `dl-${f}`} value={(f === 'width' ? displayWidth(edit[f]) : edit[f]) ?? ''} onChange={setField(f)} />}</label>)}
               {i.status === 'published' && <Share item={i} seller={current} reload={load} />}
               <span><button className="primary" onClick={save}>Save (marks all verified)</button>
-                {!admin && needsCheck(i) && <button type="button" className="primary" onClick={() => approve(i)}>Approve / ready to go live</button>}
+                {needsCheck(i) && <button type="button" className="primary" onClick={() => approve(i)}>{admin ? 'Approve for seller' : 'Approve / ready to go live'}</button>}
                 <button onClick={() => setEdit(null)}>Cancel</button></span>
               {!admin && i.approved_at && <small className="warn">Saving changes takes it off the exported list until you approve it again.</small>}
             </div> : <div className="info" onClick={() => setEdit(i)}>
@@ -355,7 +356,7 @@ export default function Screen({ admin = false }) {
                 <dt>{label(f)}</dt><dd>{f.includes('price') && i[f] ? `$${Number(i[f]).toFixed(2)}` : i[f] || '—'}</dd></div>)}</dl>
               {i.description && <p className="desc">{i.description}</p>}
               <small>Tap to edit</small>
-              {!admin && needsCheck(i) && <button type="button" className="primary" onClick={e => { e.stopPropagation(); approve(i); }}>Approve / ready to go live</button>}
+              {needsCheck(i) && <button type="button" className="primary" onClick={e => { e.stopPropagation(); approve(i); }}>{admin ? 'Approve for seller' : 'Approve / ready to go live'}</button>}
             </div>}
           </div>)}
         </section>;
