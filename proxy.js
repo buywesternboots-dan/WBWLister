@@ -25,4 +25,5 @@ export async function proxy(req) {
   return NextResponse.next({ request: { headers } });
 }
 
-export const config = { matcher: ['/((?!login|api/login|api/register|img|feed|_next|favicon).*)'] };
+// Every page and /api route, including login. decide() allows only sign-in and public photos through without a session.
+export const config = { matcher: ['/((?!_next/static|_next/image|favicon.ico|icon.svg|robots.txt).*)'] };

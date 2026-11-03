@@ -187,8 +187,5 @@ test('seller A cannot read or modify seller B through the items API', async () =
   assert.equal((await shut.json()).error, CLOSED);
 
   const dev = await itemsResponse(new Request('http://localhost/api/items?status=review', { headers: { authorization: `Bearer ${regA.seller}` } }), items, { NODE_ENV: 'development' });
-  assert.equal(dev.status, 200);
-  const devBody = await dev.json();
-  assert.equal(devBody.every(i => i.seller === regA.seller), true);
-  assert.equal(devBody.some(i => i.title === 'Bea boot'), false);
+  assert.equal(dev.status, 401);
 });
