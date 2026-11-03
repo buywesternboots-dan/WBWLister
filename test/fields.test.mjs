@@ -165,4 +165,20 @@ Asking price: $400
     for (const file of ['lib/seo.js', 'lib/crosspost.js', 'lib/ebay.js'])
       assert.equal(readFileSync(new URL(`../${file}`, import.meta.url), 'utf8').includes('displayWidth'), false, file);
   });
+
+  it('keeps AAA in a generated title and description, never a bare A', () => {
+    const item = enrich({
+      title: 'Lucchese cowboy boots size 9 AAA',
+      description: 'Shaft height 12 in. AAA width.',
+      size: '9AAA', brand: 'Lucchese',
+    });
+    assert.equal(item.width, 'AAA');
+    const listing = { ...item, photos: ['https://example.com/a.jpg'], id: 1, boot: 'boot', wbw_price: 200 };
+    const shared = post('craigslist', listing, 'http://localhost', {});
+    const generated = { title: shared.title, description: shared.body, seo: altText(listing, 1) };
+    for (const [name, text] of Object.entries({ ...generated, 'stored title': item.title, 'stored description': item.description })) {
+      assert.equal(text.includes('AAA'), true, name);
+      assert.equal(text.includes(' A '), false, name);
+    }
+  });
 });
