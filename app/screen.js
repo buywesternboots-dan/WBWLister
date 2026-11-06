@@ -243,6 +243,7 @@ export default function Screen({ admin = false }) {
         {who && <button onClick={() => setSellerForm(hasDetails ? current : { name: who, sync: 'off' })}>{hasDetails ? 'Seller settings' : 'Set up seller'}</button>}
         <button className="primary" onClick={() => setSellerForm({ sync: 'off' })}>+ Add seller</button></>}
         {admin && <a className="src" href="/wbw-importer.zip" download title="Needed for Facebook and Depop imports">Chrome extension{ext ? ' ✓' : ''}</a>}
+        {admin && <a className="src" href="/admin/bugs">Bug reports</a>}
         <a className="src" href="/login" onClick={e => { e.preventDefault(); fetch('/api/login', { method: 'DELETE' }).then(() => location.assign('/login')); }}>Log out</a>
       </div>
       {!admin && <p className="help">Your job is to double-check each listing before it goes live, including anything shown in yellow. When you approve it, it is published right away. It is marked exported here — WBW is not connected yet, so nothing is sent to the live site.</p>}
