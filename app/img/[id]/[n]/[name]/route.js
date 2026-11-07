@@ -119,6 +119,7 @@ export async function readSourcePhoto(src, opt = {}) {
 }
 
 export async function GET(req, { params }) {
+  // The filename in the path is a label. Lookup is id and photo index, so an older name still resolves.
   const { id, n } = await params;
   const item = /^\d+$/.test(id) ? await getItem(id) : null, src = item?.photos[n - 1];
   if (!src) return new Response('Not found', { status: 404 });

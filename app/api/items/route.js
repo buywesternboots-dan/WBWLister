@@ -15,6 +15,9 @@ const db = {
   lowerPrice: wbw.lowerPrice,
   approveItems: wbw.approveItems,
   setStatus: wbw.setStatus,
+  proposeOptimization: wbw.proposeOptimization,
+  editOptimization: wbw.editOptimization,
+  applyOptimization: wbw.applyOptimizationToItem,
 };
 
 // GET ?status= → that seller's items. POST one listing. PATCH bulk actions.

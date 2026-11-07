@@ -5,7 +5,8 @@
     "dev": "next dev",
     "build": "node scripts/zip-extension.mjs && next build",
     "start": "next start",
-    "test": "node --import ./test/register.mjs --test test/*.test.mjs"
+    "test": "node --import ./test/register.mjs --test test/*.test.mjs",
+    "test:pg": "node --import ./test/register.mjs --test test/pg/smoke.test.mjs"
   },
   "dependencies": {
     "@google/genai": "^3.0.0",
@@ -17,5 +18,8 @@
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "sanitize-html": "^2.18.1"
+  },
+  "devDependencies": {
+    "pg": "^8.23.1"
   }
 }
