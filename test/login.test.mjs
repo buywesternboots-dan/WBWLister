@@ -167,7 +167,7 @@ test('every /api route checks the signed session or the site gate', () => {
   const walk = d => { for (const name of readdirSync(d)) { const p = join(d, name); if (statSync(p).isDirectory()) walk(p); else if (name === 'route.js') files.push(p); } };
   walk(dir);
   assert.ok(files.length >= 10);
-  for (const f of files) assert.match(readFileSync(f, 'utf8'), /actorFrom|sellerContext|itemsResponse|loginResponse|registerResponse/, f);
+  for (const f of files) assert.match(readFileSync(f, 'utf8'), /actorFrom|sellerContext|itemsResponse|loginResponse|registerResponse|bugReportResponse/, f);
 });
 
 test('the proxy fails closed without a session, including local dev', async () => {

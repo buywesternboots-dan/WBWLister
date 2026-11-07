@@ -10,7 +10,7 @@ export async function proxy(req) {
   headers.delete('x-session-seller'); // only this proxy may set it; routes still ignore it
   let decision;
   try {
-    decision = await decide(req.nextUrl.pathname, req.headers.get('x-auth') || req.cookies.get('auth')?.value);
+    decision = await decide(req.nextUrl.pathname, req.headers.get('x-auth') || req.cookies.get('auth')?.value, process.env, req.method);
   } catch {
     return req.nextUrl.pathname.startsWith('/api/')
       ? NextResponse.json({ error: 'Please log in.' }, { status: 401 })
