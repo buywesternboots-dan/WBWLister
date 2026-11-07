@@ -2,8 +2,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { CHOICES, displayWidth, searchMatch } from '../lib/vocab';
 import { needsCheck, REQUIRED } from '../lib/publish';
-import { csvCell, packCsvChunks } from '../lib/csv';
-import { altText, photoUrl } from '../lib/seo';
+import OptimizePanel from '../components/optimize-panel';
+import { packCsvChunks } from '../lib/csv';
+import { toCsv } from '../lib/export';
 import { CHANNELS, post } from '../lib/crosspost';
 
 // Selected seller comes from ?seller= (the extension's seller dropdown uses the same names).
@@ -55,16 +56,10 @@ const SELLER_FORM = [
   ['terms', 'Custom terms, one per line: their shorthand = meaning (e.g. BJ = Black Jack, Sz = Size)', 'area'],
   ['defaults', 'Defaults, one per line: field = value, used when a listing doesn\'t say (e.g. sized_for = Women, made_in = USA)', 'area'],
 ];
-// Export: every field on the WBW "Sell a pair" form, then the extra columns this import still needs.
-const SIZED = { Men: "Men's", Women: "Women's", Kids: 'Kids' };
+// Export: every field on the WBW "Sell a pair" form, then the extra columns this import still needs. Built in lib/export.js.
 const PRIVATE_SELLER = new Set(['contact', 'email', 'phone']);
-const CSV = { photos: 'Photos', title: 'Listing title', wbw_price: 'Asking price', brand: 'Brand', sized_for: 'Sized for', size: 'Size', size_estimated: 'Size estimated', condition: 'Condition', width: 'Width', material_type: 'Material type', material: 'Material / hide', material_cut: 'Material specifics (cut)', made_in: 'Where made', color: 'Color', keywords: 'Keywords', sole_length: 'Sole length', sole_width: 'Sole width', heel_height: 'Heel height', shaft_circ: 'Shaft circumference', shaft_height: 'Shaft height', sole: 'Sole', heel: 'Heel', toe: 'Toe', description: 'Description', seller: 'WBW Seller Name', price: 'Source price', id_text: 'Model / date codes', category: 'Category', website_url: 'Seller Website Link', alts: 'Image Alt Text', brand_context: 'Brand Context', brand_link: 'Brand Page Link', seller_context: 'Seller Context', source_id: 'Source ID' };
 const download = (rows, brands = {}, s = {}) => {
-  const row = r => ({ ...r, seller_context: s.display_name ? `Sold by ${s.display_name}${s.location ? ` of ${s.location}` : ''}.` : '', brand_context: brands[r.brand] ? `${brands[r.brand].text} ${[r.material, r.size && `size ${r.size}`].filter(Boolean).join(', ')}.` : '', brand_link: brands[r.brand]?.link ?? '', website_url: ['facebook', 'depop', 'poshmark', 'ebay'].includes(r.source) ? '' : r.source_url, wbw_price: r.wbw_price ?? r.price,
-    sized_for: SIZED[r.sized_for] ?? r.sized_for, size_estimated: r.size_estimated || (/^estimated$/i.test(String(r.size ?? '')) ? 'Yes' : ''), category: ['boot', 'belt'].includes(r.boot) ? GROUPS[r.boot] : '',
-    width: displayWidth(r.width),
-    photos: r.photos.map((_, n) => photoUrl(location.origin, r, n + 1)), alts: r.photos.map((_, n) => altText(r, n + 1)) });
-  const csv = [Object.values(CSV), ...rows.map(r => Object.keys(CSV).map(k => row(r)[k]))].map(r => r.map(csvCell).join(',')).join('\r\n');
+  const csv = toCsv(rows, { origin: location.origin, brands, seller: s });
   Object.assign(document.createElement('a'), { href: URL.createObjectURL(new Blob([csv], { type: 'text/csv' })), download: `bootlister-export-${new Date().toISOString().slice(0, 10)}.csv` }).click();
 };
 // Copy-ready posts for other marketplaces; "Posted" tracks where and when each was posted.
@@ -103,6 +98,8 @@ export default function Screen({ admin = false }) {
   const [ext, setExt] = useState(false); // BootLister extension present on this page
   const [err, setErr] = useState('');
   const [me, setMe] = useState(null);
+  const [opt, setOpt] = useState(null);
+  const [optBusy, setOptBusy] = useState(false);
 
   const current = sellers.find(s => s.seller === who), hasDetails = !!current?.name;
   const setRun = patch => setRunState(r => ({ ...r, ...patch }));
@@ -152,6 +149,39 @@ export default function Screen({ admin = false }) {
     const note = rows.length < picked.length ? `${picked.length - rows.length} still need the seller's check and were left out.` : '';
     download(rows, names.length ? await api('GET', null, `?names=${encodeURIComponent(names)}`, '/api/brand').catch(() => ({})) : {}, current);
     if (note) setErr(note);
+  };
+  const prepareOpt = i => {
+    setErr(''); setOptBusy(true);
+    api('PATCH', { ids: [i.id], action: 'optimize' })
+      .then(r => {
+        const p = r.proposal || r.item?.opt_proposal;
+        if (r.item) setItems(list => list.map(x => x.id === r.item.id ? { ...x, ...r.item } : x));
+        setOpt({ id: i.id, proposal: p, title: p?.title ?? '', description: p?.description ?? '' });
+      })
+      .catch(e => setErr(e.message))
+      .finally(() => setOptBusy(false));
+  };
+  const saveOpt = () => {
+    setOptBusy(true);
+    api('PATCH', { ids: [opt.id], action: 'optimize-edit', title: opt.title, description: opt.description })
+      .then(r => {
+        const p = r.proposal || r.item?.opt_proposal;
+        if (r.item) setItems(list => list.map(x => x.id === r.item.id ? { ...x, ...r.item } : x));
+        setOpt(o => ({ ...o, proposal: p, title: p?.title ?? o.title, description: p?.description ?? o.description }));
+      })
+      .catch(e => setErr(e.message))
+      .finally(() => setOptBusy(false));
+  };
+  const applyOpt = () => {
+    if (!confirm('Replace the live title and description with this draft? The imported original stays saved. Approve the listing again before export.')) return;
+    setOptBusy(true);
+    api('PATCH', { ids: [opt.id], action: 'optimize-apply', title: opt.title, description: opt.description })
+      .then(r => {
+        if (r.item) setItems(list => list.map(x => x.id === r.item.id ? { ...x, ...r.item } : x));
+        setOpt(null);
+      })
+      .catch(e => setErr(e.message))
+      .finally(() => setOptBusy(false));
   };
   const saveSeller = () => api('POST', { ...sellerForm, rename_from: sellerForm.created_at && current?.name }, '', '/api/sellers')
     .then(s => { setSellerForm(null); s.name === who ? loadSellers() : switchTo(s.name); }).catch(e => setErr(e.message));
@@ -340,6 +370,7 @@ export default function Screen({ admin = false }) {
               {i.status === 'published' && <Share item={i} seller={current} reload={load} />}
               <span><button className="primary" onClick={save}>Save (marks all verified)</button>
                 {needsCheck(i) && <button type="button" className="primary" onClick={() => approve(i)}>{admin ? 'Approve for seller' : 'Approve / ready to go live'}</button>}
+                <button type="button" data-prepare-optimize onClick={() => prepareOpt(i)}>Optimize</button>
                 <button onClick={() => setEdit(null)}>Cancel</button></span>
               {!admin && i.approved_at && <small className="warn">Saving changes takes it off the exported list until you approve it again.</small>}
             </div> : <div className="info" onClick={() => setEdit(i)}>
@@ -358,8 +389,15 @@ export default function Screen({ admin = false }) {
                 <dt>{label(f)}</dt><dd>{f.includes('price') && i[f] ? `$${Number(i[f]).toFixed(2)}` : i[f] || '—'}</dd></div>)}</dl>
               {i.description && <p className="desc">{i.description}</p>}
               <small>Tap to edit</small>
-              {needsCheck(i) && <button type="button" className="primary" onClick={e => { e.stopPropagation(); approve(i); }}>{admin ? 'Approve for seller' : 'Approve / ready to go live'}</button>}
+              <span>
+                {needsCheck(i) && <button type="button" className="primary" onClick={e => { e.stopPropagation(); approve(i); }}>{admin ? 'Approve for seller' : 'Approve / ready to go live'}</button>}
+                <button type="button" data-prepare-optimize onClick={e => { e.stopPropagation(); prepareOpt(i); }}>Optimize</button>
+              </span>
             </div>}
+            {opt?.id === i.id && opt.proposal && <OptimizePanel item={items.find(x => x.id === i.id) ?? i} proposal={opt.proposal} title={opt.title} description={opt.description} busy={optBusy}
+              onTitle={title => setOpt({ ...opt, title })} onDescription={description => setOpt({ ...opt, description })}
+              onPrepare={() => prepareOpt(i)} onSave={saveOpt} onApply={applyOpt}
+              onAdd={body => api('POST', body, '', '/api/references').then(() => prepareOpt(i)).catch(e => setErr(e.message))} />}
           </div>)}
         </section>;
       })}
@@ -387,7 +425,10 @@ label{display:flex;flex-direction:column;font-size:13px;color:#6b5a4a;gap:2px}
 .adj{display:flex;gap:4px}.adj input{width:90px}
 h2{font-size:15px;margin:20px 0 8px;color:#6b5a4a;display:flex;flex-wrap:wrap;gap:6px;align-items:center}
 .chip{font-size:12px;padding:2px 8px;border-radius:12px}.chip.miss{color:#a3261b;border-color:#e3b3ad}.chip.on{background:#1f6f6b;border-color:#1f6f6b;color:#fff}
-.item{display:flex;gap:12px;align-items:flex-start;padding:10px;background:#fff;border:1px solid #e6dfd6;border-radius:8px;margin-bottom:8px}
+.item{display:flex;flex-wrap:wrap;gap:12px;align-items:flex-start;padding:10px;background:#fff;border:1px solid #e6dfd6;border-radius:8px;margin-bottom:8px}
+.opt{flex:1 0 100%;display:flex;flex-direction:column;gap:8px;border-top:1px solid #e6dfd6;padding-top:8px}
+.compare{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+@media(max-width:640px){.compare{grid-template-columns:1fr}}
 .item img,.noimg{width:72px;height:72px;object-fit:cover;border-radius:6px;background:#eee;flex-shrink:0}
 .info{display:flex;flex-direction:column;cursor:pointer;flex:1;min-width:0}.info small{color:#8a7a6a}
 .form{display:flex;flex-direction:column;gap:6px;flex:1}.form label>span{display:flex;align-items:center}

@@ -82,28 +82,28 @@ When `opt_applied` matches the live title and description, Photos and Image Alt 
 
 Cover factual preservation, missing and guessed values, HTML stripping, CSV formula escaping, stable variation, filename collisions, original snapshot, unapplied proposal left out of CSV, Width `A` versus listing `AAA`, `N` left as `N`, confirmed versus candidate references, and the noindex / bug-button source guards.
 
-- [ ] **Step 1:** Add `test/optimize.test.mjs`.
-- [ ] **Step 2:** Run `node --import ./test/register.mjs --test test/optimize.test.mjs` and confirm it fails because the modules are missing.
+- [x] **Step 1:** Add `test/optimize.test.mjs`.
+- [x] **Step 2:** Run `node --import ./test/register.mjs --test test/optimize.test.mjs` and confirm it fails because the modules are missing.
 
 ### Task 2: Pure optimization, references, and export
 
 **Files:** `lib/references.js`, `lib/optimize.js`, `lib/export.js`
 
-- [ ] **Step 1:** Implement the exports the tests import. No `fetch`, no `@google/genai`, no `brandinfo`.
-- [ ] **Step 2:** Re-run the optimize tests and expect pass.
+- [x] **Step 1:** Implement the exports the tests import. No `fetch`, no `@google/genai`, no `brandinfo`.
+- [x] **Step 2:** Re-run the optimize tests and expect pass.
 
 ### Task 3: Persist and review
 
 **Files:** `lib/wbw.js`, `lib/items-api.js`, `app/api/items/route.js`, `app/api/references/route.js`, `components/optimize-panel.js`, `app/screen.js`, `test/fields.test.mjs`
 
-- [ ] **Step 1:** Add columns, reference rows, and propose / edit / apply functions that do not change `photos`.
-- [ ] **Step 2:** Sellers call those actions on their own ids. Apply for a seller clears approval.
-- [ ] **Step 3:** Inventory screen shows the panel and downloads CSV via `toCsv`.
-- [ ] **Step 4:** `npm test` and `npm run build`.
+- [x] **Step 1:** Add columns, reference rows, and propose / edit / apply functions that do not change `photos`.
+- [x] **Step 2:** Sellers call those actions on their own ids. Apply for a seller clears approval.
+- [x] **Step 3:** Inventory screen shows the panel and downloads CSV via `toCsv`.
+- [x] **Step 4:** `npm test` and `npm run build`.
 
 ### Task 4: Browser check
 
-Open the seller inventory with API responses stubbed. Prepare a draft, see original versus proposed, apply, and confirm the bug button is still on the page. Do not approve a real publish or write production data.
+- [x] Open the seller inventory with API responses stubbed. Prepare a draft, see original versus proposed, apply, and confirm the bug button is still on the page. Do not approve a real publish or write production data.
 
 ## Self-review
 

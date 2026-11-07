@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { describe, it } from 'node:test';
 import { post } from '../lib/crosspost.js';
+import { CSV } from '../lib/export.js';
 import { altText } from '../lib/seo.js';
 import { displayWidth } from '../lib/vocab.js';
 import { enrich } from '../lib/wbw.js';
@@ -11,14 +12,15 @@ const HEADERS = ['Photos', 'Listing title', 'Asking price', 'Brand', 'Sized for'
 describe('WBW sell-a-pair fields', () => {
   it('exports every field from the WBW listing form', () => {
     const src = readFileSync(new URL('../app/screen.js', import.meta.url), 'utf8');
-    const cols = src.slice(src.indexOf('const CSV = {'), src.indexOf('const cell')).split('\n').join(' ');
+    const cols = Object.values(CSV).join(' ');
     let at = 0;
     for (const h of HEADERS) {
-      const i = cols.indexOf(`'${h}'`, at);
-      assert.ok(i > at, h);
-      at = i;
+      const i = cols.indexOf(h, at);
+      assert.ok(i >= at, h);
+      at = i + h.length;
     }
     assert.equal(cols.includes('(in)'), false);
+    assert.match(src, /toCsv\(/);
     assert.match(src, /bootlister-export-/);
     assert.equal(src.includes('wbw-import-'), false);
   });
@@ -154,8 +156,10 @@ Asking price: $400
     assert.equal(displayWidth('EE'), 'EE');
     assert.equal(displayWidth('4E'), '4E');
     const src = readFileSync(new URL('../app/screen.js', import.meta.url), 'utf8');
-    assert.match(src, /width: displayWidth\(r\.width\)/);
+    const exp = readFileSync(new URL('../lib/export.js', import.meta.url), 'utf8');
+    assert.match(exp, /width: displayWidth\(item\.width\)/);
     assert.match(src, /f === 'width' \? displayWidth\(edit\[f\]\)/);
+    assert.match(src, /toCsv\(/);
     assert.match(readFileSync(new URL('../lib/vocab.js', import.meta.url), 'utf8'), /width: \['M', 'A', 'B', 'C', 'D', 'E', 'EE', 'EEE', 'W'\]/);
     const listing = { ...stored, photos: ['https://example.com/a.jpg'], id: 1, boot: 'boot', wbw_price: 200 };
     assert.match(altText(listing, 1), /AAA width/);
