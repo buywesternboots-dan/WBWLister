@@ -80,8 +80,9 @@ Schema changes run inside `init()` on the first request (`create table if not ex
 
 ## Review rules
 
-- Approved photo names are used only when every current photo URL is still at the same position. A reorder, add, or removal falls back to names built from the current photos.
-- A draft stores `facts_fp`. Apply and edit refuse the draft when brand, size, width, photos, or the preserved import text no longer match.
+- Approved photo names are used only when `opt_applied.facts_fp` still matches the current facts (brand, size, width, and the other naming inputs) and every photo URL is still in the same position. Otherwise export builds names from the current item. Listing title and description in the CSV are always the live fields.
+- A draft stores `facts_fp`. Apply and edit refuse the draft when those facts no longer match.
+- A real reimport (`src_hash` change), including a description-only change, refreshes the current source snapshot, keeps the first import on `opt_original.first`, and clears the proposal and applied copy. The same hash does not write. `updateItems` does not rewrite the source snapshot. List Perfectly updates use the same plan.
 - Apply clears approval for every role and moves a published row back to review. It does not change `changed_at`. `approveItems` is what publishes. `getFeedItems` reads `status = 'published'` only.
 - Alt text, filenames, and XMP use the same factual fields. The photo route finds the file by id and index, so an older filename still resolves.
 - A confirmed model note may add `Model <id>.` when that id is already in the import. The note's provenance stays on the screen and out of the public wording.

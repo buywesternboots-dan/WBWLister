@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { describe, it } from 'node:test';
 import { packCsvChunks, parseCsv } from '../lib/csv.js';
 import { lpApi } from '../lib/lp-api.js';
-import { LP_PRIVATE, isCowboyBoot, lpPhotoUrl, lpSourceId, mapLpCsv, mappedItem, missingFromLp, planLp, runLpImport } from '../lib/lp.js';
+import { LP_PRIVATE, isCowboyBoot, lpPhotoUrl, lpSourceId, mapLpCsv, mappedItem, mergeLp, missingFromLp, planLp, runLpImport } from '../lib/lp.js';
 import { allowedPhotoUrl } from '../lib/net.js';
 import { sessionToken } from '../lib/session.js';
 import { enrich } from '../lib/wbw.js';
@@ -382,5 +382,22 @@ describe('List Perfectly upload access', () => {
     assert.match(read('app/screen.js'), /Import List Perfectly CSV/);
     assert.match(read('app/screen.js'), /sold or removed/);
     assert.match(read('app/screen.js'), /not cowboy boots/);
+  });
+});
+
+describe('List Perfectly source refresh', () => {
+  it('refreshes the current source text when the file changes and leaves an unchanged hash alone', () => {
+    const base = { hash: 'h1', photos: ['https://cdn.example/a.jpg'], markets: '', raw: { title: 'Boots', description: 'old heel', brand: 'Lucchese' }, item: { title: 'Boots', description: 'old heel', brand: 'Lucchese', price: 10, guessed: [], boot: 'boot', boot_score: 1 } };
+    const created = mergeLp({}, base);
+    assert.equal(created.opt_original.description, 'old heel');
+    assert.equal(created.opt_proposal, undefined);
+    const changed = mergeLp({ src_hash: 'h1', opt_original: created.opt_original, opt_proposal: { facts_fp: 'x' }, opt_applied: { facts_fp: 'x' }, verified: [] }, { ...base, hash: 'h2', raw: { ...base.raw, description: 'Heel < 1.5 now' }, item: { ...base.item, description: 'Heel < 1.5 now' } });
+    assert.equal(changed.opt_original.description, 'Heel < 1.5 now');
+    assert.equal(changed.opt_original.first.description, 'old heel');
+    assert.equal(changed.opt_proposal, null);
+    assert.equal(changed.opt_applied, null);
+    const same = mergeLp({ src_hash: 'h2', opt_original: changed.opt_original, opt_proposal: { facts_fp: 'keep' }, verified: [] }, { ...base, hash: 'h2', raw: base.raw, item: base.item });
+    assert.equal(same.opt_proposal, undefined);
+    assert.equal(same.opt_original, undefined);
   });
 });

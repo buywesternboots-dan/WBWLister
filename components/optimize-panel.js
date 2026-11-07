@@ -11,11 +11,13 @@ const obj = v => {
 export default function OptimizePanel({ item, proposal, title, description, busy, onTitle, onDescription, onPrepare, onSave, onApply, onAdd }) {
   const p = obj(proposal) ?? {};
   const original = obj(item.opt_original) ?? { title: item.title ?? '', description: item.description ?? '' };
+  const first = obj(original.first);
   const [ref, setRef] = useState({ maker: item.brand ?? '', model: '', status: 'candidate', provenance: '', notes: '' });
   const set = k => e => setRef({ ...ref, [k]: e.target.value });
   return <div className="opt" data-optimize-panel>
     <strong>Optimize listing</strong>
     <small>{p.reference_note}</small>
+    {first && (first.description !== original.description || first.title !== original.title) && <small>The first import is kept. The text below is the latest source copy.</small>}
     <small>{p.width_note}</small>
     <div className="compare">
       <label>Original title
