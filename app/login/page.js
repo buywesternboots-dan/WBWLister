@@ -29,10 +29,10 @@ export default function Login() {
   return <form onSubmit={submit} style={{ maxWidth: 420, margin: '12vh auto', display: 'flex', flexDirection: 'column', gap: 8, font: '16px system-ui', padding: 16 }}>
     <strong>BootLister</strong>
     {mode === 'reg' && <input name="shop" placeholder="Shop name" required autoFocus style={field} />}
-    {mode === 'invite' ? <input value={code} onChange={e => setCode(e.target.value)} placeholder="Invite code" autoFocus required style={field} />
-      : <input name="email" type={mode === 'reg' ? 'email' : 'text'} placeholder={mode === 'reg' ? 'Email (or leave blank and use phone)' : 'Email, phone, or admin'} autoComplete="username" required={mode === 'in'} autoFocus={mode === 'in'} style={field} />}
-    {mode === 'reg' && <input name="phone" type="tel" placeholder="Phone (or leave blank and use email)" autoComplete="tel" style={field} />}
-    <input name="password" type="password" placeholder={mode === 'in' ? 'Password' : 'Password (at least 8 characters)'} autoComplete={mode === 'in' ? 'current-password' : 'new-password'} required minLength={mode === 'in' ? undefined : 8} style={field} />
+    {mode === 'invite' ? <input data-private="" value={code} onChange={e => setCode(e.target.value)} placeholder="Invite code" autoFocus required style={field} />
+      : <input data-private="" name="email" type={mode === 'reg' ? 'email' : 'text'} placeholder={mode === 'reg' ? 'Email (or leave blank and use phone)' : 'Email, phone, or admin'} autoComplete="username" required={mode === 'in'} autoFocus={mode === 'in'} style={field} />}
+    {mode === 'reg' && <input data-private="" name="phone" type="tel" placeholder="Phone (or leave blank and use email)" autoComplete="tel" style={field} />}
+    <input data-private="" name="password" type="password" placeholder={mode === 'in' ? 'Password' : 'Password (at least 8 characters)'} autoComplete={mode === 'in' ? 'current-password' : 'new-password'} required minLength={mode === 'in' ? undefined : 8} style={field} />
     <button style={{ ...field, background: '#1f6f6b', color: '#fff', borderColor: '#1f6f6b' }}>{mode === 'reg' ? 'Create account' : mode === 'invite' ? 'Set password' : 'Log in'}</button>
     <button type="button" onClick={() => { setMode(mode === 'reg' ? 'in' : 'reg'); setErr(''); }} style={{ ...field, background: '#fff' }}>{mode === 'reg' ? 'Have an account? Log in' : 'New seller? Create an account'}</button>
     <button type="button" onClick={() => { setMode(mode === 'invite' ? 'in' : 'invite'); setErr(''); }} style={{ ...field, background: '#fff' }}>{mode === 'invite' ? 'Back to log in' : 'Have an invite code?'}</button>

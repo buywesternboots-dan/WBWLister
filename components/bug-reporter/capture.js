@@ -2,6 +2,7 @@
 // document itself. html2canvas draws with its own renderer; html-to-image relies on SVG foreignObject,
 // which Safari often leaves blank. Cross-origin images are requested with CORS and dropped if the host
 // refuses — a missing photo does not fail the shot. Output is WebP when the browser can encode it, else JPEG.
+import { redactClone } from './redact';
 const MAX_PIXELS = 1_200_000;
 const TARGET_CHARS = 900_000;
 
@@ -49,6 +50,7 @@ function shootOptions(html2canvas, stripImages) {
     windowHeight: vh,
     ignoreElements: el => !!el?.closest?.('[data-bug-reporter]'),
     onclone(doc) {
+      redactClone(doc);
       doc.querySelectorAll('[data-bug-reporter]').forEach(el => el.remove());
       doc.querySelectorAll('img').forEach(img => {
         if (stripImages) { img.remove(); return; }

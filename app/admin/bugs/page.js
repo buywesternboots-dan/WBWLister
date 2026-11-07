@@ -2,7 +2,7 @@ import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import MarkFixed from './toggle';
 import { listReports } from '../../../lib/bug-store';
-import { filterReports, priorityColor, priorityFilter, renderAnalysis, safeHttpUrl, safeImageSrc } from '../../../lib/bugs';
+import { filterReports, priorityColor, priorityFilter, renderAnalysis, REPORT_PAGE, reportWindow, safeHttpUrl, safeImageSrc } from '../../../lib/bugs';
 import { sessionSecret } from '../../../lib/gate';
 import { readSession } from '../../../lib/session';
 
@@ -23,7 +23,17 @@ export default async function BugReports({ searchParams }) {
   const q = await searchParams;
   const raw = typeof q?.priority === 'string' ? q.priority : '';
   const selected = priorityFilter(raw);
-  const rows = filterReports(await listReports(selected), selected);
+  const win = reportWindow(q?.page);
+  const fetched = await listReports(selected, { limit: win.limit + 1, offset: win.offset });
+  const hasMore = fetched.length > win.limit;
+  const rows = filterReports(fetched.slice(0, win.limit), selected);
+  const hrefFor = (priority, page) => {
+    const params = new URLSearchParams();
+    if (priority) params.set('priority', priority);
+    if (page > 1) params.set('page', String(page));
+    const s = params.toString();
+    return s ? `/admin/bugs?${s}` : '/admin/bugs';
+  };
   return <main>
     <style>{css}</style>
     <header>
@@ -33,7 +43,7 @@ export default async function BugReports({ searchParams }) {
       </div>
       <nav>
         {FILTERS.map(([value, label]) => {
-          const href = value ? `/admin/bugs?priority=${value}` : '/admin/bugs';
+          const href = hrefFor(value, 1);
           const on = value === (selected || '');
           return <a key={label} href={href} aria-current={on ? 'page' : undefined}>{label}</a>;
         })}
@@ -51,7 +61,7 @@ export default async function BugReports({ searchParams }) {
           <MarkFixed id={row.id} status={row.status} />
         </header>
         <div className="split">
-          <div>{src ? <img src={src} alt={`Annotated screenshot for report ${row.id}`} /> : <p>No screenshot.</p>}</div>
+          <div>{src ? <img src={src} alt={`Annotated screenshot for report ${row.id}`} loading="lazy" decoding="async" /> : <p>No screenshot.</p>}</div>
           <div>
             {href ? <a href={href}>{href}</a> : <p>No page link.</p>}
             <p className="meta">{row.viewport} {row.user_agent}</p>
@@ -62,6 +72,11 @@ export default async function BugReports({ searchParams }) {
         </div>
       </article>;
     })}
+    <p className="pager">
+      {win.page > 1 && <a href={hrefFor(selected, win.page - 1)}>Previous</a>}
+      <span>Page {win.page} · {REPORT_PAGE} at a time</span>
+      {hasMore && <a href={hrefFor(selected, win.page + 1)}>Next</a>}
+    </p>
   </main>;
 }
 
@@ -84,4 +99,6 @@ pre,.md{white-space:pre-wrap;word-break:break-word;background:#faf8f5;border-rad
 .md pre{background:#fff}
 .meta{color:#6b5a4a;font-size:13px}
 .empty{color:#6b5a4a}
+.pager{display:flex;gap:12px;align-items:center}
+.pager a{color:#1f6f6b}
 `;

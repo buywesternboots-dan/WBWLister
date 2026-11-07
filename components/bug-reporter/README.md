@@ -29,6 +29,8 @@ Speech uses `SpeechRecognition` or `webkitSpeechRecognition` (continuous, interi
 
 ## This app
 
-`app/api/bug-reports` stores a row in Neon (`bug_reports`, created on first use). Signed-in staff and sellers can report from any page. Logged-out reports are accepted only from `/login`, capped at 1MB, and limited to 5 per 10 minutes per IP. The dashboard is `/admin/bugs` (staff only).
+`app/api/bug-reports` stores a row in Neon (`bug_reports`, created on first use). Signed-in staff and sellers can report from any page. Logged-out reports are accepted only from `/login`, capped at 1MB, and limited to 5 per 10 minutes per IP. The counter is one atomic database statement, not a read followed by a write. The dashboard is `/admin/bugs` (staff only) and loads one page of screenshots at a time.
 
-Set `GEMINI_API_KEY` to turn on a gemini-2.5-flash triage note. Leave it unset and reports still save; analysis stays empty.
+The snapshot clears password, email, phone, invite, and contact fields, plus anything marked `data-private` or `data-sensitive`. `page_url` is stored without its fragment or sensitive query (`invite`, `password`, `email`, `phone`, `contact`, and similar).
+
+AI triage stays off unless the reporter is signed in and both `BUG_REPORT_AI=on` and `GEMINI_API_KEY` are set. A missing flag, a logged-out report, or a Gemini failure still saves the report with an empty analysis.

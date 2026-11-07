@@ -1,7 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { bugReportResponse, escapeHtml, filterReports, priorityFilter, renderAnalysis, validateImage, ANON_MAX, ANON_MAX_IMAGE_BYTES, MAX_IMAGE_BYTES } from '../lib/bugs.js';
+import { bugLimitDecision, bugReportResponse, escapeHtml, filterReports, MAX_BODY_BYTES, priorityFilter, renderAnalysis, REPORT_PAGE, reportWindow, validateImage, ANON_MAX, ANON_MAX_IMAGE_BYTES, MAX_IMAGE_BYTES } from '../lib/bugs.js';
+import { isSensitiveControl, redactClone } from '../components/bug-reporter/redact.js';
+import { redactPageUrl, sensitiveQuery } from '../lib/report-url.js';
 import { decide } from '../lib/gate.js';
 import { sessionToken } from '../lib/session.js';
 import { captureScale } from '../components/bug-reporter/capture.js';
@@ -25,10 +27,16 @@ const webp = () => {
 function memory() {
   const reports = [];
   const limits = new Map();
+  let chain = Promise.resolve();
   let id = 1;
   return {
     reports,
-    async list() { return reports.map(r => ({ ...r })); },
+    async list(priority, window = {}) {
+      const filtered = filterReports(reports, priority);
+      const offset = Math.max(0, Number(window.offset) || 0);
+      const limit = window.limit == null ? filtered.length : Math.max(0, Number(window.limit));
+      return filtered.slice(offset, offset + limit).map(r => ({ ...r }));
+    },
     async insert(row) {
       const saved = { ...row, id: id++, status: 'open', created_at: new Date(Date.now() + id).toISOString() };
       reports.push(saved);
@@ -42,8 +50,19 @@ function memory() {
     },
     async reporter(who) { return who.seller === 'ada' ? 'ada@shop.test' : who.seller; },
     limits: {
-      async read(key) { return limits.get(key) || null; },
-      async write(key, next) { limits.set(key, next); },
+      async admit(key, max, windowMs, now = Date.now()) {
+        let release;
+        const gate = new Promise(resolve => { release = resolve; });
+        const prev = chain;
+        chain = prev.then(() => gate);
+        await prev;
+        try {
+          const decision = bugLimitDecision(limits.get(key) || null, now, max, windowMs);
+          if (!decision.allow) return { allow: false, n: Number(limits.get(key)?.n || 0) };
+          limits.set(key, decision.next);
+          return { allow: true, n: decision.next.n };
+        } finally { release(); }
+      },
     },
   };
 }
@@ -102,7 +121,7 @@ test('logged-out reports are only accepted from /login and then rate limited', a
 test('a signed-in seller or admin can report; only an admin sees and updates the list', async () => {
   const db = memory();
   db.analyze = () => { throw new Error('gemini down'); };
-  const env = { ...ENV, GEMINI_API_KEY: 'test-key', sessionVersions: { ada: 1 } };
+  const env = { ...ENV, GEMINI_API_KEY: 'test-key', BUG_REPORT_AI: 'on', sessionVersions: { ada: 1 } };
   const seller = await sessionToken('seller:ada', SECRET, { version: 1 });
   const admin = await sessionToken('admin', SECRET);
   const sellerRes = await bugReportResponse(post({
@@ -193,4 +212,167 @@ test('POST /api/bug-reports reaches the handler without a session; other methods
   assert.equal((await decide('/admin/bugs', admin, ENV)).type, 'next');
   const seller = await sessionToken('seller:ada', SECRET);
   assert.equal((await decide('/admin/bugs', seller, ENV)).to, '/seller');
+});
+
+test('concurrent anonymous reports cannot pass the cap, and a lost update can', async () => {
+  const rows = new Map();
+  const racy = async key => {
+    const row = rows.get(key) || null;
+    await Promise.resolve();
+    const decision = bugLimitDecision(row, Date.now(), ANON_MAX, 600000);
+    if (!decision.allow) return false;
+    await Promise.resolve();
+    rows.set(key, decision.next);
+    return true;
+  };
+  const overrun = await Promise.all(Array.from({ length: 20 }, () => racy('same')));
+  assert.ok(overrun.filter(Boolean).length > ANON_MAX);
+
+  const db = memory();
+  const results = await Promise.all(Array.from({ length: 20 }, () => bugReportResponse(post(loginBody(), loginHeaders('8.8.4.4')), db, ENV)));
+  assert.equal(results.filter(r => r.status === 201).length, ANON_MAX);
+  assert.equal(results.filter(r => r.status === 429).length, 20 - ANON_MAX);
+  assert.equal(db.reports.length, ANON_MAX);
+  const store = read('lib/bug-store.js');
+  assert.match(store, /on conflict \(key\) do update/);
+  assert.match(store, /returning n/);
+  assert.equal(store.includes('do update set n ='), false);
+  assert.equal(store.includes('writeLimit'), false);
+});
+
+test('page links drop invite, password, contact, and fragments before they are stored', async () => {
+  const secret = 'INVITE-SECRET-99';
+  const db = memory();
+  const page = `http://localhost/login?invite=${secret}&seller=ada&password=hunter2&email=ada%40shop.test&phone=5551234567&contact=Ada#tok`;
+  const res = await bugReportResponse(post(loginBody({ page_url: page }), { referer: page, 'x-forwarded-for': '3.3.3.3' }), db, ENV);
+  assert.equal(res.status, 201);
+  const saved = db.reports[0].page_url;
+  assert.equal(saved.includes(secret), false);
+  assert.equal(saved.includes('hunter2'), false);
+  assert.equal(saved.includes('ada@shop.test'), false);
+  assert.equal(saved.includes('5551234567'), false);
+  assert.equal(saved.includes('invite'), false);
+  assert.equal(saved.includes('#'), false);
+  assert.equal(saved, 'http://localhost/login?seller=ada');
+  assert.equal(redactPageUrl('http://user:hunter2@localhost/seller?token=abc'), 'http://localhost/seller');
+  assert.equal(redactPageUrl('javascript:alert(1)'), '');
+  assert.equal(sensitiveQuery('access_token'), true);
+  assert.equal(sensitiveQuery('seller'), false);
+  const seller = await sessionToken('seller:ada', SECRET, { version: 1 });
+  const signed = await bugReportResponse(post(loginBody({
+    page_url: 'http://localhost/seller?password=hunter2&email=ada@shop.test&phone=%2B15551212',
+  }), { 'x-auth': seller }), db, { ...ENV, sessionVersions: { ada: 1 } });
+  assert.equal(signed.status, 201);
+  assert.equal(db.reports[1].page_url, 'http://localhost/seller');
+});
+
+test('the capture clone clears invite, password, contact, and private text', () => {
+  const node = (tag, attrs = {}, text = '') => {
+    const el = {
+      tagName: tag.toUpperCase(), attrs: { ...attrs }, value: attrs.value || '', children: [], parent: null, _text: text,
+      getAttribute(name) { return Object.prototype.hasOwnProperty.call(this.attrs, name) ? String(this.attrs[name]) : null; },
+      setAttribute(name, value) { this.attrs[name] = String(value); },
+      removeAttribute(name) { delete this.attrs[name]; },
+      hasAttribute(name) { return Object.prototype.hasOwnProperty.call(this.attrs, name); },
+      closest() {
+        for (let n = this; n; n = n.parent) if (n.hasAttribute('data-private') || n.hasAttribute('data-sensitive')) return n;
+        return null;
+      },
+      get textContent() { return this._text + this.children.map(c => c.textContent).join(''); },
+      set textContent(value) { this._text = String(value); this.children = []; },
+    };
+    return el;
+  };
+  const root = node('div');
+  const add = (parent, child) => { child.parent = parent; parent.children.push(child); return child; };
+  const invite = add(root, node('input', { placeholder: 'Invite code', value: 'INVITE-SECRET-99' }));
+  const password = add(root, node('input', { type: 'password', value: 'hunter2' }));
+  const email = add(root, node('input', { type: 'email', name: 'email', value: 'ada@shop.test' }));
+  const phone = add(root, node('input', { type: 'tel', name: 'phone', value: '5551234567' }));
+  const contact = add(root, node('input', { 'data-private': '', value: 'Ada Boots' }));
+  const shop = add(root, node('input', { placeholder: 'Shop name', value: 'Ada Boots' }));
+  const shown = add(root, node('p', { 'data-private': '' }, 'Invite code, shown once: INVITE-SECRET-99'));
+  root.querySelectorAll = sel => {
+    const all = [];
+    const walk = n => { all.push(n); n.children.forEach(walk); };
+    walk(root);
+    if (sel === 'input, textarea, select') return all.filter(n => n.tagName === 'INPUT');
+    return all.filter(n => n.hasAttribute('data-private') || n.hasAttribute('data-sensitive'));
+  };
+  assert.equal(isSensitiveControl(invite), true);
+  assert.equal(isSensitiveControl(shop), false);
+  redactClone(root);
+  for (const el of [invite, password, email, phone, contact]) assert.equal(el.value, '');
+  assert.equal(shop.value, 'Ada Boots');
+  assert.equal(shown.textContent.includes('INVITE-SECRET-99'), false);
+  assert.match(read('components/bug-reporter/capture.js'), /redactClone\(doc\)/);
+  assert.match(read('components/bug-reporter/BugReporter.js'), /redactPageUrl\(location\.href/);
+  assert.match(read('app/login/page.js'), /data-private/);
+  assert.match(read('app/screen.js'), /data-private/);
+});
+
+test('request size is the streamed body, anonymous reports do not call AI, and the dashboard page is bounded', async () => {
+  const db = memory();
+  let reads = 0;
+  const closed = {
+    method: 'POST', url: 'http://localhost/api/bug-reports',
+    headers: new Headers({ 'content-length': '1', referer: 'http://localhost/login' }),
+    body: { getReader() { reads += 1; throw new Error('read'); } },
+    json() { throw new Error('json'); },
+  };
+  assert.equal((await bugReportResponse(closed, db, { NODE_ENV: 'production' })).status, 503);
+  assert.equal(reads, 0);
+  const loggedOutPatch = { ...closed, method: 'PATCH' };
+  assert.equal((await bugReportResponse(loggedOutPatch, db, ENV)).status, 401);
+  assert.equal(reads, 0);
+
+  const hugeHeader = {
+    method: 'POST', url: 'http://localhost/api/bug-reports',
+    headers: new Headers({ 'content-length': String(MAX_BODY_BYTES + 5), referer: 'http://localhost/login', 'content-type': 'application/json' }),
+    body: { getReader() { reads += 1; throw new Error('read'); } },
+    json() { throw new Error('json'); },
+  };
+  assert.equal((await bugReportResponse(hugeHeader, db, ENV)).status, 413);
+  assert.equal(reads, 0);
+
+  let cancelled = false;
+  const chunk = new Uint8Array(MAX_BODY_BYTES + 1);
+  let sent = false;
+  const lying = {
+    method: 'POST', url: 'http://localhost/api/bug-reports',
+    headers: new Headers({ 'content-length': '1', referer: 'http://localhost/login', 'content-type': 'application/json' }),
+    body: { getReader() { return { async read() { if (sent) return { done: true }; sent = true; return { done: false, value: chunk }; }, async cancel() { cancelled = true; }, releaseLock() {} }; } },
+    json() { throw new Error('json'); },
+  };
+  assert.equal((await bugReportResponse(lying, db, ENV)).status, 413);
+  assert.equal(cancelled, true);
+  assert.equal(db.reports.length, 0);
+
+  let calls = 0;
+  db.analyze = () => { calls += 1; throw new Error('should not spend'); };
+  const flagged = { ...ENV, GEMINI_API_KEY: 'test-key', BUG_REPORT_AI: 'on' };
+  assert.equal((await bugReportResponse(post(loginBody(), loginHeaders('7.7.7.1')), db, flagged)).status, 201);
+  assert.equal(calls, 0);
+  assert.equal((await bugReportResponse(post(loginBody(), loginHeaders('7.7.7.2')), db, { ...ENV, GEMINI_API_KEY: 'test-key' })).status, 201);
+  assert.equal(calls, 0);
+  assert.equal(db.reports.every(r => r.ai_analysis == null), true);
+
+  const admin = await sessionToken('admin', SECRET);
+  for (let i = 0; i < REPORT_PAGE + 3; i++) {
+    assert.equal((await bugReportResponse(post(loginBody({ priority: i % 2 ? 'Low' : 'High', page_url: 'http://localhost/' }), { 'x-auth': admin }), db, ENV)).status, 201);
+  }
+  const page1 = await (await bugReportResponse(new Request('http://localhost/api/bug-reports?page=1', { headers: { 'x-auth': admin } }), db, ENV)).json();
+  const page2 = await (await bugReportResponse(new Request('http://localhost/api/bug-reports?page=2', { headers: { 'x-auth': admin } }), db, ENV)).json();
+  assert.equal(page1.reports.length, REPORT_PAGE);
+  assert.equal(page1.hasMore, true);
+  assert.equal(page2.reports.length, (REPORT_PAGE + 3 + 2) - REPORT_PAGE);
+  assert.equal(page2.hasMore, false);
+  assert.equal(reportWindow('nope').page, 1);
+  assert.equal(reportWindow('2').offset, REPORT_PAGE);
+  assert.match(read('lib/bug-store.js'), /limit \$\{take\} offset \$\{skip\}/);
+  assert.match(read('app/admin/bugs/page.js'), /loading="lazy"/);
+  assert.match(read('lib/bug-ai.js'), /BUG_REPORT_AI/);
+  assert.match(read('components/bug-reporter/BugReporter.js'), /data-priority-choices/);
+  assert.match(read('components/bug-reporter/BugReporter.js'), />Back</);
+  assert.match(read('components/bug-reporter/BugReporter.js'), />Cancel</);
 });

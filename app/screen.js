@@ -57,6 +57,7 @@ const SELLER_FORM = [
 ];
 // Export: every field on the WBW "Sell a pair" form, then the extra columns this import still needs.
 const SIZED = { Men: "Men's", Women: "Women's", Kids: 'Kids' };
+const PRIVATE_SELLER = new Set(['contact', 'email', 'phone']);
 const CSV = { photos: 'Photos', title: 'Listing title', wbw_price: 'Asking price', brand: 'Brand', sized_for: 'Sized for', size: 'Size', size_estimated: 'Size estimated', condition: 'Condition', width: 'Width', material_type: 'Material type', material: 'Material / hide', material_cut: 'Material specifics (cut)', made_in: 'Where made', color: 'Color', keywords: 'Keywords', sole_length: 'Sole length', sole_width: 'Sole width', heel_height: 'Heel height', shaft_circ: 'Shaft circumference', shaft_height: 'Shaft height', sole: 'Sole', heel: 'Heel', toe: 'Toe', description: 'Description', seller: 'WBW Seller Name', price: 'Source price', id_text: 'Model / date codes', category: 'Category', website_url: 'Seller Website Link', alts: 'Image Alt Text', brand_context: 'Brand Context', brand_link: 'Brand Page Link', seller_context: 'Seller Context', source_id: 'Source ID' };
 const download = (rows, brands = {}, s = {}) => {
   const row = r => ({ ...r, seller_context: s.display_name ? `Sold by ${s.display_name}${s.location ? ` of ${s.location}` : ''}.` : '', brand_context: brands[r.brand] ? `${brands[r.brand].text} ${[r.material, r.size && `size ${r.size}`].filter(Boolean).join(', ')}.` : '', brand_link: brands[r.brand]?.link ?? '', website_url: ['facebook', 'depop', 'poshmark', 'ebay'].includes(r.source) ? '' : r.source_url, wbw_price: r.wbw_price ?? r.price,
@@ -255,15 +256,15 @@ export default function Screen({ admin = false }) {
       {admin && sellerForm && <div className="panel">
         <strong>{sellerForm.created_at ? 'Edit seller' : 'New seller'}</strong>
         <small>{sellerForm.has_login ? 'This seller has a password. Setting a new one logs out their other sessions.' : 'This seller has no password yet. Set one here, or create an invite code they type on the sign-in page. Registration will not take over this seller.'}</small>
-        <label>Initial password<input type="password" autoComplete="new-password" value={sellerForm.password ?? ''} onChange={setForm('password')} /></label>
+        <label>Initial password<input data-private="" type="password" autoComplete="new-password" value={sellerForm.password ?? ''} onChange={setForm('password')} /></label>
         <button type="button" onClick={() => api('POST', { ...sellerForm, password: sellerForm.password || undefined, issue_invite: true, rename_from: sellerForm.created_at && current?.name }, '', '/api/sellers').then(s => { setInviteCode(s.invite); setSellerForm({ ...s, password: '' }); }).catch(e => setErr(e.message))}>Create invite code</button>
-        {inviteCode && <p className="warn">Invite code, shown once: {inviteCode}. It expires in 7 days. They choose “Have an invite code?” on the sign-in page. Nothing is emailed.</p>}
+        {inviteCode && <p data-private="" className="warn">Invite code, shown once: {inviteCode}. It expires in 7 days. They choose “Have an invite code?” on the sign-in page. Nothing is emailed.</p>}
         {SELLER_FORM.map(([f, l, kind]) => kind === 'h' ? <h3 key={f}>{l}</h3> :
           <label key={f}>{l}{kind === 'area' ? <textarea rows="3" value={sellerForm[f] ?? ''} onChange={setForm(f)} />
             : kind === 'toggle' ? <select value={sellerForm[f] ?? 'on'} onChange={setForm(f)}><option value="on">On</option><option value="off">Off</option></select>
             : kind === 'sync' ? <select value={sellerForm.sync ?? 'off'} onChange={setForm(f)}>
               <option value="off">Off (sync by hand)</option><option value="daily">Daily</option><option value="weekly">Weekly</option></select>
-            : <input value={sellerForm[f] ?? ''} onChange={setForm(f)} />}</label>)}
+            : <input {...(PRIVATE_SELLER.has(f) ? { 'data-private': '' } : {})} value={sellerForm[f] ?? ''} onChange={setForm(f)} />}</label>)}
         <span><button className="primary" onClick={saveSeller}>Save seller</button><button onClick={() => setSellerForm(null)}>Cancel</button>
           {sellerForm.created_at && !current?.active && <button onClick={deleteSeller}>Delete seller</button>}</span>
       </div>}

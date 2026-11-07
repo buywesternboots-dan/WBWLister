@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { captureViewport, compressCanvas } from './capture';
 import { BUTTON, clampPosition, movedPastThreshold, parseStoredPosition, placePosition, snapPosition } from './position';
+import { redactPageUrl } from '../../lib/report-url';
 
 const ENDPOINT = '/api/bug-reports';
 const STORAGE_KEY = 'bug-reporter-position';
@@ -59,6 +60,7 @@ export default function BugReporter({ endpoint = ENDPOINT, storageKey = STORAGE_
   const loadedShot = useRef('');
   const rootRef = useRef(null);
   const [ink, setInk] = useState(0);
+  const attempt = useRef(0);
 
   const setPhaseBoth = next => { phaseRef.current = next; setPhase(next); };
 
@@ -167,6 +169,7 @@ export default function BugReporter({ endpoint = ENDPOINT, storageKey = STORAGE_
   }
 
   function reset() {
+    attempt.current += 1;
     stopSpeech();
     strokes.current = [];
     drawing.current = null;
@@ -303,11 +306,21 @@ export default function BugReporter({ endpoint = ENDPOINT, storageKey = STORAGE_
     setTranscript(t => (t + interim).trim().slice(0, 8000));
     setInterim('');
     stopSpeech();
+    setError('');
     setPhaseBoth('priority');
+  }
+
+  function backToNote() {
+    setError('');
+    setSending(false);
+    setReady(false);
+    loadedShot.current = '';
+    setPhaseBoth('draw');
   }
 
   async function send(priority) {
     if (sending) return;
+    const ticket = attempt.current;
     setSending(true);
     setError('');
     try {
@@ -318,16 +331,18 @@ export default function BugReporter({ endpoint = ENDPOINT, storageKey = STORAGE_
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           image, transcript: note, priority,
-          page_url: location.href.slice(0, 2000),
+          page_url: redactPageUrl(location.href, location.origin),
           user_agent: navigator.userAgent,
           viewport: `${window.innerWidth}x${window.innerHeight}@${window.devicePixelRatio || 1}`,
         }),
       });
       const data = await res.json().catch(() => ({}));
+      if (ticket !== attempt.current) return;
       if (!res.ok) throw new Error(data.error || 'Could not send the report.');
       reset();
       setToast('Bug report sent.');
     } catch (e) {
+      if (ticket !== attempt.current) return;
       setError(e.message);
       setSending(false);
     }
@@ -386,11 +401,17 @@ export default function BugReporter({ endpoint = ENDPOINT, storageKey = STORAGE_
         <div aria-live="polite" style={{ minHeight: 22, color: '#9ca3af', fontStyle: 'italic' }}>{interim}</div>
         {speechNote && <p style={{ margin: 0, color: '#fca5a5', fontSize: 14 }}>{speechNote}</p>}
       </>}
-      {phase === 'priority' && <div style={{ margin: 'auto 0', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-        {PRIORITIES.map(([label, color]) => <button key={label} type="button" disabled={sending} onClick={() => send(label)}
-          style={{ minHeight: 48, border: 0, borderRadius: 10, background: color, color: '#fff', font: '700 18px system-ui, sans-serif' }}>{label}</button>)}
-        {error && <p style={{ gridColumn: '1 / -1', color: '#fca5a5', margin: 0 }}>{error}</p>}
-      </div>}
+      {phase === 'priority' && <>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+          <Tool onClick={backToNote} disabled={sending}>Back</Tool>
+          <Tool onClick={reset} bg="#dc2626">Cancel</Tool>
+        </div>
+        {error && <p style={{ color: '#fca5a5', margin: '8px 0 0' }}>{error}</p>}
+        <div data-priority-choices="" style={{ margin: 'auto 0', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          {PRIORITIES.map(([label, color]) => <button key={label} type="button" disabled={sending} onClick={() => send(label)}
+            style={{ minHeight: 48, border: 0, borderRadius: 10, background: color, color: '#fff', font: '700 18px system-ui, sans-serif' }}>{label}</button>)}
+        </div>
+      </>}
     </div>}
     {toast && <div role="status" style={{ position: 'fixed', left: 16, right: 16, bottom: 'max(16px, env(safe-area-inset-bottom))', pointerEvents: 'none', background: '#1f6f6b', color: '#fff', textAlign: 'center', padding: '12px 16px', borderRadius: 10, font: '16px system-ui, sans-serif', zIndex: 2147483002 }}>{toast}</div>}
   </div>;

@@ -1,5 +1,5 @@
 import { bugReportResponse } from '../../../lib/bugs';
-import { insertReport, listReports, readLimit, reporterFor, setStatus, writeLimit } from '../../../lib/bug-store';
+import { admitLimit, insertReport, listReports, reporterFor, setStatus } from '../../../lib/bug-store';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -10,7 +10,7 @@ const db = {
   insert: insertReport,
   setStatus,
   reporter: reporterFor,
-  limits: { read: readLimit, write: writeLimit },
+  limits: { admit: admitLimit },
 };
 
 export const GET = req => bugReportResponse(req, db);
