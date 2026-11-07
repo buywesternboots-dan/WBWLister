@@ -9,7 +9,7 @@ import { after, describe, it } from 'node:test';
 import pg from 'pg';
 import { exportRecord } from '../../lib/export.js';
 import { pgSql } from '../../lib/pg-sql.js';
-import { addReference, applyOptimizationToItem, createItem, proposeOptimization, saveSeller, useSql } from '../../lib/wbw.js';
+import { acceptStyleCandidate, addReference, applyOptimizationToItem, createItem, proposeOptimization, saveSeller, useSql } from '../../lib/wbw.js';
 
 const socket = process.env.PGHOST || '/var/run/postgresql';
 const photo = 'https://abc.public.blob.vercel-storage.com/photos/a.jpg';
@@ -112,7 +112,24 @@ Lucchese cowboy boots,sku-9,80,LP old heel,Lucchese,${photo}
     const notes = await raw.query(`select count(*)::int as n from boot_references where seller = 'ada' and lower(model) = 'h1'`);
     assert.equal(notes[0].n, 1);
 
+    const styled = await createItem('ada', { title: 'Dan Post boots', description: 'Style: 0030\nWorn some.', price: 80, brand: 'Dan Post', photos: [photo], source: 'facebook', source_id: 'dp-0030' });
+    await raw.query(`update items set verified = array['brand','id_text'], id_text = '0030' where id = $1`, [styled.id]);
+    const prepared = await proposeOptimization('ada', styled.id);
+    assert.equal(prepared.proposal.style_sample.matches[0].style_number, '0030');
+    assert.equal(prepared.proposal.description.includes('Cow'), false);
+    const keptRef = await acceptStyleCandidate('ada', styled.id, prepared.proposal.style_sample.matches[0].record_url);
+    const refRow = await raw.query(`select jsonb_typeof(style_ref) as kind, style_ref->>'style_number' as style, description, title from items where id = $1`, [styled.id]);
+    assert.equal(refRow[0].kind, 'object');
+    assert.equal(refRow[0].style, '0030');
+    assert.equal(refRow[0].description, keptRef.item.description);
+    assert.match(refRow[0].description, /Style: 0030/);
+    const cleared = await createItem('ada', { title: 'Dan Post boots', description: 'Worn some.', price: 80, brand: 'Dan Post', photos: [photo], source: 'facebook', source_id: 'dp-0030' });
+    assert.equal(cleared.updated, true);
+    const gone = await raw.query(`select style_ref from items where id = $1`, [styled.id]);
+    assert.equal(gone[0].style_ref, null);
+
     const nft = JSON.parse(readFileSync(new URL('../../.next/server/app/api/items/route.js.nft.json', import.meta.url), 'utf8'));
-    assert.ok(nft.files.some(f => f.endsWith('data/wbw-reference/makers.csv')), nft.files.filter(f => f.includes('maker')).join('\n'));
+    assert.ok(nft.files.some(f => f.endsWith('data/wbw-reference/makers.csv')));
+    assert.ok(nft.files.some(f => f.endsWith('data/wbw-reference/models_sample.normalized.json')));
   });
 });

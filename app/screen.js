@@ -397,6 +397,7 @@ export default function Screen({ admin = false }) {
             {opt?.id === i.id && opt.proposal && <OptimizePanel item={items.find(x => x.id === i.id) ?? i} proposal={opt.proposal} title={opt.title} description={opt.description} busy={optBusy}
               onTitle={title => setOpt({ ...opt, title })} onDescription={description => setOpt({ ...opt, description })}
               onPrepare={() => prepareOpt(i)} onSave={saveOpt} onApply={applyOpt}
+              onKeepStyle={url => api('PATCH', { ids: [i.id], action: 'style-candidate', record_url: url }).then(r => { if (r.item) setItems(list => list.map(x => x.id === r.item.id ? { ...x, ...r.item } : x)); }).catch(e => setErr(e.message))}
               onAdd={body => api('POST', body, '', '/api/references').then(() => prepareOpt(i)).catch(e => setErr(e.message))} />}
           </div>)}
         </section>;
