@@ -72,7 +72,23 @@ When `opt_applied` matches the live title and description, Photos and Image Alt 
 
 ## Storage
 
-`items.opt_original`, `items.opt_proposal`, `items.opt_applied` are jsonb. The original snapshot is written once. Later Prepare calls do not replace it, and they keep using it as the seller-notes source so a second pass does not rewrite an applied description. `boot_references` holds seller notes. Photo URL arrays are not rewritten.
+`items.opt_original` is written when the listing is imported (`importOriginal` of the source payload and stored photo URLs). A later import does not replace it. Prepare uses that snapshot for seller notes. If an older row has none, Prepare saves the text it sees and does not invent an earlier copy.
+
+`items.opt_proposal` and `items.opt_applied` are jsonb. Photo URL arrays are not rewritten. `boot_references` is one note per seller + maker + model (`boot_references_seller_idx`, unique `boot_references_maker_model`). A duplicate note is rejected. Posts are capped at 100000 bytes and 50 rows. Maker, model, provenance, and notes have length caps.
+
+Schema changes run inside `init()` on the first request (`create table if not exists` / `add column if not exists`). There is no separate migration runner. A failed boot clears the cached promise and the next request tries again.
+
+## Review rules
+
+- Approved photo names are used only when every current photo URL is still at the same position. A reorder, add, or removal falls back to names built from the current photos.
+- A draft stores `facts_fp`. Apply and edit refuse the draft when brand, size, width, photos, or the preserved import text no longer match.
+- Apply clears approval for every role and moves a published row back to review. It does not change `changed_at`. `approveItems` is what publishes. `getFeedItems` reads `status = 'published'` only.
+- Alt text, filenames, and XMP use the same factual fields. The photo route finds the file by id and index, so an older filename still resolves.
+- A confirmed model note may add `Model <id>.` when that id is already in the import. The note's provenance stays on the screen and out of the public wording.
+
+## Maker directory snapshot
+
+`data/wbw-reference/` is an untrusted read-only pull from 2026-11-07: 258 directory rows and 8 excerpts. `search_blurb` and sample text are not listing facts. A name match can only supply the directory's spelling. Location and history are not applied to a pair. Model lookup is unavailable. The screen says so.
 
 ## Tasks
 

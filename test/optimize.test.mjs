@@ -2,12 +2,13 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { describe, it } from 'node:test';
 import { itemsResponse } from '../lib/items-api.js';
-import { applyOptimization, cleanText, copyNames, editProposal, optimize, structureVariant } from '../lib/optimize.js';
+import { applyOptimization, cleanText, copyNames, editProposal, importOriginal, optimize, structureVariant } from '../lib/optimize.js';
 import { CSV, exportRecord, toCsv } from '../lib/export.js';
-import { matchReferences, parseReferenceTable, referenceFromFields, REFERENCE_NOTE } from '../lib/references.js';
-import { photoUrl } from '../lib/seo.js';
+import { assertReferencePost, matchReferences, parseReferenceTable, referenceFromFields, REFERENCE_LIMITS, REFERENCE_NOTE } from '../lib/references.js';
+import { altText, fileName, photoUrl, withXmp } from '../lib/seo.js';
 import { sessionToken } from '../lib/session.js';
-import { applyReturnsToReview } from '../lib/publish.js';
+import { possessive } from '../lib/facts.js';
+import { needsCheck, reviewAfterApply } from '../lib/publish.js';
 import { displayWidth } from '../lib/vocab.js';
 
 const read = p => readFileSync(new URL(`../${p}`, import.meta.url), 'utf8');
@@ -104,6 +105,11 @@ describe('factual optimization', () => {
     });
     assert.equal(cleanText(dirty.description).includes('<'), false);
     assert.equal(cleanText(dirty.description).includes('Worn some.'), true);
+    assert.equal(cleanText('Heel < 1.5 in and opening > 12 in'), 'Heel < 1.5 in and opening > 12 in');
+    assert.equal(cleanText('shaft<=16 and heel>=1.5'), 'shaft<=16 and heel>=1.5');
+    const measured = optimize(boot({ description: 'Heel < 1.5 in. Worn some. Size 9 AAA. Style 1883.' }), []);
+    assert.match(measured.proposal.seller_notes, /Heel < 1\.5 in/);
+    assert.match(measured.proposal.description, /< 1\.5/);
     const out = optimize(dirty, []);
     assert.equal(out.proposal.description.includes('<'), false);
     assert.equal(out.proposal.seller_notes.includes('alert(1)'), false);
@@ -184,8 +190,11 @@ describe('seller reference notes', () => {
 
     const out = optimize(item, [confirmed, candidate, absent, otherMaker]);
     assert.equal(out.proposal.references_connected, false);
-    assert.match(out.proposal.facts, /1883/);
-    assert.match(out.proposal.facts, /Insole stamp read by the seller/);
+    assert.match(out.proposal.facts, /Model 1883/);
+    assert.equal(out.proposal.facts.includes('Insole stamp read by the seller'), false);
+    assert.equal(out.proposal.description.includes('Insole stamp read by the seller'), false);
+    assert.equal(out.proposal.description.includes('confirmed note'), false);
+    assert.equal(out.proposal.matches.find(m => m.use).provenance, 'Insole stamp read by the seller');
     assert.equal(out.proposal.facts.includes('Guessed from a catalog photo'), false);
     assert.equal(out.proposal.facts.includes('ZZTOP'), false);
     assert.equal(out.proposal.facts.includes('Tony Lama'), false);
@@ -222,8 +231,19 @@ describe('approved export mapping', () => {
     assert.equal(row.title.includes(' A '), false);
     assert.equal(row.width, 'A');
     assert.equal(row.description, applied.description);
-    assert.match(row.photos[0], new RegExp(`${applied.opt_applied.images[0].file}$`));
+    assert.match(row.photos[0], new RegExp(`${applied.opt_applied.images[0].file.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`));
     assert.equal(row.alts[0], applied.opt_applied.images[0].alt);
+    assert.equal(row.photos[0], photoUrl(ctx.origin, live, 1));
+    const tagged = { ...live, opt_applied: { ...live.opt_applied, images: live.opt_applied.images.map((im, i) => ({ ...im, file: `stored-${i}.jpg` })) } };
+    assert.match(exportRecord(tagged, ctx).photos[0], /stored-0\.jpg$/);
+    const swapped = { ...tagged, photos: [...tagged.photos].reverse() };
+    const moved = exportRecord(swapped, ctx);
+    assert.equal(moved.photos[0], photoUrl(ctx.origin, swapped, 1));
+    assert.equal(moved.photos[0].includes('stored-'), false);
+    const shorter = { ...tagged, photos: tagged.photos.slice(0, 1) };
+    assert.equal(exportRecord(shorter, ctx).photos[0], photoUrl(ctx.origin, shorter, 1));
+    assert.equal(exportRecord(shorter, ctx).photos[0].includes('stored-'), false);
+    assert.throws(() => applyOptimization({ ...item, width: 'D' }, prepared), /out of date/);
     assert.equal(Object.values(CSV).includes('SEO description'), false);
     assert.equal(prepared.proposal.portable.seo_description_exported, false);
     assert.ok(prepared.proposal.portable.seo_description.length > 0);
@@ -279,10 +299,63 @@ describe('optimize api', () => {
 });
 
 describe('apply review', () => {
-  it('sends a seller back through approval and lets staff keep a live listing', () => {
-    assert.equal(applyReturnsToReview('seller'), true);
-    assert.equal(applyReturnsToReview('admin'), false);
-    assert.match(read('lib/wbw.js'), /applyReturnsToReview\(role\)/);
+  it('sends every applied rewrite back for review and keeps the source-change flag', () => {
+    const review = reviewAfterApply();
+    assert.equal(possessive('Kids'), "Kids'");
+    assert.equal(possessive('Men'), "Men's");
+    assert.equal(possessive('Women'), "Women's");
+    let kidsId = 'listing-a';
+    for (let i = 0; i < 30; i++) if (structureVariant(`kid-${i}`) === 0) { kidsId = `kid-${i}`; break; }
+    const kids = optimize(boot({ source_id: kidsId, sized_for: 'Kids', description: 'Kids size 9 AAA. Worn some. Style 1883.' }), []);
+    assert.match(kids.proposal.title, /Kids'/);
+    assert.equal(kids.proposal.title.includes("Kids's"), false);
+    assert.equal(review.approved_at, null);
+    assert.equal(review.approved_by, null);
+    assert.equal(review.status, 'review');
+    assert.equal(Object.hasOwn(review, 'changed_at'), false);
+    assert.equal(needsCheck(review), true);
+    const src = read('lib/wbw.js');
+    const fn = src.slice(src.indexOf('export async function applyOptimizationToItem'), src.indexOf('// Seller approves'));
+    assert.equal(fn.includes('changed_at'), false);
+    assert.match(fn, /reviewAfterApply\(\)/);
+    assert.match(fn, /status = 'review'/);
+    assert.equal(fn.includes('applyReturnsToReview'), false);
+    assert.match(src, /where i\.status = 'published'/);
+    assert.match(src, /importOriginal\(raw, photos/);
+    assert.match(src, /if \(!old\?\.opt_original\)/);
+    const imported = importOriginal({ title: 'Imported title', description: 'Heel < 1.5', price: 10, brand: 'Lucchese' }, ['https://cdn.example/a.jpg'], '2026-11-07T00:00:00.000Z');
+    assert.equal(imported.title, 'Imported title');
+    assert.deepEqual(imported.photos, ['https://cdn.example/a.jpg']);
+    const route = read('app/img/[id]/[n]/[name]/route.js');
+    assert.match(route, /const \{ id, n \} = await params/);
+    assert.equal(route.includes('fileName'), false);
+  });
+});
+
+describe('photo metadata', () => {
+  it('keeps guessed materials out of alt text and XMP, and uses one filename', () => {
+    const item = { id: 4, seller: 'ada', brand: 'Lucchese', material: 'Alligator', guessed: ['material'], verified: ['brand'], boot: 'boot', width: 'AAA', size: '9', photos: ['https://cdn.example/a.jpg'] };
+    assert.equal(altText(item, 1).includes('Alligator'), false);
+    assert.match(altText(item, 1), /AAA width/);
+    assert.equal(fileName(item, 1), copyNames(item)[0].file);
+    const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xd9]);
+    const xmp = withXmp(jpeg, item, 1).toString('utf8');
+    assert.equal(xmp.includes('Alligator'), false);
+    assert.match(xmp, /AAA/);
+  });
+});
+
+describe('reference note limits', () => {
+  it('caps a post and rejects a duplicate key', () => {
+    assert.throws(() => referenceFromFields({ maker: 'A'.repeat(81), model: '1883', status: 'candidate', provenance: 'insole' }), /too long/);
+    assert.throws(() => assertReferencePost({ csv: 'a'.repeat(REFERENCE_LIMITS.csvBytes + 1) }), /too large/);
+    let csv = '';
+    for (let i = 0; i < 51; i++) csv += `Maker ${i} | M${i} | candidate | read on the insole\n`;
+    const parsed = parseReferenceTable(csv);
+    assert.equal(parsed.rows.length, 0);
+    assert.match(parsed.errors[0].error, /50/);
+    assert.match(read('lib/wbw.js'), /boot_references_maker_model/);
+    assert.match(read('lib/wbw.js'), /already saved/);
   });
 });
 

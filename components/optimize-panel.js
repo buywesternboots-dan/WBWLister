@@ -27,8 +27,9 @@ export default function OptimizePanel({ item, proposal, title, description, busy
       <label>Proposed description
         <textarea rows="8" data-proposed-description value={description ?? ''} onChange={e => onDescription(e.target.value)} /></label>
     </div>
+    {p.directory?.suggestion && <small data-maker-directory>Directory lists the name {p.directory.suggestion.name}. That is not where this pair was made. Model lookup is not in this snapshot.</small>}
     {p.omitted?.length > 0 && <small>Left out: {p.omitted.map(o => `${o.field} (${o.reason})`).join(' ')}</small>}
-    {p.matches?.length > 0 && <ul>{p.matches.map((m, i) => <li key={i}>{m.use ? 'Used' : 'Not used'} — {m.status}: {m.maker} {m.model} — {m.reason}</li>)}</ul>}
+    {p.matches?.length > 0 && <ul>{p.matches.map((m, i) => <li key={i}>{m.use ? 'Used' : 'Not used'} — {m.status}: {m.maker} {m.model} — {m.reason}{m.provenance ? ` Source note (not published): ${m.provenance}` : ''}</li>)}</ul>}
     <div>
       <small>Photo copy names for the CSV. Stored files and the seller’s source images are not renamed. Pixels are not changed.</small>
       <ul>{(p.images ?? []).map(im => <li key={im.n}>{im.file} — {im.alt}<br />stored: {im.stored_url}</li>)}</ul>
