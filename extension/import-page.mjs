@@ -86,7 +86,9 @@ export async function readDepopShop(shop, deadlineMs, cap = 2) {
     if (!(deadlineMs > Date.now())) return fail('Depop shop read timed out before the page was read. Nothing was imported.');
     const productUrls = [];
     const seen = new Set();
+    const listedBy = `item listed by ${shop}`;
     for (const a of document.querySelectorAll('a[href*="/products/"]')) {
+      if ((a.getAttribute?.('aria-label') || '') !== listedBy) continue;
       let slug = '';
       try {
         const u = new URL(a.href, location.href);
@@ -100,7 +102,7 @@ export async function readDepopShop(shop, deadlineMs, cap = 2) {
     }
     return {
       ok: true, complete: false, value: [], productUrls,
-      reason: `The shop page is ${shop}. A product slug is not that account, so nothing on this page was written. A product is kept only when its page shows a seller link to ${shop}. Sync will not remove listings.`,
+      reason: `The shop page is ${shop}. Only anchors labeled "item listed by ${shop}" are candidates, in page order, and at most ${limit} are opened. A product slug is not the account. Sync will not remove listings.`,
     };
   } catch (e) {
     return fail(e?.message || 'Depop shop read failed. Nothing was imported.');
@@ -126,15 +128,63 @@ export async function readDepopProduct(shop, deadlineMs) {
       return fail('This tab is not a Depop product page. Nothing was imported.');
     const slug = String(location.pathname || '').match(/^\/products\/([^/]+)\/?$/)?.[1] || '';
     if (!slug) return fail('This tab is not a Depop product page. Nothing was imported.');
-    let sellerHref = '';
-    for (const a of document.querySelectorAll('a[href]')) {
-      if (sellerHandle(a.href) === shop) { sellerHref = a.href; break; }
-    }
-    if (!sellerHref)
+    const shopLink = [...document.querySelectorAll('a[href]')].find(a => sellerHandle(a.href) === shop);
+    if (!shopLink)
       return fail(`This Depop product does not show a seller link to ${shop}. Account binding is unresolved. Nothing was imported.`);
-    // The seller link is the account. The slug is only the listing id.
-    // Heading, description, and gallery were visible as text on the observed page, but their elements were not identified.
-    return fail(`Seller link matches ${shop}. Product slug ${slug} is only the listing id, not the account. The heading, description, and gallery elements were not identified, so nothing was written.`);
+    const script = document.querySelector('script[data-testid="meta__jsonLd"]');
+    if (!script || (script.getAttribute?.('type') || '') !== 'application/ld+json')
+      return fail('This Depop product has no schema.org product block. Nothing was imported.');
+    let parsed;
+    try { parsed = JSON.parse(script.textContent || ''); }
+    catch { return fail('This Depop product block could not be read. Nothing was imported.'); }
+    const product = [parsed].flat().find(x => x && [x['@type']].flat().includes('Product'));
+    if (!product) return fail('This Depop product block is not a Product. Nothing was imported.');
+    const offer = product.offers || {};
+    if (!String(offer.availability || '').endsWith('InStock'))
+      return fail('This Depop product is not marked in stock. Nothing was imported.');
+    const price = typeof offer.price === 'string' ? offer.price : '';
+    if (!/^\d{1,8}(\.\d{1,2})?$/.test(price)) return fail('This Depop product has no price amount. Nothing was imported.');
+    const description = typeof product.description === 'string' ? product.description : '';
+    if (!description.trim()) return fail('This Depop product has no description. Nothing was imported.');
+    const firstLine = description.split('\n').map(s => s.trim()).find(Boolean) || '';
+    const sellerName = typeof product.name === 'string' ? product.name : '';
+    const generated = (document.querySelector('h1')?.textContent || '').trim();
+    const nameTruncated = sellerName.includes('...');
+    let title = '';
+    let titleNote = '';
+    if (firstLine && !firstLine.includes('...')) {
+      title = firstLine.slice(0, 300);
+      titleNote = `The title is the first line of the full description. Depop's generated heading is "${generated || 'missing'}".${nameTruncated ? ' The seller name in the product block was truncated and was not used.' : ''}`;
+    } else if (generated) {
+      title = generated.slice(0, 300);
+      titleNote = `The seller name was truncated, so the title is Depop's generated heading "${generated}", not the seller's own title.`;
+    } else return fail('This Depop product has no usable title. Nothing was imported.');
+    const photos = [];
+    for (const src of [product.image].flat()) {
+      if (typeof src !== 'string' || !/^https:\/\/\S+$/.test(src) || src.length > 2000) continue;
+      if (/\/(?:U1|P8|P10)\.jpg(?:$|\?)/.test(src)) continue;
+      if (!photos.includes(src)) photos.push(src);
+      if (photos.length > 30) return fail('This Depop product has more photos than the limit. Nothing was imported.');
+    }
+    if (!photos.length) return fail('This Depop product block has no photos. Nothing was imported.');
+    const lines = [...(document.querySelector('[data-testid="productPrimaryAttributes"]')?.querySelectorAll('p') || [])]
+      .map(p => (p.textContent || '').trim()).filter(Boolean);
+    const sizeLine = lines.find(l => /^size\s+/i.test(l)) || '';
+    const conditionLine = lines.find(l => /\scondition$/i.test(l)) || '';
+    const size = sizeLine ? sizeLine.replace(/^size\s+/i, '').slice(0, 40) : null;
+    const condition = conditionLine ? conditionLine.replace(/\s+condition$/i, '').slice(0, 40) : null;
+    const who = /\bwomen['’]s\b/i.test(description) ? 'Women' : /\bmen['’]s\b/i.test(description) ? 'Men' : /\bkids?\b/i.test(description) ? 'Kids' : null;
+    const brandName = product.brand?.name;
+    const brand = typeof brandName === 'string' && brandName && brandName !== 'Other' ? brandName : null;
+    const currency = typeof offer.priceCurrency === 'string' ? offer.priceCurrency : '';
+    return {
+      ok: true, complete: false,
+      value: [{
+        source: 'depop', source_id: slug, source_url: `https://www.depop.com/products/${slug}/`,
+        title, description, price, brand, size, sized_for: who, condition, color: null, material: null, category: '', photos,
+      }],
+      reason: `${titleNote} Price amount ${price}${currency ? ` ${currency}` : ''}; a currency symbol in the page heading is not a second price. Sync will not remove listings.`,
+    };
   } catch (e) {
     return fail(e?.message || 'Depop product read failed. Nothing was imported.');
   }

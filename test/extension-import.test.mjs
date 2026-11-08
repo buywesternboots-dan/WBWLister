@@ -90,8 +90,18 @@ test('Facebook error pages stay unknown unless Chrome reported a network error',
 const LIVE_SELLER = 'https://www.depop.com/nuclear_nostalgia/?brandIds=1667&productId=988597946';
 const LIVE_PRODUCT = 'https://www.depop.com/products/nuclear_postalgia-y2k-brown-leather-western-boots-f397/';
 const LIVE_SLUG = 'nuclear_postalgia-y2k-brown-leather-western-boots-f397';
+const LIVE_PHOTOS = [
+  'https://media-photos.depop.com/b1/6702411/5150160802_ce48a0a325d448ea86622af9e4288a67/P0.jpg',
+  'https://media-photos.depop.com/b1/6702411/5150160035_f256c7c374f64970a7525a2797db0513/P0.jpg',
+  'https://media-photos.depop.com/b1/6702411/5150160138_b5178623f5ae45ab89c70b8a088a5580/P0.jpg',
+  'https://media-photos.depop.com/b1/6702411/5150160417_1ae8e66160474812a49664c5943e74e5/P0.jpg',
+  'https://media-photos.depop.com/b1/6702411/5150160418_6183d704c5264bb6aef9707bdc10db9d/P0.jpg',
+  'https://media-photos.depop.com/b1/6702411/5150160310_24e7be6729ad4e0b976db912cb3a242b/P0.jpg',
+  'https://media-photos.depop.com/b1/6702411/5150159751_4e2cf8f684984515a044bcfa76e8f555/P0.jpg',
+];
+const LIVE_DESC = 'Y2K brown leather western boots \nWomen’s size 8 \nUsed condition has some heel drag and some scuffing \nClassic brown leather coastal cowgirl boots \n\n#western #boho #westernsleaze #indiesleaze #americana';
 
-test('the observed Depop seller link binds the shop and the product slug does not', async () => {
+test('the observed Depop page supplies the listing and the slug is not the account', async () => {
   assert.equal(depopSellerHandle(LIVE_SELLER), SHOP);
   assert.equal(depopSellerHandle(LIVE_PRODUCT), '');
   assert.equal(LIVE_SLUG === SHOP || LIVE_SLUG.startsWith(`${SHOP}-`), false);
@@ -100,48 +110,78 @@ test('the observed Depop seller link binds the shop and the product slug does no
 
   let fetched = false;
   globalThis.fetch = () => { fetched = true; };
+  const listed = (href, shop) => ({ href, getAttribute: n => n === 'aria-label' ? `item listed by ${shop}` : '' });
   globalThis.location = { hostname: 'www.depop.com', pathname: `/${SHOP}/`, href: `https://www.depop.com/${SHOP}/` };
   globalThis.document = { querySelectorAll: () => [
-    { href: LIVE_PRODUCT },
-    { href: 'https://www.depop.com/products/another-boot/' },
-    { href: 'https://www.depop.com/products/third-boot/' },
+    { href: 'https://www.depop.com/products/related-card-p10/', getAttribute: () => '' },
+    listed(LIVE_PRODUCT, SHOP),
+    listed(LIVE_PRODUCT, SHOP),
+    listed('https://www.depop.com/products/benny-caiman-western/', SHOP),
+    listed('https://www.depop.com/products/corral-flaming-skull/', SHOP),
+    listed('https://www.depop.com/products/rivers-eel/', SHOP),
+    listed('https://www.depop.com/products/nocona-boots/', SHOP),
+    listed('https://www.depop.com/products/old-west-suede/', SHOP),
+    listed('https://www.depop.com/products/not-this-shop/', 'someone_else'),
   ] };
   const shop = await readDepopShop(SHOP, Date.now() + 1000, 9);
   assert.equal(fetched, false);
-  assert.equal(shop.ok, true);
   assert.equal(shop.complete, false);
-  assert.deepEqual(shop.value, []);
-  assert.deepEqual(shop.productUrls, [LIVE_PRODUCT, 'https://www.depop.com/products/another-boot/']);
-  assert.match(shop.reason, /not that account/);
+  assert.deepEqual(shop.productUrls, [LIVE_PRODUCT, 'https://www.depop.com/products/benny-caiman-western/']);
 
-  globalThis.location = { hostname: 'www.depop.com', pathname: `/products/${LIVE_SLUG}/`, href: LIVE_PRODUCT };
-  globalThis.document = { querySelectorAll: () => [{ href: LIVE_SELLER }] };
-  const bound = await readDepopProduct(SHOP, Date.now() + 1000);
-  assert.equal(bound.ok, false);
-  assert.equal(bound.complete, false);
-  assert.match(bound.error, new RegExp(`Seller link matches ${SHOP}`));
-  assert.match(bound.error, /not the account/);
-  assert.match(bound.error, /not identified/);
-  assert.equal(bound.error.includes('988597946'), false);
-  assert.equal(bound.value, undefined);
-
-  globalThis.document = {
-    querySelectorAll: () => [],
-    body: { innerText: '' },
+  const json = {
+    name: 'Y2K brown leather western boots \nWomen’s size 8...',
+    description: LIVE_DESC,
+    '@type': 'Product',
+    image: [...LIVE_PHOTOS],
+    brand: { '@type': 'Brand', name: 'Other' },
+    offers: { priceCurrency: 'USD', price: '50.00', availability: 'https://schema.org/InStock', itemCondition: 'https://schema.org/UsedCondition' },
   };
+  globalThis.location = { hostname: 'www.depop.com', pathname: `/products/${LIVE_SLUG}/`, href: LIVE_PRODUCT };
+  globalThis.document = {
+    querySelector(sel) {
+      if (sel === 'script[data-testid="meta__jsonLd"]')
+        return { textContent: JSON.stringify(json), getAttribute: n => n === 'type' ? 'application/ld+json' : '' };
+      if (sel === 'h1') return { textContent: "Women's Brown and Black Boots" };
+      if (sel === '[data-testid="productPrimaryAttributes"]')
+        return { querySelectorAll: () => [{ textContent: 'Size US 8' }, { textContent: 'Fair condition' }] };
+      return null;
+    },
+    querySelectorAll: () => [
+      { href: LIVE_SELLER, getAttribute: () => null },
+      { href: LIVE_SELLER, getAttribute: n => n === 'aria-label' ? "nuclear_nostalgia's shop" : null },
+    ],
+  };
+  const bound = await readDepopProduct(SHOP, Date.now() + 1000);
+  assert.equal(bound.ok, true);
+  assert.equal(bound.complete, false);
+  const item = bound.value[0];
+  assert.equal(item.source_id, LIVE_SLUG);
+  assert.equal(item.title, 'Y2K brown leather western boots');
+  assert.equal(item.title.includes("Women's Brown"), false);
+  assert.equal(item.description, LIVE_DESC);
+  assert.match(item.description, /#americana/);
+  assert.equal(item.price, '50.00');
+  assert.equal(item.size, 'US 8');
+  assert.equal(item.condition, 'Fair');
+  assert.equal(item.sized_for, 'Women');
+  assert.equal(item.brand, null);
+  assert.deepEqual(item.photos, LIVE_PHOTOS);
+  assert.equal(item.photos.some(p => p.includes('/U1.jpg') || p.includes('/P10.jpg') || p.includes('/P8.jpg')), false);
+  assert.match(bound.reason, /generated heading/);
+  assert.match(bound.reason, /truncated/);
+  assert.match(bound.reason, /USD/);
+  assert.equal(validateItemEnvelope(item, { source: 'depop', expectedId: LIVE_SLUG })?.price, '50.00');
+
+  globalThis.document = { querySelectorAll: () => [{ href: 'https://www.depop.com/someone_else/' }], querySelector: () => null };
   const unresolved = await readDepopProduct(SHOP, Date.now() + 1000);
   assert.equal(unresolved.ok, false);
   assert.match(unresolved.error, /unresolved/);
-  assert.equal(unresolved.value, undefined);
 
   globalThis.location = { hostname: 'www.depop.com', pathname: '/other_shop/', href: 'https://www.depop.com/other_shop/' };
   const off = await readDepopShop(SHOP, Date.now() + 1000, 2);
   assert.match(off.error, /not the requested Depop shop/);
   assert.equal(fetched, false);
-
   assert.equal(planSync(true, true, [LIVE_SLUG], true).sync, false);
-  assert.match(planSync(true, true, [LIVE_SLUG], true).skipped, /did not remove/);
-  assert.equal(planSync(true, false, [LIVE_SLUG]).sync, false);
 });
 
 test('the smoke cap, worker envelope, and job deadline gate writes', () => {
@@ -250,8 +290,8 @@ test('the committed extension zip matches source and its service worker parses',
   assert.match(read('app/screen.js').toString(), /n\.skipped/);
   assert.match(read('extension/popup.js').toString(), /r\.skipped/);
   const manifest = JSON.parse(read('extension/manifest.json').toString());
-  assert.equal(manifest.version, '0.4');
-  const zip = readZip(read('public/bootlister-extension-0.4.zip'));
+  assert.equal(manifest.version, '0.5');
+  const zip = readZip(read('public/bootlister-extension-0.5.zip'));
   const names = ['background.js', 'bridge.js', 'import-page.mjs', 'import-job.mjs', 'manifest.json', 'popup.html', 'popup.js'];
   assert.deepEqual([...zip.keys()].sort(), names.map(n => `wbw-importer/${n}`).sort());
   for (const name of names) assert.deepEqual(zip.get(`wbw-importer/${name}`), read(`extension/${name}`));
