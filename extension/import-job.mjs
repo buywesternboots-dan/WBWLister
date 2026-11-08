@@ -52,7 +52,6 @@ export function planSync(syncRequested, complete, ids, capped = false) {
 
 export function createImportLock() {
   let job = null;
-  let seq = 0;
   return {
     begin(request) {
       if (job) return { error: 'An import is already running — wait for it to finish.' };
@@ -65,7 +64,7 @@ export function createImportLock() {
       const maxDeadline = Date.now() + JOB_TIMEOUT_MS;
       const requestedDeadline = Number(request?.deadline);
       const deadline = Number.isFinite(requestedDeadline) ? Math.min(requestedDeadline, maxDeadline) : maxDeadline;
-      job = Object.freeze({ id: ++seq, server, seller, token, limit, deadline });
+      job = Object.freeze({ id: crypto.randomUUID(), server, seller, token, limit, deadline });
       return { job };
     },
     auth() {

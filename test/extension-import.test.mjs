@@ -9,7 +9,8 @@ import {
   acceptScan, collectIds, depopSellerHandle, explainPageFailure, pageScriptEmpty, readDepopProduct, readDepopShop, NO_FACEBOOK_LISTINGS,
 } from '../extension/import-page.mjs';
 import { createImportLock, gateWrite, navListenerArmedBeforeTabCreate, planSync, smokeCap, validateItemEnvelope, withDeadline } from '../extension/import-job.mjs';
-import { itemsApi, resetImportWrites } from '../lib/items-api.js';
+import { itemsApi } from '../lib/items-api.js';
+import { nextImportCount } from '../lib/import-cap.js';
 import { sessionToken } from '../lib/session.js';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
@@ -223,11 +224,23 @@ test('a nav link to the shop is not the seller anchor', async () => {
 });
 
 test('one import job can create two listings and not a third', async () => {
-  resetImportWrites();
+  assert.throws(() => nextImportCount(0, '1'), /missing its job/);
+  const jobA = crypto.randomUUID();
+  const jobB = crypto.randomUUID();
+  assert.equal(nextImportCount(0, jobA), 1);
+  assert.equal(nextImportCount(1, jobA), 2);
+  assert.throws(() => nextImportCount(2, jobA), /2 listing writes/);
   const secret = 'signing-secret';
   const token = await sessionToken('admin', secret);
   const env = { NODE_ENV: 'production', ADMIN_PASSWORD: 'staff-secret', APP_PASSWORD: secret };
-  const db = { async createItem(seller, raw) { return { id: raw.source_id, seller }; } };
+  const counts = new Map();
+  const db = {
+    async claimImportWrite(seller, job) {
+      const key = `${seller}\n${String(job || '').trim()}`;
+      counts.set(key, nextImportCount(counts.get(key) || 0, job));
+    },
+    async createItem(seller, raw) { return { id: raw.source_id, seller }; },
+  };
   const call = (job, id, source = 'depop') => itemsApi({
     method: 'POST', url: 'http://localhost/api/items',
     headers: { get(name) {
@@ -239,11 +252,12 @@ test('one import job can create two listings and not a third', async () => {
     } },
     json: async () => ({ source, source_id: id, title: 'Boots', description: 'd', price: '50.00', photos: ['https://example.test/a.jpg'] }),
   }, db, env);
-  assert.equal((await call('job-a', 'one')).item.id, 'one');
-  assert.equal((await call('job-a', 'two')).item.id, 'two');
-  await assert.rejects(() => call('job-a', 'three'), /2 listing writes/);
-  assert.equal((await call('job-b', 'three')).item.id, 'three');
-  await assert.rejects(() => call('', 'four'), /missing its job/);
+  assert.equal((await call(jobA, 'one')).item.id, 'one');
+  assert.equal((await call(jobA, 'two')).item.id, 'two');
+  await assert.rejects(() => call(jobA, 'three'), /2 listing writes/);
+  assert.equal((await call(jobB, 'three')).item.id, 'three');
+  await assert.rejects(() => call('1', 'four'), /missing its job/);
+  assert.equal(read('lib/items-api.js').toString().includes('new Map'), false);
 });
 
 test('the smoke cap, worker envelope, and job deadline gate writes', () => {
@@ -327,8 +341,9 @@ test('one import lock covers every entry and ignores later setting changes', () 
     assert.match(again.error, /already running/, entry);
   }
   assert.equal(lock.job.seller, 'import-test');
-  lock.end(first.job.id + 1);
-  assert.equal(lock.job.seller, 'import-test');
+  assert.match(first.job.id, /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+  lock.end('1');
+  assert.equal(lock.job.id, first.job.id);
   lock.end(first.job.id);
   assert.equal(lock.job, null);
   const mismatched = createImportLock().begin({ server: 'https://evil.example', seller: 'a', token: 'secret', tokenServer: 'https://bootlister.vercel.app' });
@@ -352,8 +367,8 @@ test('the committed extension zip matches source and its service worker parses',
   assert.match(read('app/screen.js').toString(), /n\.skipped/);
   assert.match(read('extension/popup.js').toString(), /r\.skipped/);
   const manifest = JSON.parse(read('extension/manifest.json').toString());
-  assert.equal(manifest.version, '0.6');
-  const zip = readZip(read('public/bootlister-extension-0.6.zip'));
+  assert.equal(manifest.version, '0.7');
+  const zip = readZip(read('public/bootlister-extension-0.7.zip'));
   const loop = bg.slice(bg.indexOf('async function importAll'), bg.indexOf('async function importFacebook'));
   assert.equal(loop.includes('retry(() => importOne'), false);
   assert.match(bg, /x-import-job/);
