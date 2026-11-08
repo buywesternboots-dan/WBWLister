@@ -128,7 +128,12 @@ export async function readDepopProduct(shop, deadlineMs) {
       return fail('This tab is not a Depop product page. Nothing was imported.');
     const slug = String(location.pathname || '').match(/^\/products\/([^/]+)\/?$/)?.[1] || '';
     if (!slug) return fail('This tab is not a Depop product page. Nothing was imported.');
-    const shopLink = [...document.querySelectorAll('a[href]')].find(a => sellerHandle(a.href) === shop);
+    const sellerLabel = `${shop}'s shop`;
+    const shopLink = [...document.querySelectorAll('a[href]')].find(a => {
+      if (sellerHandle(a.href) !== shop) return false;
+      if ((a.getAttribute?.('aria-label') || '') === sellerLabel) return true;
+      return !!a.querySelector?.('[data-testid="avatar"]');
+    });
     if (!shopLink)
       return fail(`This Depop product does not show a seller link to ${shop}. Account binding is unresolved. Nothing was imported.`);
     const script = document.querySelector('script[data-testid="meta__jsonLd"]');
@@ -152,13 +157,10 @@ export async function readDepopProduct(shop, deadlineMs) {
     const nameTruncated = sellerName.includes('...');
     let title = '';
     let titleNote = '';
-    if (firstLine && !firstLine.includes('...')) {
-      title = firstLine.slice(0, 300);
-      titleNote = `The title is the first line of the full description. Depop's generated heading is "${generated || 'missing'}".${nameTruncated ? ' The seller name in the product block was truncated and was not used.' : ''}`;
-    } else if (generated) {
-      title = generated.slice(0, 300);
-      titleNote = `The seller name was truncated, so the title is Depop's generated heading "${generated}", not the seller's own title.`;
-    } else return fail('This Depop product has no usable title. Nothing was imported.');
+    if (!(firstLine && !firstLine.includes('...')))
+      return fail(`The first line of the description is unusable, so this item was not imported. Depop's generated heading${generated ? ` "${generated}"` : ''} was not stored as the title.`);
+    title = firstLine.slice(0, 300);
+    titleNote = `The title is the first line of the full description. Depop's generated heading is "${generated || 'missing'}" and was not stored as the title.${nameTruncated ? ' The seller name in the product block was truncated and was not used.' : ''}`;
     const photos = [];
     for (const src of [product.image].flat()) {
       if (typeof src !== 'string' || !/^https:\/\/\S+$/.test(src) || src.length > 2000) continue;

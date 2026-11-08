@@ -9,6 +9,8 @@ import {
   acceptScan, collectIds, depopSellerHandle, explainPageFailure, pageScriptEmpty, readDepopProduct, readDepopShop, NO_FACEBOOK_LISTINGS,
 } from '../extension/import-page.mjs';
 import { createImportLock, gateWrite, navListenerArmedBeforeTabCreate, planSync, smokeCap, validateItemEnvelope, withDeadline } from '../extension/import-job.mjs';
+import { itemsApi, resetImportWrites } from '../lib/items-api.js';
+import { sessionToken } from '../lib/session.js';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const read = p => readFileSync(new URL(`../${p}`, import.meta.url));
@@ -184,6 +186,66 @@ test('the observed Depop page supplies the listing and the slug is not the accou
   assert.equal(planSync(true, true, [LIVE_SLUG], true).sync, false);
 });
 
+test('a truncated description line is not replaced with the generated heading', async () => {
+  globalThis.location = { hostname: 'www.depop.com', pathname: `/products/${LIVE_SLUG}/`, href: LIVE_PRODUCT };
+  globalThis.document = {
+    querySelector(sel) {
+      if (sel === 'script[data-testid="meta__jsonLd"]') return {
+        textContent: JSON.stringify({
+          name: 'Y2K brown leather western boots...', description: 'Y2K brown leather western boots...\nrest',
+          '@type': 'Product', image: LIVE_PHOTOS, brand: { name: 'Other' },
+          offers: { price: '50.00', priceCurrency: 'USD', availability: 'https://schema.org/InStock' },
+        }),
+        getAttribute: n => n === 'type' ? 'application/ld+json' : '',
+      };
+      if (sel === 'h1') return { textContent: "Women's Brown and Black Boots" };
+      if (sel === '[data-testid="productPrimaryAttributes"]') return { querySelectorAll: () => [] };
+      return null;
+    },
+    querySelectorAll: () => [{ href: LIVE_SELLER, getAttribute: n => n === 'aria-label' ? "nuclear_nostalgia's shop" : '' }],
+  };
+  const bad = await readDepopProduct(SHOP, Date.now() + 1000);
+  assert.equal(bad.ok, false);
+  assert.equal(bad.value, undefined);
+  assert.match(bad.error, /not stored as the title/);
+  assert.equal(/title = generated/.test(readDepopProduct.toString()), false);
+});
+
+test('a nav link to the shop is not the seller anchor', async () => {
+  globalThis.location = { hostname: 'www.depop.com', pathname: `/products/${LIVE_SLUG}/`, href: LIVE_PRODUCT };
+  globalThis.document = {
+    querySelectorAll: () => [{ href: 'https://www.depop.com/nuclear_nostalgia/', getAttribute: () => 'Home' }],
+    querySelector: () => { throw new Error('should not read the product'); },
+  };
+  const decoy = await readDepopProduct(SHOP, Date.now() + 1000);
+  assert.equal(decoy.ok, false);
+  assert.match(decoy.error, /unresolved/);
+});
+
+test('one import job can create two listings and not a third', async () => {
+  resetImportWrites();
+  const secret = 'signing-secret';
+  const token = await sessionToken('admin', secret);
+  const env = { NODE_ENV: 'production', ADMIN_PASSWORD: 'staff-secret', APP_PASSWORD: secret };
+  const db = { async createItem(seller, raw) { return { id: raw.source_id, seller }; } };
+  const call = (job, id, source = 'depop') => itemsApi({
+    method: 'POST', url: 'http://localhost/api/items',
+    headers: { get(name) {
+      const key = String(name).toLowerCase();
+      if (key === 'x-auth') return token;
+      if (key === 'x-import-job') return job;
+      if (key === 'authorization') return 'Bearer import-test';
+      return '';
+    } },
+    json: async () => ({ source, source_id: id, title: 'Boots', description: 'd', price: '50.00', photos: ['https://example.test/a.jpg'] }),
+  }, db, env);
+  assert.equal((await call('job-a', 'one')).item.id, 'one');
+  assert.equal((await call('job-a', 'two')).item.id, 'two');
+  await assert.rejects(() => call('job-a', 'three'), /2 listing writes/);
+  assert.equal((await call('job-b', 'three')).item.id, 'three');
+  await assert.rejects(() => call('', 'four'), /missing its job/);
+});
+
 test('the smoke cap, worker envelope, and job deadline gate writes', () => {
   assert.equal(smokeCap(undefined), 2);
   assert.equal(smokeCap(9), 2);
@@ -290,8 +352,11 @@ test('the committed extension zip matches source and its service worker parses',
   assert.match(read('app/screen.js').toString(), /n\.skipped/);
   assert.match(read('extension/popup.js').toString(), /r\.skipped/);
   const manifest = JSON.parse(read('extension/manifest.json').toString());
-  assert.equal(manifest.version, '0.5');
-  const zip = readZip(read('public/bootlister-extension-0.5.zip'));
+  assert.equal(manifest.version, '0.6');
+  const zip = readZip(read('public/bootlister-extension-0.6.zip'));
+  const loop = bg.slice(bg.indexOf('async function importAll'), bg.indexOf('async function importFacebook'));
+  assert.equal(loop.includes('retry(() => importOne'), false);
+  assert.match(bg, /x-import-job/);
   const names = ['background.js', 'bridge.js', 'import-page.mjs', 'import-job.mjs', 'manifest.json', 'popup.html', 'popup.js'];
   assert.deepEqual([...zip.keys()].sort(), names.map(n => `wbw-importer/${n}`).sort());
   for (const name of names) assert.deepEqual(zip.get(`wbw-importer/${name}`), read(`extension/${name}`));

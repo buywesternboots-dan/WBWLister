@@ -72,6 +72,7 @@ async function snapshot(message) {
 }
 async function api(method, body, q = '') {
   const { server, headers } = lock.auth();
+  if (lock.job?.id) headers['x-import-job'] = String(lock.job.id);
   const r = await fetch(`${server}/api/items${q}`, {
     method, credentials: 'include', // the page's login cookie, when started from the page
     headers, body: body && JSON.stringify(body), signal: AbortSignal.timeout(API_TIMEOUT_MS),
@@ -131,7 +132,7 @@ async function inTab(url, settle, fn, active = true) {
 }
 const importListing = url => inTab(url, 2500, async (id, site) => {
   const expected = String(url || '').match(/\/item\/(\d+)/)?.[1] || '';
-  const raw = await runCall(id, readListing, 'ISOLATED', [], 15000, site);
+  const raw = await retry(() => runCall(id, readListing, 'ISOLATED', [], 15000, site));
   const item = validateItemEnvelope(raw, { source: 'facebook', expectedId: expected });
   if (!item) throw new Error(`This Facebook listing did not match the requested item ${expected || '(missing id)'}. Nothing was imported.`);
   return send(item);
@@ -142,12 +143,14 @@ const importListing = url => inTab(url, 2500, async (id, site) => {
 // listings that are gone to Removed.
 async function importAll({ source, ids, todo, sync, complete, importOne, pause = 0, name = e => e }) {
   const n = { added: 0, updated: 0, failed: 0, removed: 0 };
+  let attempts = 0;
   for (const [i, entry] of todo.entries()) {
-    const gate = gateWrite({ deadline: lock.job?.deadline, written: n.added + n.updated, cap: lock.job?.limit });
+    const gate = gateWrite({ deadline: lock.job?.deadline, written: attempts, cap: lock.job?.limit });
     if (!gate.ok) { n.skipped = gate.reason; break; }
+    attempts += 1;
     badge(todo.length - i);
     progress({ done: i, total: todo.length, label: `${sync ? 'Syncing' : 'Importing'} — ${n.added} added, ${n.updated} updated, ${n.failed} failed` });
-    try { const r = await retry(() => importOne(entry)); if (r.item?.updated) n.updated++; else if (r.item) n.added++; }
+    try { const r = await importOne(entry); if (r.item?.updated) n.updated++; else if (r.item) n.added++; }
     catch (e) { n.failed++; status(`${name(entry)} failed: ${e.message}`); }
     if (pause) await wait(pause + Math.random() * pause); // Facebook: human pace
   }
@@ -211,14 +214,14 @@ function importLink(link, sync) {
   if (shop) return importDepop(shop, sync);
   throw new Error('That isn\'t a Facebook Marketplace profile or Depop shop link.');
 }
-const addCurrent = (tabId, pageUrl) => retry(async () => {
+const addCurrent = async (tabId, pageUrl) => {
   const expected = String(pageUrl || '').match(/\/item\/(\d+)/)?.[1] || '';
   if (!expected) throw new Error('The listing id could not be checked against the requested page. Nothing was imported.');
-  const raw = await runCall(tabId, readListing, 'ISOLATED', [], 15000, 'Facebook');
+  const raw = await retry(() => runCall(tabId, readListing, 'ISOLATED', [], 15000, 'Facebook'));
   const item = validateItemEnvelope(raw, { source: 'facebook', expectedId: expected });
   if (!item) throw new Error(`This Facebook listing did not match the requested item ${expected}. Nothing was imported.`);
   return send(item);
-});
+};
 
 // Every entry point (page, popup, right-click) takes the same lock and the same frozen seller.
 async function runEntry(message) {
