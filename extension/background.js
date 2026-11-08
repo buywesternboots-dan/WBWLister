@@ -1,4 +1,7 @@
+import { explainPageFailure, requirePagePayload, pageScriptEmpty, readDepopShop, NO_FACEBOOK_LISTINGS } from './import-page.mjs';
+
 const ITEM = /facebook\.com\/marketplace\/item\/(\d+)/;
+const siteOf = url => /facebook\.com/i.test(url || '') ? 'Facebook' : /depop\.com/i.test(url || '') ? 'Depop' : 'The page';
 const wait = ms => new Promise(r => setTimeout(r, ms));
 // Runs fn; on failure tries twice more (after 2 s, then 4 s) before giving up.
 const retry = async (fn, n = 1) => { try { return await fn(); } catch (e) { if (n >= 3) throw e; await wait(n * 2000); return retry(fn, n + 1); } };
@@ -57,47 +60,28 @@ function readListing() {
 }
 
 // Runs inside a Marketplace profile page. The profile opens as a dialog over the general feed, so read and scroll only the dialog.
-async function collectIds() {
-  const links = () => [...(document.querySelector('[role="dialog"]') || document).querySelectorAll('a[href*="/marketplace/item/"]')];
-  const ids = () => [...new Set(links().map(a => a.href.match(/item\/(\d+)/)?.[1]).filter(Boolean))];
-  for (let n = 0, same = 0, k = 0; same < 3 && k++ < 40;) {
-    const last = links().at(-1);
-    last ? last.scrollIntoView({ block: 'end' }) : scrollTo(0, document.body.scrollHeight);
-    await new Promise(r => setTimeout(r, 1500));
-    const c = ids().length; same = c === n ? same + 1 : 0; n = c;
+// The result is written onto the page: an async injected function's return value can come back null.
+async function collectIds(key) {
+  const finish = payload => {
+    const el = document.createElement('script');
+    el.type = 'application/json';
+    el.id = key;
+    el.textContent = JSON.stringify(payload);
+    document.documentElement.appendChild(el);
+  };
+  try {
+    const links = () => [...(document.querySelector('[role="dialog"]') || document).querySelectorAll('a[href*="/marketplace/item/"]')];
+    const ids = () => [...new Set(links().map(a => a.href.match(/item\/(\d+)/)?.[1]).filter(Boolean))];
+    for (let n = 0, same = 0, k = 0; same < 3 && k++ < 40;) {
+      const last = links().at(-1);
+      last ? last.scrollIntoView({ block: 'end' }) : scrollTo(0, document.body.scrollHeight);
+      await new Promise(r => setTimeout(r, 1500));
+      const c = ids().length; same = c === n ? same + 1 : 0; n = c;
+    }
+    finish({ ok: true, value: ids() });
+  } catch (e) {
+    finish({ ok: false, error: e?.message || String(e) });
   }
-  return ids();
-}
-
-// Runs inside a Depop shop page (page context, so Depop's own listing feed answers): every listing for sale → item fields.
-async function readDepopShop() {
-  const id = performance.getEntriesByType('resource').map(e => e.name.match(/\/shops\/(\d+)\/products/)?.[1]).find(Boolean);
-  if (!id) throw new Error('Could not find the shop on this page — is it a Depop shop link?');
-  const all = [];
-  for (let after = ''; ;) {
-    const j = await (await fetch(`https://webapi.depop.com/presentation/api/v1/shops/${id}/products/?limit=24${after ? `&after=${after}` : ''}`)).json();
-    all.push(...j.objects);
-    if (!j.page_info?.has_more) break;
-    after = j.page_info.last;
-    await new Promise(r => setTimeout(r, 500));
-  }
-  const cap = s => s && s[0].toUpperCase() + s.slice(1);
-  return all.filter(o => o.status === 'STATUS_ONSALE').map(o => {
-    const a = o.attributes ?? {}, pr = o.pricing ?? {}, desc = o.description ?? '';
-    return {
-      source: 'depop', source_id: o.slug, source_url: `https://www.depop.com/products/${o.slug}/`,
-      title: desc.split('\n')[0].trim().slice(0, 120), // Depop listings have no title; the first line serves as one
-      description: desc,
-      price: pr[pr.final_price_key]?.price_breakdown?.price?.amount ?? pr.display_price?.headline_price?.amount ?? null,
-      brand: a.brand === 'unbranded' ? 'Unbranded' : o.brand_name && o.brand_name !== 'Other' ? o.brand_name : null,
-      size: o.sizes?.[0]?.name ?? null,
-      sized_for: a.is_kids ? 'Kids' : a.gender === 'female' ? 'Women' : a.gender === 'male' ? 'Men' : null,
-      condition: a.condition === 'brand_new' ? 'New' : 'Used',
-      color: cap(a.colour?.[0]) ?? null,
-      category: [o.category_name, a.product_type, ...(a.style ?? [])].filter(Boolean).join(' '), // helps tell boots/belts apart
-      photos: (o.pictures ?? []).map(p => Object.values(p.formats).sort((x, y) => y.width - x.width)[0].url),
-    };
-  });
 }
 
 // ---- talking to the BootLister server ----
@@ -122,7 +106,42 @@ async function api(method, body, q = '') {
 const send = item => api('POST', item);
 
 // ---- tabs ----
-const run = async (tabId, func, world = 'ISOLATED') => (await chrome.scripting.executeScript({ target: { tabId }, func, world }))[0].result;
+// Records the browser's network error for a tab we opened (for example net::ERR_TOO_MANY_REDIRECTS).
+function armNavError(tabId) {
+  let netError = '';
+  const onErr = d => { if (d.tabId === tabId && d.frameId === 0 && d.error) netError = d.error; };
+  try { chrome.webNavigation.onErrorOccurred.addListener(onErr); } catch { /* older unpacked copy without the permission */ }
+  return {
+    read: () => netError,
+    stop() { try { chrome.webNavigation.onErrorOccurred.removeListener(onErr); } catch { /* listener already gone */ } },
+  };
+}
+// Sync page functions return their value. Async ones publish JSON on the DOM; a null return used to crash the import.
+async function run(tabId, func, world = 'ISOLATED', site = 'The page') {
+  if (func.constructor.name !== 'AsyncFunction') {
+    const [out] = await chrome.scripting.executeScript({ target: { tabId }, func, world });
+    if (out?.result == null) throw new Error(pageScriptEmpty(site));
+    return out.result;
+  }
+  const key = `wbw-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  await chrome.scripting.executeScript({ target: { tabId }, world, func, args: [key] });
+  const deadline = Date.now() + 120000;
+  while (Date.now() < deadline) {
+    const [out] = await chrome.scripting.executeScript({
+      target: { tabId }, world: 'ISOLATED', args: [key],
+      func: id => {
+        const el = document.getElementById(id);
+        if (!el) return null;
+        const text = el.textContent;
+        el.remove();
+        return text;
+      },
+    });
+    if (out?.result != null) return requirePagePayload(out.result, site);
+    await wait(200);
+  }
+  throw new Error(pageScriptEmpty(site));
+}
 // Resolves when the tab finishes loading (or after 20 s, whichever is first).
 const loaded = tabId => new Promise(res => {
   const done = () => { chrome.tabs.onUpdated.removeListener(l); clearTimeout(t); res(); };
@@ -130,13 +149,30 @@ const loaded = tabId => new Promise(res => {
   const t = setTimeout(done, 20000);
   chrome.tabs.onUpdated.addListener(l);
 });
-// Opens url in a tab, waits for it to settle, runs fn(tabId), always closes the tab.
+// Opens url in a tab, waits for it to settle, runs fn(tabId, site). Leaves the tab open when the site didn't load.
 async function inTab(url, settle, fn, active = true) {
   const tab = await chrome.tabs.create({ url, active });
-  try { await loaded(tab.id); await wait(settle); return await fn(tab.id); }
-  finally { chrome.tabs.remove(tab.id).catch(() => {}); }
+  const site = siteOf(url);
+  const nav = armNavError(tab.id);
+  let close = true;
+  try {
+    await loaded(tab.id);
+    const info = await chrome.tabs.get(tab.id);
+    const blocked = explainPageFailure({ site, tabUrl: info.url || '', title: info.title || '', netError: nav.read(), pageUrl: url });
+    if (blocked) { close = false; throw new Error(blocked); }
+    await wait(settle);
+    return await fn(tab.id, site);
+  } catch (e) {
+    const blocked = explainPageFailure({ site, message: e.message || '', netError: nav.read(), pageUrl: url });
+    if (blocked) { close = false; throw new Error(blocked); }
+    if (/didn't return a result|Could not find the shop|shop feed/i.test(e.message || '')) close = false;
+    throw e;
+  } finally {
+    nav.stop();
+    if (close) chrome.tabs.remove(tab.id).catch(() => {});
+  }
 }
-const importListing = url => inTab(url, 2500, async id => send(await run(id, readListing)), false);
+const importListing = url => inTab(url, 2500, (id, site) => send(await run(id, readListing, 'ISOLATED', site)), false);
 
 // ---- imports ----
 // Shared loop: importOne(entry) for each entry, retrying twice, with progress in the popup/page. Sync then moves
@@ -158,9 +194,9 @@ async function importAll({ source, ids, todo, sync, importOne, pause = 0, name =
 async function importFacebook(profileId, sync) {
   const known = new Set(await api('GET', null, '?source=facebook')); // first: fails if the seller isn't set up
   status('Scanning the Facebook profile for listings…');
-  const ids = await inTab(`https://www.facebook.com/marketplace/profile/${profileId}/`, 3000, id => run(id, collectIds));
+  const ids = await inTab(`https://www.facebook.com/marketplace/profile/${profileId}/`, 3000, (id, site) => run(id, collectIds, 'ISOLATED', site));
   status(`Found ${ids.length} listings on the profile`);
-  if (!ids.length) throw new Error('No listings found on this profile.');
+  if (!ids.length) throw new Error(NO_FACEBOOK_LISTINGS);
   return importAll({ source: 'facebook', ids, sync, todo: sync ? ids : ids.filter(id => !known.has(id)), pause: 3000,
     importOne: id => importListing(`https://www.facebook.com/marketplace/item/${id}/`), name: id => `Listing ${id}` });
 }
@@ -169,7 +205,7 @@ async function importFacebook(profileId, sync) {
 async function importDepop(shop, sync) {
   const known = new Set(await api('GET', null, '?source=depop')); // first: fails if the seller isn't set up
   status('Reading the Depop shop…');
-  const items = await inTab(`https://www.depop.com/${shop}/`, 4000, id => run(id, readDepopShop, 'MAIN'));
+  const items = await inTab(`https://www.depop.com/${shop}/`, 4000, (id, site) => run(id, readDepopShop, 'MAIN', site));
   status(`Found ${items.length} listings for sale`);
   return importAll({ source: 'depop', ids: items.map(i => i.source_id), sync, todo: sync ? items : items.filter(i => !known.has(i.source_id)),
     importOne: send, name: i => `"${i.title.slice(0, 40)}"` });
@@ -182,7 +218,7 @@ function importLink(link, sync) {
   if (shop) return importDepop(shop, sync);
   throw new Error('That isn\'t a Facebook Marketplace profile or Depop shop link.');
 }
-const addCurrent = tabId => retry(async () => send(await run(tabId, readListing)));
+const addCurrent = tabId => retry(async () => send(await run(tabId, readListing, 'ISOLATED', 'Facebook')));
 
 // Messages: { type: 'link', link, sync } (popup or page) or { type: 'listing', tabId } (popup: add the open listing).
 // Page messages also carry { server, seller }. One import at a time.

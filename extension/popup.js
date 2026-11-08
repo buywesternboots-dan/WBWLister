@@ -83,6 +83,7 @@ const importLink = sync => {
   say('Working — you can close this; the icon shows items left.');
   start({ type: 'link', link, sync });
 };
+$('ver').textContent = `Extension ${chrome.runtime.getManifest().version}`;
 $('profile').onclick = () => importLink(false);
 $('sync').onclick = () => importLink(true);
 $('listing').onclick = async () => {
