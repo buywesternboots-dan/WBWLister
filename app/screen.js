@@ -75,7 +75,7 @@ function Share({ item, seller, reload }) {
 }
 const CONCURRENT = 4; // website products imported at once
 const EXTENSION_LINK = /facebook\.com|depop\.com/i; // these sites block servers, so the Chrome extension imports them
-const done = n => `Done: ${n.added} new, ${n.updated} changed${n.sold != null ? `, ${n.sold} already sold (skipped)` : ''}, ${n.removed} gone (now Pending sold), ${n.failed} failed`;
+const done = n => `Done: ${n.added} new, ${n.updated} changed${n.sold != null ? `, ${n.sold} already sold (skipped)` : ''}, ${n.removed} gone (now Pending sold), ${n.failed} failed${n.skipped ? ` ${n.skipped}` : ''}`;
 const daysLeft = i => Math.max(0, 30 - Math.floor((Date.now() - new Date(i.status_at)) / 864e5));
 
 // Shared item screen. The admin interface passes admin; the seller interface at /seller does not, so those controls are not rendered.
