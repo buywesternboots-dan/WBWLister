@@ -81,7 +81,8 @@ const importLink = sync => {
   const link = $('profileUrl').value.trim();
   if (!IMPORTABLE.test(link)) return say('Paste a Facebook Marketplace profile link (facebook.com/marketplace/profile/…) or a Depop shop link (depop.com/…).');
   say('Working — you can close this; the icon shows items left.');
-  start({ type: 'link', link, sync });
+  const limit = Math.min(2, Math.max(1, parseInt($('limit').value, 10) || 2));
+  start({ type: 'link', link, sync, limit });
 };
 $('ver').textContent = `Extension ${chrome.runtime.getManifest().version}`;
 $('profile').onclick = () => importLink(false);
@@ -90,5 +91,5 @@ $('listing').onclick = async () => {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!/marketplace\/item\//.test(tab.url)) return say('Open a Marketplace listing first.');
   say('Adding…');
-  start({ type: 'listing', tabId: tab.id });
+  start({ type: 'listing', tabId: tab.id, url: tab.url });
 };

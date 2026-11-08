@@ -6,9 +6,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  acceptScan, collectIds, explainPageFailure, pageScriptEmpty, readDepopShop, NO_FACEBOOK_LISTINGS,
+  acceptScan, collectIds, depopSellerHandle, explainPageFailure, pageScriptEmpty, readDepopProduct, readDepopShop, NO_FACEBOOK_LISTINGS,
 } from '../extension/import-page.mjs';
-import { createImportLock, navListenerArmedBeforeTabCreate, planSync, withDeadline } from '../extension/import-job.mjs';
+import { createImportLock, gateWrite, navListenerArmedBeforeTabCreate, planSync, smokeCap, validateItemEnvelope, withDeadline } from '../extension/import-job.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const read = p => readFileSync(new URL(`../${p}`, import.meta.url));
@@ -87,111 +87,91 @@ test('Facebook error pages stay unknown unless Chrome reported a network error',
   assert.match(NO_FACEBOOK_LISTINGS, /Nothing was imported/);
 });
 
-test('Depop keeps literal fields, fails closed on identity, and does not complete a partial feed', async () => {
-  const shop = installPage({
-    entries: [{ name: 'https://webapi.depop.com/presentation/api/v1/shops/42/products/?limit=24' }],
-    pages: [
-      { json: { objects: [onsale(`${SHOP}-0030`), { ...onsale(`${SHOP}-sold`), status: 'STATUS_PURCHASED' }], page_info: { has_more: true, last: '0030' } } },
-      { json: { objects: [onsale(`${SHOP}-second`)], page_info: { has_more: false, last: null } } },
-    ],
-  });
-  const data = await readDepopShop(SHOP, Date.now() + 60000);
-  assert.equal(data.ok, true);
-  assert.equal(data.complete, true);
-  assert.equal(data.value.length, 2);
-  const item = data.value[0];
-  assert.equal(item.source_id, `${SHOP}-0030`);
-  assert.equal(item.source_url, `https://www.depop.com/products/${SHOP}-0030/`);
-  assert.equal(item.size, '0030');
-  assert.equal(item.price, '125.00');
-  assert.deepEqual(item.photos, ['https://media.depop.com/large.jpg']);
-  assert.equal(shop.urls[1], 'https://webapi.depop.com/presentation/api/v1/shops/42/products/?limit=24&after=0030');
+const LIVE_SELLER = 'https://www.depop.com/nuclear_nostalgia/?brandIds=1667&productId=988597946';
+const LIVE_PRODUCT = 'https://www.depop.com/products/nuclear_postalgia-y2k-brown-leather-western-boots-f397/';
+const LIVE_SLUG = 'nuclear_postalgia-y2k-brown-leather-western-boots-f397';
 
-  const stranger = installPage({
-    entries: [{ name: 'https://webapi.depop.com/presentation/api/v1/shops/7/products/' }],
-    pages: [{ json: { objects: [onsale('someone_else-boot')], page_info: { has_more: false } } }],
-  });
-  const wrong = await readDepopShop(SHOP, Date.now() + 60000);
-  assert.equal(wrong.ok, false);
-  assert.equal(wrong.complete, false);
-  assert.equal(wrong.value, undefined);
-  assert.match(wrong.error, /requested shop/);
-  assert.equal(stranger.urls.length, 1);
+test('the observed Depop seller link binds the shop and the product slug does not', async () => {
+  assert.equal(depopSellerHandle(LIVE_SELLER), SHOP);
+  assert.equal(depopSellerHandle(LIVE_PRODUCT), '');
+  assert.equal(LIVE_SLUG === SHOP || LIVE_SLUG.startsWith(`${SHOP}-`), false);
+  assert.equal(readDepopShop.toString().includes('webapi.depop.com'), false);
+  assert.equal(readDepopProduct.toString().includes('webapi.depop.com'), false);
 
-  const many = installPage({
-    entries: [
-      { name: 'https://webapi.depop.com/presentation/api/v1/shops/1/products/' },
-      { name: 'https://webapi.depop.com/presentation/api/v1/shops/2/products/' },
-    ],
-    pages: [{ json: { objects: [onsale(`${SHOP}-0030`)], page_info: { has_more: false } } }],
-  });
-  const ambiguous = await readDepopShop(SHOP, Date.now() + 60000);
-  assert.equal(ambiguous.ok, false);
-  assert.match(ambiguous.error, /More than one Depop shop/);
-  assert.equal(many.urls.length, 0);
+  let fetched = false;
+  globalThis.fetch = () => { fetched = true; };
+  globalThis.location = { hostname: 'www.depop.com', pathname: `/${SHOP}/`, href: `https://www.depop.com/${SHOP}/` };
+  globalThis.document = { querySelectorAll: () => [
+    { href: LIVE_PRODUCT },
+    { href: 'https://www.depop.com/products/another-boot/' },
+    { href: 'https://www.depop.com/products/third-boot/' },
+  ] };
+  const shop = await readDepopShop(SHOP, Date.now() + 1000, 9);
+  assert.equal(fetched, false);
+  assert.equal(shop.ok, true);
+  assert.equal(shop.complete, false);
+  assert.deepEqual(shop.value, []);
+  assert.deepEqual(shop.productUrls, [LIVE_PRODUCT, 'https://www.depop.com/products/another-boot/']);
+  assert.match(shop.reason, /not that account/);
 
-  const elsewhere = installPage({
-    entries: [{ name: 'https://webapi.depop.com/presentation/api/v1/shops/42/products/' }],
-    pages: [],
-    path: '/other_shop/',
-  });
-  const off = await readDepopShop(SHOP, Date.now() + 60000);
+  globalThis.location = { hostname: 'www.depop.com', pathname: `/products/${LIVE_SLUG}/`, href: LIVE_PRODUCT };
+  globalThis.document = { querySelectorAll: () => [{ href: LIVE_SELLER }] };
+  const bound = await readDepopProduct(SHOP, Date.now() + 1000);
+  assert.equal(bound.ok, false);
+  assert.equal(bound.complete, false);
+  assert.match(bound.error, new RegExp(`Seller link matches ${SHOP}`));
+  assert.match(bound.error, /not the account/);
+  assert.match(bound.error, /not identified/);
+  assert.equal(bound.error.includes('988597946'), false);
+  assert.equal(bound.value, undefined);
+
+  globalThis.document = {
+    querySelectorAll: () => [],
+    body: { innerText: '' },
+  };
+  const unresolved = await readDepopProduct(SHOP, Date.now() + 1000);
+  assert.equal(unresolved.ok, false);
+  assert.match(unresolved.error, /unresolved/);
+  assert.equal(unresolved.value, undefined);
+
+  globalThis.location = { hostname: 'www.depop.com', pathname: '/other_shop/', href: 'https://www.depop.com/other_shop/' };
+  const off = await readDepopShop(SHOP, Date.now() + 1000, 2);
   assert.match(off.error, /not the requested Depop shop/);
-  assert.equal(elsewhere.urls.length, 0);
+  assert.equal(fetched, false);
 
-  const partial = installPage({
-    entries: [{ name: 'https://webapi.depop.com/presentation/api/v1/shops/42/products/' }],
-    pages: [{ json: { objects: [onsale(`${SHOP}-0030`), onsale(`${SHOP}-0030`)] } }],
-  });
-  const incomplete = await readDepopShop(SHOP, Date.now() + 60000);
-  assert.equal(incomplete.ok, true);
-  assert.equal(incomplete.complete, false);
-  assert.equal(incomplete.value.length, 1);
-  assert.equal(incomplete.value[0].source_id, `${SHOP}-0030`);
-  assert.equal(partial.urls.length, 1);
-
-  assert.equal(planSync(true, false, [`${SHOP}-0030`]).sync, false);
-  assert.match(planSync(true, false, [`${SHOP}-0030`]).skipped, /did not remove/);
-  assert.equal(planSync(true, true, [`${SHOP}-0030`]).sync, true);
-  assert.deepEqual(planSync(false, true, [`${SHOP}-0030`]), { sync: false });
+  assert.equal(planSync(true, true, [LIVE_SLUG], true).sync, false);
+  assert.match(planSync(true, true, [LIVE_SLUG], true).skipped, /did not remove/);
+  assert.equal(planSync(true, false, [LIVE_SLUG]).sync, false);
 });
 
-test('Depop HTTP errors use status precedence and a past deadline does not fetch', async () => {
-  assert.equal(Boolean(401 ?? 200 === 200), true);
-  assert.equal((401 ?? 200) === 200, false);
-  for (const http of [401, 500]) {
-    installPage({
-      entries: [{ name: 'https://webapi.depop.com/presentation/api/v1/shops/42/products/' }],
-      pages: [{ http, json: { objects: [onsale(`${SHOP}-0030`)], page_info: { has_more: false } } }],
-    });
-    const data = await readDepopShop(SHOP, Date.now() + 60000);
-    assert.equal(data.ok, false, String(http));
-    assert.match(data.error, new RegExp(`HTTP ${http}`));
-    assert.equal(data.complete, false);
-  }
-  let called = false;
-  globalThis.fetch = () => { called = true; };
-  globalThis.performance = { getEntriesByType: () => [{ name: 'https://webapi.depop.com/presentation/api/v1/shops/42/products/' }] };
-  globalThis.location = { hostname: 'www.depop.com', pathname: `/${SHOP}/`, href: `https://www.depop.com/${SHOP}/` };
-  const late = await readDepopShop(SHOP, Date.now() - 5);
-  assert.equal(called, false);
-  assert.match(late.error, /timed out/);
-  assert.equal(late.complete, false);
-});
-
-test('a hanging Depop fetch is aborted by the deadline', async () => {
-  globalThis.location = { hostname: 'www.depop.com', pathname: `/${SHOP}/`, href: `https://www.depop.com/${SHOP}/` };
-  globalThis.performance = { getEntriesByType: () => [{ name: 'https://webapi.depop.com/presentation/api/v1/shops/42/products/' }] };
-  globalThis.fetch = (_url, opts) => new Promise((_, reject) => {
-    const abort = () => reject(Object.assign(new Error('Aborted'), { name: 'AbortError' }));
-    if (opts?.signal?.aborted) return abort();
-    opts?.signal?.addEventListener('abort', abort);
-  });
-  const start = Date.now();
-  const data = await readDepopShop(SHOP, Date.now() + 50);
-  assert.match(data.error, /timed out/);
-  assert.equal(data.complete, false);
-  assert.ok(Date.now() - start < 1000);
+test('the smoke cap, worker envelope, and job deadline gate writes', () => {
+  assert.equal(smokeCap(undefined), 2);
+  assert.equal(smokeCap(9), 2);
+  assert.equal(smokeCap(1), 1);
+  assert.equal(smokeCap('2'), 2);
+  const good = {
+    source: 'depop', source_id: LIVE_SLUG, source_url: `https://www.depop.com/products/${LIVE_SLUG}/`,
+    title: "Women's Brown and Black Boots", description: '', price: '50.00', photos: ['https://media.example/boot-0.jpg'],
+  };
+  assert.equal(validateItemEnvelope(good, { source: 'depop', expectedId: LIVE_SLUG })?.source_id, LIVE_SLUG);
+  assert.equal(validateItemEnvelope({ ...good, photos: ['http://media.example/boot.jpg'] }, { source: 'depop', expectedId: LIVE_SLUG }), null);
+  assert.equal(validateItemEnvelope({ ...good, source_id: '988597946' }, { source: 'depop', expectedId: LIVE_SLUG }), null);
+  assert.equal(validateItemEnvelope({ ...good, photos: Array.from({ length: 31 }, (_, i) => `https://media.example/${i}.jpg`) }, { source: 'depop', expectedId: LIVE_SLUG }), null);
+  const fb = validateItemEnvelope({
+    source: 'facebook', source_id: '100000111', source_url: 'https://www.facebook.com/marketplace/item/100000111/',
+    title: 'Boots', description: '', photos: ['https://example.test/a.jpg'],
+  }, { source: 'facebook', expectedId: '100000111' });
+  assert.equal(fb?.source_id, '100000111');
+  assert.equal(validateItemEnvelope(fb, { source: 'facebook', expectedId: '100000222' }), null);
+  assert.equal(gateWrite({ deadline: Date.now() + 1000, written: 2, cap: 9 }).ok, false);
+  assert.match(gateWrite({ deadline: Date.now() + 1000, written: 2, cap: 2 }).reason, /Smoke test limit is 2/);
+  assert.equal(gateWrite({ deadline: Date.now() - 1, written: 0, cap: 2 }).ok, false);
+  assert.match(gateWrite({ deadline: Date.now() - 1, written: 0, cap: 2 }).reason, /time limit/);
+  const lock = createImportLock();
+  const job = lock.begin({ server: 'https://bootlister.vercel.app', seller: 'import-test', token: '', tokenServer: 'https://bootlister.vercel.app', limit: 400, deadline: Date.now() + 999999999 });
+  assert.equal(job.job.limit, 2);
+  assert.ok(job.job.deadline <= Date.now() + 120000);
+  lock.end(job.job.id);
 });
 
 test('Facebook profile scan fails closed without the profile dialog', async () => {
@@ -223,7 +203,8 @@ test('Facebook profile scan fails closed without the profile dialog', async () =
   };
   const found = await collectIds('1661843737', Date.now() + 1000, 0);
   assert.equal(found.ok, true);
-  assert.equal(found.complete, true);
+  assert.equal(found.complete, false);
+  assert.match(found.reason, /does not prove every listing/);
   assert.deepEqual(found.value, ['100000111']);
   assert.equal(calls.docAll, 0);
 });
@@ -262,12 +243,15 @@ test('the committed extension zip matches source and its service worker parses',
   assert.match(bg, /sameOrigin\(saved\.server, server\)/);
   assert.match(bg, /runEntry/);
   const depop = bg.slice(bg.indexOf('async function importDepop'), bg.indexOf('function importLink'));
-  assert.ok(depop.indexOf('acceptScan') >= 0 && depop.indexOf('acceptScan') < depop.indexOf('.length'));
+  assert.match(depop, /validateItemEnvelope/);
+  assert.match(depop, /complete: false/);
+  assert.match(bg, /AbortSignal\.timeout\(API_TIMEOUT_MS\)/);
+  assert.match(bg, /expectedId: expected/);
   assert.match(read('app/screen.js').toString(), /n\.skipped/);
   assert.match(read('extension/popup.js').toString(), /r\.skipped/);
   const manifest = JSON.parse(read('extension/manifest.json').toString());
-  assert.equal(manifest.version, '0.3');
-  const zip = readZip(read('public/bootlister-extension-0.3.zip'));
+  assert.equal(manifest.version, '0.4');
+  const zip = readZip(read('public/bootlister-extension-0.4.zip'));
   const names = ['background.js', 'bridge.js', 'import-page.mjs', 'import-job.mjs', 'manifest.json', 'popup.html', 'popup.js'];
   assert.deepEqual([...zip.keys()].sort(), names.map(n => `wbw-importer/${n}`).sort());
   for (const name of names) assert.deepEqual(zip.get(`wbw-importer/${name}`), read(`extension/${name}`));

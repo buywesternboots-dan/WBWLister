@@ -1,5 +1,5 @@
-import { acceptScan, collectIds, explainPageFailure, readDepopShop, validateFacebookListing, NO_FACEBOOK_LISTINGS } from './import-page.mjs';
-import { createImportLock, planSync, sameOrigin, withDeadline } from './import-job.mjs';
+import { acceptScan, collectIds, explainPageFailure, readDepopProduct, readDepopShop, NO_FACEBOOK_LISTINGS } from './import-page.mjs';
+import { API_TIMEOUT_MS, createImportLock, gateWrite, JOB_TIMEOUT_MS, planSync, sameOrigin, smokeCap, validateItemEnvelope, withDeadline } from './import-job.mjs';
 
 const ITEM = /facebook\.com\/marketplace\/item\/(\d+)/;
 const siteOf = url => /facebook\.com/i.test(url || '') ? 'Facebook' : /depop\.com/i.test(url || '') ? 'Depop' : 'The page';
@@ -68,13 +68,13 @@ async function snapshot(message) {
   const server = String(message?.server || saved.server || '').replace(/\/$/, '');
   const seller = String(message?.seller || saved.seller || '').trim().toLowerCase();
   const token = saved.token && sameOrigin(saved.server, server) ? saved.token : '';
-  return { server, seller, token, tokenServer: server };
+  return { server, seller, token, tokenServer: server, limit: smokeCap(message?.limit), deadline: Date.now() + JOB_TIMEOUT_MS };
 }
 async function api(method, body, q = '') {
   const { server, headers } = lock.auth();
   const r = await fetch(`${server}/api/items${q}`, {
     method, credentials: 'include', // the page's login cookie, when started from the page
-    headers, body: body && JSON.stringify(body),
+    headers, body: body && JSON.stringify(body), signal: AbortSignal.timeout(API_TIMEOUT_MS),
   });
   const j = await r.json();
   if (!r.ok) throw new Error(j.error);
@@ -130,9 +130,10 @@ async function inTab(url, settle, fn, active = true) {
   }
 }
 const importListing = url => inTab(url, 2500, async (id, site) => {
+  const expected = String(url || '').match(/\/item\/(\d+)/)?.[1] || '';
   const raw = await runCall(id, readListing, 'ISOLATED', [], 15000, site);
-  const item = validateFacebookListing(raw);
-  if (!item) throw new Error('This Facebook listing did not match the open item page. Nothing was imported.');
+  const item = validateItemEnvelope(raw, { source: 'facebook', expectedId: expected });
+  if (!item) throw new Error(`This Facebook listing did not match the requested item ${expected || '(missing id)'}. Nothing was imported.`);
   return send(item);
 }, false);
 
@@ -142,13 +143,16 @@ const importListing = url => inTab(url, 2500, async (id, site) => {
 async function importAll({ source, ids, todo, sync, complete, importOne, pause = 0, name = e => e }) {
   const n = { added: 0, updated: 0, failed: 0, removed: 0 };
   for (const [i, entry] of todo.entries()) {
+    const gate = gateWrite({ deadline: lock.job?.deadline, written: n.added + n.updated, cap: lock.job?.limit });
+    if (!gate.ok) { n.skipped = gate.reason; break; }
     badge(todo.length - i);
     progress({ done: i, total: todo.length, label: `${sync ? 'Syncing' : 'Importing'} — ${n.added} added, ${n.updated} updated, ${n.failed} failed` });
     try { const r = await retry(() => importOne(entry)); if (r.item?.updated) n.updated++; else if (r.item) n.added++; }
     catch (e) { n.failed++; status(`${name(entry)} failed: ${e.message}`); }
     if (pause) await wait(pause + Math.random() * pause); // Facebook: human pace
   }
-  const plan = planSync(!!sync, complete, ids);
+  // Smoke cap and an unproven scroll both refuse removal, even if the page said the scan was finished.
+  const plan = planSync(!!sync, complete, ids, true);
   if (plan.sync) n.removed = (await api('PATCH', { action: 'sync', source, ids: plan.ids })).removed;
   if (plan.skipped) n.skipped = plan.skipped;
   return n;
@@ -158,13 +162,15 @@ async function importAll({ source, ids, todo, sync, complete, importOne, pause =
 async function importFacebook(profileId, sync) {
   const known = new Set(await api('GET', null, '?source=facebook')); // first: fails if the seller isn't set up
   status('Scanning the Facebook profile for listings…');
+  const cap = lock.job?.limit;
   const raw = await inTab(`https://www.facebook.com/marketplace/profile/${profileId}/`, 3000,
-    (id, site) => runCall(id, collectIds, 'ISOLATED', [profileId, Date.now() + 20000, 1500], 25000, site));
+    (id, site) => runCall(id, collectIds, 'ISOLATED', [profileId, Date.now() + 20000, 1500, cap], 25000, site));
   const scan = acceptScan(raw, 'Facebook');
-  status(`Found ${scan.items.length} listings on the profile`);
-  if (!scan.items.length) throw new Error(NO_FACEBOOK_LISTINGS);
+  const ids = scan.items.filter(id => /^\d{5,20}$/.test(String(id))).slice(0, cap);
+  status(`Found ${scan.items.length} listings on the profile; this run writes at most ${cap}.`);
+  if (!ids.length) throw new Error(NO_FACEBOOK_LISTINGS);
   if (scan.reason) status(scan.reason);
-  return importAll({ source: 'facebook', ids: scan.items, sync, complete: scan.complete, todo: sync ? scan.items : scan.items.filter(id => !known.has(id)), pause: 3000,
+  return importAll({ source: 'facebook', ids, sync, complete: false, todo: sync ? ids : ids.filter(id => !known.has(id)), pause: 3000,
     importOne: id => importListing(`https://www.facebook.com/marketplace/item/${id}/`), name: id => `Listing ${id}` });
 }
 
@@ -172,14 +178,30 @@ async function importFacebook(profileId, sync) {
 async function importDepop(shop, sync) {
   const known = new Set(await api('GET', null, '?source=depop')); // first: fails if the seller isn't set up
   status('Reading the Depop shop…');
+  const cap = lock.job?.limit;
   const raw = await inTab(`https://www.depop.com/${shop}/`, 4000,
-    (id, site) => runCall(id, readDepopShop, 'MAIN', [shop, Date.now() + 18000], 22000, site));
+    (id, site) => runCall(id, readDepopShop, 'MAIN', [shop, Date.now() + 15000, cap], 20000, site));
   const scan = acceptScan(raw, 'Depop');
-  status(`Found ${scan.items.length} listings for sale`);
   if (scan.reason) status(scan.reason);
-  return importAll({ source: 'depop', ids: scan.items.map(i => i.source_id), sync, complete: scan.complete,
-    todo: sync ? scan.items : scan.items.filter(i => !known.has(i.source_id)),
+  const todo = [];
+  const notes = [scan.reason].filter(Boolean);
+  for (const productUrl of scan.productUrls.slice(0, cap)) {
+    const gate = gateWrite({ deadline: lock.job?.deadline, written: todo.length, cap });
+    if (!gate.ok) { notes.push(gate.reason); break; }
+    const slug = productUrl.match(/\/products\/([^/]+)\/?$/)?.[1] || '';
+    try {
+      const page = await inTab(productUrl, 2500, (id, site) => runCall(id, readDepopProduct, 'MAIN', [shop, Date.now() + 15000], 20000, site));
+      const product = acceptScan(page, 'Depop');
+      const item = validateItemEnvelope(product.items[0], { source: 'depop', expectedId: slug });
+      if (!item) throw new Error(`Depop product ${slug} did not match the requested shop ${shop}. Nothing was written for it.`);
+      if (product.reason) notes.push(product.reason);
+      todo.push(item);
+    } catch (e) { notes.push(`${slug || productUrl} skipped: ${e.message}`); }
+  }
+  const result = await importAll({ source: 'depop', ids: todo.map(i => i.source_id), sync, complete: false, todo,
     importOne: send, name: i => `"${(i.title || '').slice(0, 40)}"` });
+  result.skipped = [result.skipped, ...notes].filter(Boolean).join(' ');
+  return result;
 }
 
 // A Facebook Marketplace profile or Depop shop link → the right importer.
@@ -189,10 +211,12 @@ function importLink(link, sync) {
   if (shop) return importDepop(shop, sync);
   throw new Error('That isn\'t a Facebook Marketplace profile or Depop shop link.');
 }
-const addCurrent = tabId => retry(async () => {
+const addCurrent = (tabId, pageUrl) => retry(async () => {
+  const expected = String(pageUrl || '').match(/\/item\/(\d+)/)?.[1] || '';
+  if (!expected) throw new Error('The listing id could not be checked against the requested page. Nothing was imported.');
   const raw = await runCall(tabId, readListing, 'ISOLATED', [], 15000, 'Facebook');
-  const item = validateFacebookListing(raw);
-  if (!item) throw new Error('This Facebook listing did not match the open item page. Nothing was imported.');
+  const item = validateItemEnvelope(raw, { source: 'facebook', expectedId: expected });
+  if (!item) throw new Error(`This Facebook listing did not match the requested item ${expected}. Nothing was imported.`);
   return send(item);
 });
 
@@ -207,9 +231,11 @@ async function runEntry(message) {
       return { r };
     }
     if (message?.type === 'listing' || message?.type === 'context') {
+      const pageUrl = message.url || message.link || '';
       const link = message.type === 'context' && ITEM.test(message.link || '') ? message.link : '';
-      if (message.type === 'context' && !link && !ITEM.test(message.url || '')) throw new Error('Open a Marketplace listing first.');
-      return { r: await (link ? importListing(link) : addCurrent(message.tabId)) };
+      if (message.type === 'context' && !link && !ITEM.test(pageUrl)) throw new Error('Open a Marketplace listing first.');
+      if (message.type === 'listing' && !ITEM.test(pageUrl)) throw new Error('Open a Marketplace listing first.');
+      return { r: await (link ? importListing(link) : addCurrent(message.tabId, pageUrl)) };
     }
     throw new Error('Unknown request.');
   } catch (e) {

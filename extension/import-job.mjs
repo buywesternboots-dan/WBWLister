@@ -1,5 +1,26 @@
 // Import orchestration that does not touch Chrome. The service worker freezes one job at a time.
 
+// Smoke runs stay tiny. A higher number in the popup cannot raise this.
+export const SMOKE_CAP = 2;
+export const API_TIMEOUT_MS = 20000;
+export const JOB_TIMEOUT_MS = 120000;
+
+export function smokeCap(value) {
+  const n = Number(value);
+  if (!Number.isInteger(n) || n < 1) return SMOKE_CAP;
+  return Math.min(n, SMOKE_CAP);
+}
+
+// Checked in the worker immediately before a write. A past deadline or a full cap writes nothing.
+export function gateWrite({ deadline, written, cap }) {
+  const limit = smokeCap(cap);
+  if (!(typeof deadline === 'number' && deadline > Date.now()))
+    return { ok: false, reason: 'Import stopped: the time limit for this run was reached. Nothing further was written, and sync did not remove listings.' };
+  if ((written || 0) >= limit)
+    return { ok: false, reason: `Smoke test limit is ${limit} listing${limit === 1 ? '' : 's'} per run. Sync will not remove listings.` };
+  return { ok: true };
+}
+
 export function sameOrigin(saved, dest) {
   try { return !!saved && !!dest && new URL(saved).origin === new URL(dest).origin; }
   catch { return false; }
@@ -16,9 +37,10 @@ export function withDeadline(promise, ms, message) {
 }
 
 // Sync removal deletes listings that were not in the scan. An uncertain scan must not do that.
-export function planSync(syncRequested, complete, ids) {
+export function planSync(syncRequested, complete, ids, capped = false) {
   if (!syncRequested) return { sync: false };
-  if (complete !== true || !Array.isArray(ids))
+  // A smoke cap, an unproven Facebook scroll, or a missing page end all mean the absence list is not real.
+  if (capped || complete !== true || !Array.isArray(ids))
     return { sync: false, skipped: 'Sync did not remove listings because the scan was incomplete. Nothing was marked sold.' };
   const seen = new Set();
   for (const id of ids) {
@@ -39,7 +61,11 @@ export function createImportLock() {
       if (!server) return { error: 'Set the BootLister address in the extension popup.' };
       if (!seller) return { error: 'Pick a seller first.' };
       const token = request?.token && sameOrigin(request.tokenServer || '', server) ? String(request.token) : '';
-      job = Object.freeze({ id: ++seq, server, seller, token });
+      const limit = smokeCap(request?.limit);
+      const maxDeadline = Date.now() + JOB_TIMEOUT_MS;
+      const requestedDeadline = Number(request?.deadline);
+      const deadline = Number.isFinite(requestedDeadline) ? Math.min(requestedDeadline, maxDeadline) : maxDeadline;
+      job = Object.freeze({ id: ++seq, server, seller, token, limit, deadline });
       return { job };
     },
     auth() {
@@ -51,6 +77,37 @@ export function createImportLock() {
     end(id) { if (job && job.id === id) job = null; },
     get job() { return job; },
   };
+}
+
+const TEXT_LIMIT = { title: 300, description: 20000, brand: 80, size: 40, color: 80, material: 120, sized_for: 20, condition: 40, category: 200 };
+
+// Worker-side check. A value shaped by the page is not trusted until it passes here.
+export function validateItemEnvelope(item, { source, expectedId } = {}) {
+  if (!item || typeof item !== 'object' || Array.isArray(item)) return null;
+  if (source !== 'facebook' && source !== 'depop') return null;
+  if (item.source !== source) return null;
+  const id = item.source_id;
+  if (typeof id !== 'string' || !id || id.length > 200 || /\s/.test(id)) return null;
+  if (expectedId && id !== expectedId) return null;
+  const url = source === 'facebook'
+    ? `https://www.facebook.com/marketplace/item/${id}/`
+    : `https://www.depop.com/products/${id}/`;
+  if (source === 'facebook' && !/^\d{5,20}$/.test(id)) return null;
+  if (source === 'depop' && !/^[\w.-]+$/.test(id)) return null;
+  if (item.source_url !== url) return null;
+  if (typeof item.title !== 'string' || item.title.length < 1 || item.title.length > TEXT_LIMIT.title) return null;
+  if (typeof item.description !== 'string' || item.description.length > TEXT_LIMIT.description) return null;
+  if (!Array.isArray(item.photos) || item.photos.length < 1 || item.photos.length > 30) return null;
+  if (!item.photos.every(p => typeof p === 'string' && p.length <= 2000 && /^https:\/\/\S+$/.test(p))) return null;
+  for (const key of Object.keys(TEXT_LIMIT)) {
+    if (key === 'title' || key === 'description') continue;
+    const value = item[key];
+    if (value == null || value === '') continue;
+    if (typeof value !== 'string' && typeof value !== 'number') return null;
+    if (String(value).length > TEXT_LIMIT[key]) return null;
+  }
+  if (!(item.price == null || item.price === '' || /^\d{1,8}(\.\d{1,2})?$/.test(String(item.price)))) return null;
+  return item;
 }
 
 export function navListenerArmedBeforeTabCreate(source) {
