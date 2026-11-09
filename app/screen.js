@@ -99,7 +99,6 @@ export default function Screen({ admin = false }) {
   const [ext, setExt] = useState(false); // BootLister extension present on this page
   const [err, setErr] = useState('');
   const [me, setMe] = useState(null);
-  const [opt, setOpt] = useState(null);
   const [optBusy, setOptBusy] = useState(false);
 
   const current = sellers.find(s => s.seller === who), hasDetails = !!current?.name;
@@ -154,33 +153,22 @@ export default function Screen({ admin = false }) {
   const prepareOpt = i => {
     setErr(''); setOptBusy(true);
     api('PATCH', { ids: [i.id], action: 'optimize' })
-      .then(r => {
-        const p = r.proposal || r.item?.opt_proposal;
-        if (r.item) setItems(list => list.map(x => x.id === r.item.id ? { ...x, ...r.item } : x));
-        setOpt({ id: i.id, proposal: p, title: p?.title ?? '', description: p?.description ?? '' });
-      })
+      .then(r => { if (r.item) setItems(list => list.map(x => x.id === r.item.id ? { ...x, ...r.item } : x)); })
       .catch(e => setErr(e.message))
       .finally(() => setOptBusy(false));
   };
-  const saveOpt = () => {
+  const saveOpt = (i, title, description) => {
     setOptBusy(true);
-    api('PATCH', { ids: [opt.id], action: 'optimize-edit', title: opt.title, description: opt.description })
-      .then(r => {
-        const p = r.proposal || r.item?.opt_proposal;
-        if (r.item) setItems(list => list.map(x => x.id === r.item.id ? { ...x, ...r.item } : x));
-        setOpt(o => ({ ...o, proposal: p, title: p?.title ?? o.title, description: p?.description ?? o.description }));
-      })
+    api('PATCH', { ids: [i.id], action: 'optimize-edit', title, description })
+      .then(r => { if (r.item) setItems(list => list.map(x => x.id === r.item.id ? { ...x, ...r.item } : x)); })
       .catch(e => setErr(e.message))
       .finally(() => setOptBusy(false));
   };
-  const applyOpt = () => {
+  const applyOpt = (i, title, description) => {
     if (!confirm('Replace the live title and description with this draft? The imported original stays saved. Approve the listing again before export.')) return;
     setOptBusy(true);
-    api('PATCH', { ids: [opt.id], action: 'optimize-apply', title: opt.title, description: opt.description })
-      .then(r => {
-        if (r.item) setItems(list => list.map(x => x.id === r.item.id ? { ...x, ...r.item } : x));
-        setOpt(null);
-      })
+    api('PATCH', { ids: [i.id], action: 'optimize-apply', title, description })
+      .then(r => { if (r.item) setItems(list => list.map(x => x.id === r.item.id ? { ...x, ...r.item } : x)); })
       .catch(e => setErr(e.message))
       .finally(() => setOptBusy(false));
   };
@@ -275,6 +263,7 @@ export default function Screen({ admin = false }) {
         </select>
         {who && <button onClick={() => setSellerForm(hasDetails ? current : { name: who, sync: 'off' })}>{hasDetails ? 'Seller settings' : 'Set up seller'}</button>}
         <button className="primary" onClick={() => setSellerForm({ sync: 'off' })}>+ Add seller</button></>}
+        {admin && who && <button type="button" onClick={() => act({ action: 'optimize-backfill' })}>Optimize existing</button>}
         {admin && <a className="src" href="/wbw-importer.zip" download title="Needed for Facebook and Depop imports">Chrome extension{ext ? ' ✓' : ''}</a>}
         {admin && <a className="src" href="/admin/bugs">Bug reports</a>}
         <a className="src" href="/login" onClick={e => { e.preventDefault(); fetch('/api/login', { method: 'DELETE' }).then(() => location.assign('/login')); }}>Log out</a>
@@ -374,6 +363,7 @@ export default function Screen({ admin = false }) {
                 {f === 'description' ? <textarea rows="4" value={edit[f] ?? ''} onChange={setField(f)} />
                   : <input list={CHOICES[f] && `dl-${f}`} value={(f === 'width' ? displayWidth(edit[f]) : edit[f]) ?? ''} onChange={setField(f)} />}</label>)}
               {i.missing_group_price && <small className="err">Missing group price — spreadsheet price kept</small>}
+              {i.opt_error && <small className="err">Optimization failed: {i.opt_error}</small>}
               {i.status === 'published' && <Share item={i} seller={current} reload={load} />}
               <span><button className="primary" onClick={save}>Save (marks all verified)</button>
                 {needsCheck(i) && <button type="button" className="primary" onClick={() => approve(i)}>{admin ? 'Approve for seller' : 'Approve / ready to go live'}</button>}
@@ -386,6 +376,7 @@ export default function Screen({ admin = false }) {
                 View on {{ facebook: 'Facebook', depop: 'Depop', poshmark: 'Poshmark', ebay: 'eBay' }[i.source] ?? i.source}</a>}
               {i.source === 'listperfectly' && <small>List Perfectly{i.markets ? ` · listed on ${i.markets}` : ''}</small>}
               {i.changed_at && <small className="warn">Changed at source — review before it goes back to WBW</small>}
+              {i.opt_error && <small className="err">Optimization failed: {i.opt_error}</small>}
               {i.status === 'pending' && <small className="warn">Gone from the source — confirm sold, or it's marked sold in {daysLeft(i)} days</small>}
               {i.source_condition && <small>Source condition: {i.source_condition}</small>}
               {i.boot === 'unsure' && <small>{Math.round((i.boot_score ?? 0) * 100)}% likely a boot</small>}
@@ -405,9 +396,8 @@ export default function Screen({ admin = false }) {
                 <button type="button" data-prepare-optimize onClick={e => { e.stopPropagation(); prepareOpt(i); }}>Optimize</button>
               </span>
             </div>}
-            {opt?.id === i.id && opt.proposal && <OptimizePanel item={items.find(x => x.id === i.id) ?? i} proposal={opt.proposal} title={opt.title} description={opt.description} busy={optBusy}
-              onTitle={title => setOpt({ ...opt, title })} onDescription={description => setOpt({ ...opt, description })}
-              onPrepare={() => prepareOpt(i)} onSave={saveOpt} onApply={applyOpt}
+            {i.opt_proposal && <OptimizePanel item={items.find(x => x.id === i.id) ?? i} proposal={i.opt_proposal} busy={optBusy}
+              onPrepare={() => prepareOpt(i)} onSave={(title, description) => saveOpt(i, title, description)} onApply={(title, description) => applyOpt(i, title, description)}
               onKeepStyle={url => api('PATCH', { ids: [i.id], action: 'style-candidate', record_url: url }).then(r => { if (r.item) setItems(list => list.map(x => x.id === r.item.id ? { ...x, ...r.item } : x)); }).catch(e => setErr(e.message))}
               onAdd={body => api('POST', body, '', '/api/references').then(() => prepareOpt(i)).catch(e => setErr(e.message))} />}
           </div>)}

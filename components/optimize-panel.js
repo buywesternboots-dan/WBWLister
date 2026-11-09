@@ -1,5 +1,5 @@
 'use client';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 const obj = v => {
   if (!v) return null;
@@ -8,10 +8,17 @@ const obj = v => {
 };
 
 // Original against the draft. Apply is the only write of title and description.
-export default function OptimizePanel({ item, proposal, title, description, busy, onTitle, onDescription, onPrepare, onSave, onApply, onAdd, onKeepStyle }) {
+export default function OptimizePanel({ item, proposal, title, description, busy, onPrepare, onSave, onApply, onAdd, onKeepStyle }) {
   const p = obj(proposal) ?? {};
   const original = obj(item.opt_original) ?? { title: item.title ?? '', description: item.description ?? '' };
   const first = obj(original.first);
+  const [draftTitle, setDraftTitle] = useState(title ?? p.title ?? '');
+  const [draftDescription, setDraftDescription] = useState(description ?? p.description ?? '');
+  const seed = `${p.title ?? ''}\n${p.description ?? ''}`;
+  useEffect(() => {
+    setDraftTitle(title ?? p.title ?? '');
+    setDraftDescription(description ?? p.description ?? '');
+  }, [seed]);
   const [ref, setRef] = useState({ maker: item.brand ?? '', model: '', status: 'candidate', provenance: '', notes: '' });
   const set = k => e => setRef({ ...ref, [k]: e.target.value });
   return <div className="opt" data-optimize-panel>
@@ -23,11 +30,11 @@ export default function OptimizePanel({ item, proposal, title, description, busy
       <label>Original title
         <textarea readOnly rows="3" data-original-title value={original.title ?? ''} /></label>
       <label>Proposed title
-        <textarea rows="3" data-proposed-title value={title ?? ''} onChange={e => onTitle(e.target.value)} /></label>
+        <textarea rows="3" data-proposed-title value={draftTitle} onChange={e => setDraftTitle(e.target.value)} /></label>
       <label>Original description
         <textarea readOnly rows="8" data-original-description value={original.description ?? ''} /></label>
       <label>Proposed description
-        <textarea rows="8" data-proposed-description value={description ?? ''} onChange={e => onDescription(e.target.value)} /></label>
+        <textarea rows="8" data-proposed-description value={draftDescription} onChange={e => setDraftDescription(e.target.value)} /></label>
     </div>
     {p.directory?.suggestion && <small data-maker-directory>Directory lists the name {p.directory.suggestion.name}. That is not where this pair was made. Model lookup is not in this snapshot.</small>}
     {p.style_sample && <div data-style-sample>
@@ -52,8 +59,8 @@ export default function OptimizePanel({ item, proposal, title, description, busy
     <small>{p.portable?.note}</small>
     <span>
       <button type="button" data-prepare-optimize disabled={busy} onClick={onPrepare}>Prepare again</button>
-      <button type="button" disabled={busy} onClick={onSave}>Save draft</button>
-      <button type="button" className="primary" data-apply-optimize disabled={busy} onClick={onApply}>Apply to listing</button>
+      <button type="button" disabled={busy} onClick={() => onSave(draftTitle, draftDescription)}>Save draft</button>
+      <button type="button" className="primary" data-apply-optimize disabled={busy} onClick={() => onApply(draftTitle, draftDescription)}>Apply to listing</button>
     </span>
     <form onSubmit={e => { e.preventDefault(); onAdd(ref); }} className="panel">
       <h3>Maker / model note</h3>

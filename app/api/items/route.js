@@ -18,6 +18,7 @@ const db = {
   approveItems: wbw.approveItems,
   setStatus: wbw.setStatus,
   proposeOptimization: wbw.proposeOptimization,
+  backfillOptimization: wbw.backfillOptimization,
   editOptimization: wbw.editOptimization,
   applyOptimization: wbw.applyOptimizationToItem,
   acceptStyleCandidate: wbw.acceptStyleCandidate,
