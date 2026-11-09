@@ -9,7 +9,7 @@ import {
   acceptScan, collectIds, depopSellerHandle, explainPageFailure, pageScriptEmpty, readDepopProduct, readDepopShop, rejectEmptyDepopShop, NO_FACEBOOK_LISTINGS,
 } from '../extension/import-page.mjs';
 import { westernBootDecision, bootScanSummary, GATE_VERSION, rejectToStore } from '../extension/boot-gate.mjs';
-import { absentIds, actorForJob, allowedBootlisterOrigin, CANDIDATE_CAP, cardIsNonFootwear, cookieReadUrl, createImportLock, depopBootFilters, gateWrite, importLimit, JOB_DEADLINE_MAX_MS, navListenerArmedBeforeTabCreate, planFilteredShop, planKnownSkips, planSync, presenceIds, REJECT_BATCH, scanWindowOpen, sessionFromCookie, SHOP_READ_MS, SIGNED_OUT, validateItemEnvelope, WRITE_CAP, withDeadline } from '../extension/import-job.mjs';
+import { absentIds, actorForJob, allowedBootlisterOrigin, CANDIDATE_CAP, cardIsNonFootwear, cookieReadUrl, createImportLock, depopBootFilters, gateWrite, importLimit, injectionLost, JOB_DEADLINE_MAX_MS, jobSummary, navListenerArmedBeforeTabCreate, planFilteredShop, planKnownSkips, planSync, presenceIds, REJECT_BATCH, retryInjection, scanWindowOpen, sessionFromCookie, shopAfterFilterError, SHOP_READ_MS, SIGNED_OUT, validateItemEnvelope, WRITE_CAP, withDeadline } from '../extension/import-job.mjs';
 import { knownApi, rejectApi } from '../lib/known-api.js';
 import { acceptRejectRows, matchKnown, REJECT_WRITE_CAP, visibleRejects } from '../lib/known.js';
 import { IMPORT_WRITE_CAP } from '../lib/import-cap.js';
@@ -804,8 +804,9 @@ test('already imported links are not reopened unless re-check is on, and skipped
   assert.match(depop, /planKnownSkips/);
   assert.match(depop, /presenceIds/);
   assert.match(depop, /complete: false/);
-  assert.match(depop, /already imported \(skipped\)/);
-  assert.match(depop, /previously not boots \(skipped\)/);
+  assert.match(jobSummary.toString(), /already imported \(skipped\)/);
+  assert.match(jobSummary.toString(), /previously not boots \(skipped\)/);
+  assert.match(depop, /jobSummary/);
   const summary = bootScanSummary({ scanned: 1, candidates: 3, eligible: 1, skipped: { already: 1, prior: 1 }, writeCap: 100 });
   assert.match(summary, /1 already imported \(skipped\)/);
   assert.match(summary, /1 previously not boots \(skipped\)/);
@@ -924,6 +925,49 @@ test('depop boot filters dedupe links and fall back when the filter does not sti
   assert.equal(JOB_DEADLINE_MAX_MS, 15 * 60 * 1000);
 });
 
+test('a removed frame is retried once, then the shop falls back, and the summary still prints', async () => {
+  assert.equal(injectionLost(new Error('Frame with ID 0 was removed.')), true);
+  assert.equal(injectionLost(new Error('No frame with id 0')), true);
+  assert.equal(injectionLost(new Error('Receiving end does not exist.')), true);
+  assert.equal(injectionLost(new Error('Frame with ID 0 is showing error page')), false);
+  const calls = [];
+  const recovered = await retryInjection(async (attempt) => {
+    calls.push(attempt);
+    if (attempt === 1) throw new Error('Frame with ID 0 was removed.');
+    return { ok: true, productUrls: ['https://www.depop.com/products/boot/'] };
+  });
+  assert.deepEqual(calls, [1, 2]);
+  assert.equal(recovered.ok, true);
+  let tries = 0;
+  await assert.rejects(() => retryInjection(async () => {
+    tries += 1;
+    throw new Error('Receiving end does not exist.');
+  }), /Receiving end does not exist/);
+  assert.equal(tries, 2);
+  let other = 0;
+  await assert.rejects(() => retryInjection(async () => { other += 1; throw new Error('timed out'); }), /timed out/);
+  assert.equal(other, 1);
+  const step = shopAfterFilterError(new Error('Frame with ID 0 was removed.'));
+  assert.equal(step.fallback, true);
+  assert.match(step.reason, /Frame with ID 0 was removed/);
+  const line = jobSummary({ error: 'Frame with ID 0 was removed.' });
+  assert.match(line, /0 new/);
+  assert.match(line, /0 already imported \(skipped\)/);
+  assert.match(line, /0 previously not boots \(skipped\)/);
+  assert.match(line, /0 opened/);
+  assert.match(line, /0 failed/);
+  assert.match(line, /Frame with ID 0 was removed/);
+  const bg = read('extension/background.js').toString();
+  assert.match(bg, /retryInjection\(once\)/);
+  assert.match(bg, /shopAfterFilterError/);
+  const grid = bg.slice(bg.indexOf('async function readShopGrid'), bg.indexOf('async function importDepop'));
+  assert.match(grid, /readDepopShop, 'ISOLATED'/);
+  assert.match(grid, /, false\)/);
+  const counted = jobSummary({ added: 2, duplicate: 3, prior: 4, opened: 5, failed: 1, modeNote: 'Boots only (fast).' });
+  assert.match(counted, /Boots only \(fast\)\./);
+  assert.match(counted, /2 new, 3 already imported \(skipped\), 4 previously not boots \(skipped\), 5 opened, 1 failed/);
+});
+
 test('the committed extension zip matches source and its service worker parses', () => {
   const bg = read('extension/background.js').toString();
   assert.equal(navListenerArmedBeforeTabCreate(bg), true);
@@ -957,8 +1001,8 @@ test('the committed extension zip matches source and its service worker parses',
   assert.match(read('app/screen.js').toString(), /Source condition/);
   assert.match(read('extension/popup.js').toString(), /r\.skipped/);
   const manifest = JSON.parse(read('extension/manifest.json').toString());
-  assert.equal(manifest.version, '0.16');
-  const zip = readZip(read('public/bootlister-extension-0.16.zip'));
+  assert.equal(manifest.version, '0.17');
+  const zip = readZip(read('public/bootlister-extension-0.17.zip'));
   const loop = bg.slice(bg.indexOf('async function importAll'), bg.indexOf('async function importFacebook'));
   assert.equal(loop.includes('retry(() => importOne'), false);
   assert.match(bg, /x-import-job/);

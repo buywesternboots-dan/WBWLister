@@ -171,6 +171,43 @@ export function sameOrigin(saved, dest) {
 }
 
 // The timer starts before `promise` settles. A script that never returns still hits `message`.
+// Chrome drops the injection when Depop replaces the document mid-read.
+export function injectionLost(error) {
+  const message = String(error?.message || error || '');
+  return /Frame with ID \d+ was removed|No frame|Receiving end does not exist/i.test(message);
+}
+
+// One retry. A different error is not tried again.
+export async function retryInjection(run) {
+  try { return await run(1); }
+  catch (e) {
+    if (!injectionLost(e)) throw e;
+    return await run(2);
+  }
+}
+
+// A filter read that still fails does not end the job. The full shop is next.
+export function shopAfterFilterError(error) {
+  return { fallback: true, reason: String(error?.message || error || 'filter read failed') };
+}
+
+// Counts stay on the line even when the job stops with an error.
+export function jobSummary(n = {}) {
+  const added = n.added || 0;
+  const known = n.known ?? n.duplicate ?? 0;
+  const prior = n.prior || 0;
+  const opened = n.opened || 0;
+  const failed = n.failed || 0;
+  const mode = n.modeNote ? `${n.modeNote} ` : '';
+  const word = n.error ? 'Stopped' : (n.partial ? 'Partial' : 'Done');
+  let line = `${mode}${word}: ${added} new, ${known} already imported (skipped), ${prior} previously not boots (skipped), ${opened} opened, ${failed} failed.`;
+  if (n.removed) line += ` ${n.removed} gone (now Pending sold).`;
+  if (n.scanLimit) line += ` ${n.scanLimit}`;
+  if (n.skipped) line += ` ${n.skipped}`;
+  if (n.error) line += ` ${n.error}`;
+  return line;
+}
+
 export function withDeadline(promise, ms, message) {
   let timer;
   const timeout = new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(message)), ms); });
