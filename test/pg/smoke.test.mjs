@@ -80,8 +80,11 @@ describe('postgres smoke', () => {
     assert.equal(afterDesc[0].kind, 'object');
     assert.match(afterDesc[0].description, /1\.5/);
     assert.match(afterDesc[0].first, /Old heel/);
-    assert.equal(afterDesc[0].opt_proposal, null);
-    assert.equal(afterDesc[0].opt_applied, null);
+    assert.equal(typeof afterDesc[0].opt_proposal, 'object');
+    assert.equal(afterDesc[0].opt_applied.scope, 'images-seo');
+    const storedDesc = await raw.query(`select description from items where id = $1`, [created.id]);
+    assert.match(storedDesc[0].description, /1\.5/);
+    assert.notEqual(storedDesc[0].description, afterDesc[0].opt_proposal.description);
 
     const branded = await createItem('ada', { ...base, description: 'Size 9 AAA. Heel < 1.5 now.', brand: 'Tony Lama' });
     assert.equal(branded.updated, true);
@@ -105,7 +108,7 @@ Lucchese cowboy boots,sku-9,80,LP old heel,Lucchese,${photo}
     assert.equal(lpAfter[0].kind, 'object');
     assert.match(lpAfter[0].description, /< 2/);
     assert.match(lpAfter[0].first, /LP old heel/);
-    assert.equal(lpAfter[0].opt_proposal, null);
+    assert.equal(typeof lpAfter[0].opt_proposal, 'object');
 
     await addReference('ada', { maker: 'Hyer', model: 'H1', status: 'candidate', provenance: 'Insole stamp' });
     await assert.rejects(() => addReference('ada', { maker: 'Hyer', model: 'H1', status: 'confirmed', provenance: 'Again' }), /already saved/);

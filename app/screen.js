@@ -275,6 +275,7 @@ export default function Screen({ admin = false }) {
         </select>
         {who && <button onClick={() => setSellerForm(hasDetails ? current : { name: who, sync: 'off' })}>{hasDetails ? 'Seller settings' : 'Set up seller'}</button>}
         <button className="primary" onClick={() => setSellerForm({ sync: 'off' })}>+ Add seller</button></>}
+        {admin && who && <button type="button" onClick={() => act({ action: 'optimize-backfill' })}>Optimize existing</button>}
         {admin && <a className="src" href="/wbw-importer.zip" download title="Needed for Facebook and Depop imports">Chrome extension{ext ? ' ✓' : ''}</a>}
         {admin && <a className="src" href="/admin/bugs">Bug reports</a>}
         <a className="src" href="/login" onClick={e => { e.preventDefault(); fetch('/api/login', { method: 'DELETE' }).then(() => location.assign('/login')); }}>Log out</a>
