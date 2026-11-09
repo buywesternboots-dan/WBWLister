@@ -144,6 +144,6 @@ Lucchese cowboy boots,sku-9,80,LP old heel,Lucchese,${photo}
 
     const nft = JSON.parse(readFileSync(new URL('../../.next/server/app/api/items/route.js.nft.json', import.meta.url), 'utf8'));
     assert.ok(nft.files.some(f => f.endsWith('data/wbw-reference/makers.csv')));
-    assert.ok(nft.files.some(f => f.endsWith('data/wbw-reference/models_sample.normalized.json')));
+    assert.ok(nft.files.some(f => f.endsWith('data/wbw-reference/models.csv')));
   });
 });

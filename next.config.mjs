@@ -4,9 +4,9 @@ const nextConfig = {
   experimental: { proxyClientMaxBodySize: '6mb' },
   // The maker snapshot is read with fs from process.cwd(), so the tracer must be told to ship it.
   outputFileTracingIncludes: {
-    '/api/items': ['./data/wbw-reference/makers.csv', './data/wbw-reference/models_sample.normalized.json'],
-    '/api/items/route': ['./data/wbw-reference/makers.csv', './data/wbw-reference/models_sample.normalized.json'],
-    '/*': ['./data/wbw-reference/makers.csv', './data/wbw-reference/models_sample.normalized.json'],
+    '/api/items': ['./data/wbw-reference/makers.csv', './data/wbw-reference/models.csv'],
+    '/api/items/route': ['./data/wbw-reference/makers.csv', './data/wbw-reference/models.csv'],
+    '/*': ['./data/wbw-reference/makers.csv', './data/wbw-reference/models.csv'],
   },
   async headers() {
     return [{ source: '/:path*', headers: [{ key: 'X-Robots-Tag', value: 'noindex, nofollow' }] }];

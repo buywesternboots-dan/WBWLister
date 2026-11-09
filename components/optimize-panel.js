@@ -44,7 +44,7 @@ export default function OptimizePanel({ item, proposal, title, description, busy
     </div>}
     {p.style_sample && <div data-style-sample>
       <small>{p.style_sample.note}</small>
-      <small>Style sample: {p.style_sample.sample_records} of {p.style_sample.displayed_records} displayed cards.</small>
+      <small>{p.style_sample.partial_sample ? `Style sample: ${p.style_sample.sample_records} of ${p.style_sample.displayed_records} displayed cards.` : `Catalog: ${p.style_sample.sample_records} cards${p.style_sample.snapshot_date ? ` from ${p.style_sample.snapshot_date}` : ''}.`}</small>
       {(p.style_sample.matches ?? []).map(m => <div key={m.record_url}>
         <div>Candidate for review. {m.maker_name} style {m.style_number} is in the snapshot. The heading “{m.record_title}” is not a verified model name.</div>
         {m.other_card_text && <div>Catalog card text, not verified for this pair: {m.other_card_text}</div>}
