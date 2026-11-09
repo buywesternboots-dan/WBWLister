@@ -139,13 +139,20 @@ export async function readDepopShop(shop, deadlineMs, cap = 200) {
         href: clip(location.href, 180), hasBody: !!document.body,
       };
     };
+    const scrollGrid = snap => {
+      const height = Math.max(document.body?.scrollHeight || 0, document.documentElement?.scrollHeight || 0);
+      if (typeof window !== 'undefined' && typeof window.scrollTo === 'function') window.scrollTo(0, height);
+      if (snap.last && typeof snap.last.scrollIntoView === 'function') snap.last.scrollIntoView({ block: 'end' });
+    };
     let snap = collect();
     let stable = 0;
+    // The first screen is often 24 links. Scrolling the window to the bottom is what loads the rest.
+    // Three unchanged reads after those scrolls means the visible grid stopped growing.
     while (snap.productUrls.length < limit && deadlineMs > Date.now() + 200) {
       if (snap.productUrls.length > 0 && snap.readyState === 'complete' && stable >= 3) break;
       const before = snap.productUrls.length;
-      if (snap.last && typeof snap.last.scrollIntoView === 'function') snap.last.scrollIntoView({ block: 'end' });
-      await new Promise(r => setTimeout(r, 400));
+      scrollGrid(snap);
+      await new Promise(r => setTimeout(r, 1000));
       if (!onShop()) return fail(`This tab left the requested Depop shop ${shop} (${clip(location.href, 180)}). Nothing was imported.`);
       snap = collect();
       stable = snap.productUrls.length === before ? stable + 1 : 0;
