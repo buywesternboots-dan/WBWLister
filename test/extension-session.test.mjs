@@ -17,7 +17,7 @@ function element(id) {
 }
 
 function popupDocument() {
-  const ids = ['status', 'signin', 'seller', 'profileUrl', 'limit', 'recheck', 'log', 'bar', 'barLabel', 'profile', 'sync', 'listing', 'ver'];
+  const ids = ['status', 'signin', 'seller', 'profileUrl', 'limit', 'recheck', 'shopMode', 'log', 'bar', 'barLabel', 'profile', 'sync', 'listing', 'ver'];
   const nodes = Object.fromEntries(ids.map(id => [id, element(id)]));
   return {
     getElementById: id => nodes[id],

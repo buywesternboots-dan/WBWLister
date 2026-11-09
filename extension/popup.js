@@ -57,8 +57,10 @@ async function start(message) {
   const { r, error, signIn } = await chrome.runtime.sendMessage(message);
   showSignIn(signIn);
   const word = r?.partial ? 'Partial' : 'Done';
-  const already = r?.recheck ? `${r?.duplicate || 0} already imported` : `${r?.duplicate || 0} already imported (skipped, not reopened)`;
-  say(error || (message.type === 'link' ? `${word}: ${r.added} new, ${r.updated} changed, ${already}, ${r.removed} gone (now Pending sold), ${r.failed} failed.${r.scanLimit ? ` ${r.scanLimit}` : ''}${r.skipped ? ` ${r.skipped}` : ''}` : r.duplicate ? 'Already imported.' : 'Added.'));
+  const already = r?.recheck ? `${r?.duplicate || 0} already imported` : `${r?.duplicate || 0} already imported (skipped)`;
+  const prior = r?.recheck ? '' : `, ${r?.prior || 0} previously not boots (skipped)`;
+  const mode = r?.modeNote ? `${r.modeNote} ` : '';
+  say(error || (message.type === 'link' ? `${mode}${word}: ${r.added} new, ${r.updated} changed, ${already}${prior}, ${r.removed} gone (now Pending sold), ${r.failed} failed.${r.scanLimit ? ` ${r.scanLimit}` : ''}${r.skipped ? ` ${r.skipped}` : ''}` : r.duplicate ? 'Already imported.' : 'Added.'));
 }
 const importLink = sync => {
   const link = $('profileUrl').value.trim();
@@ -67,7 +69,8 @@ const importLink = sync => {
   const raw = $('limit').value.trim();
   const parsed = parseInt(raw, 10);
   const limit = raw && Number.isInteger(parsed) ? Math.min(100, Math.max(1, parsed)) : 100;
-  start({ type: 'link', link, sync, limit, recheck: $('recheck').checked });
+  const shopMode = $('shopMode')?.value === 'full' ? 'full' : 'boots';
+  start({ type: 'link', link, sync, limit, recheck: $('recheck').checked, shopMode });
 };
 $('ver').textContent = `Extension ${chrome.runtime.getManifest().version}`;
 $('profile').onclick = () => importLink(false);
