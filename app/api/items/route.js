@@ -7,6 +7,8 @@ const db = {
   getItems: wbw.getItems,
   getSourceIds: wbw.getSourceIds,
   createItem: wbw.createItem,
+  claimImportWrite: wbw.claimImportWrite,
+  unchangedImport: wbw.unchangedImport,
   getByIds: wbw.getItemsByIds,
   deleteItems: wbw.deleteItems,
   moveItems: wbw.moveItems,

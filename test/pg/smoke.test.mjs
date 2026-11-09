@@ -9,7 +9,7 @@ import { after, describe, it } from 'node:test';
 import pg from 'pg';
 import { exportRecord } from '../../lib/export.js';
 import { pgSql } from '../../lib/pg-sql.js';
-import { acceptStyleCandidate, addReference, applyOptimizationToItem, createItem, proposeOptimization, saveSeller, useSql } from '../../lib/wbw.js';
+import { acceptStyleCandidate, addReference, applyOptimizationToItem, claimImportWrite, createItem, proposeOptimization, saveSeller, useSql } from '../../lib/wbw.js';
 
 const socket = process.env.PGHOST || '/var/run/postgresql';
 const photo = 'https://abc.public.blob.vercel-storage.com/photos/a.jpg';
@@ -127,6 +127,17 @@ Lucchese cowboy boots,sku-9,80,LP old heel,Lucchese,${photo}
     assert.equal(cleared.updated, true);
     const gone = await raw.query(`select style_ref from items where id = $1`, [styled.id]);
     assert.equal(gone[0].style_ref, null);
+
+    const job = crypto.randomUUID();
+    assert.equal(await claimImportWrite('ada', job, 2), 1);
+    assert.equal(await claimImportWrite('ada', job, 2), 2);
+    await assert.rejects(() => claimImportWrite('ada', job, 2), /2 listing writes/);
+    const wide = crypto.randomUUID();
+    assert.equal(await claimImportWrite('ada', wide, 100), 1);
+    assert.equal(await claimImportWrite('ada', wide, 100), 2);
+    assert.equal(await claimImportWrite('ada', wide, 100), 3);
+    const writes = await raw.query(`select n from import_writes where seller = 'ada' and job = $1`, [job]);
+    assert.equal(writes[0].n, 2);
 
     const nft = JSON.parse(readFileSync(new URL('../../.next/server/app/api/items/route.js.nft.json', import.meta.url), 'utf8'));
     assert.ok(nft.files.some(f => f.endsWith('data/wbw-reference/makers.csv')));

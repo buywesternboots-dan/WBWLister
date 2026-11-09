@@ -1,10 +1,10 @@
 {
   "manifest_version": 3,
   "name": "BootLister",
-  "version": "0.1",
-  "permissions": ["contextMenus", "scripting", "tabs", "storage"],
+  "version": "0.12",
+  "permissions": ["contextMenus", "scripting", "tabs", "storage", "webNavigation", "cookies"],
   "host_permissions": ["https://*.facebook.com/*", "https://*.depop.com/*", "https://bootlister.vercel.app/*", "https://wbw-lister.vercel.app/*"],
-  "background": { "service_worker": "background.js" },
+  "background": { "service_worker": "background.js", "type": "module" },
   "content_scripts": [{ "matches": ["https://wbw-lister.vercel.app/*", "https://bootlister.vercel.app/*"], "js": ["bridge.js"] }],
   "action": { "default_popup": "popup.html" }
 }

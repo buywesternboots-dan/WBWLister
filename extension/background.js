@@ -1,8 +1,13 @@
+import { acceptScan, collectIds, explainPageFailure, readDepopProduct, readDepopShop, rejectEmptyDepopShop, NO_FACEBOOK_LISTINGS } from './import-page.mjs';
+import { bootScanSummary, westernBootDecision } from './boot-gate.mjs';
+import { API_TIMEOUT_MS, actorForJob, allowedBootlisterOrigin, BOOTLISTER_ORIGINS, CANDIDATE_CAP, cookieReadUrl, createImportLock, gateWrite, importLimit, planSync, scanWindowOpen, sessionFromCookie, SHOP_READ_MS, SIGNED_OUT, validateItemEnvelope, withDeadline } from './import-job.mjs';
+
 const ITEM = /facebook\.com\/marketplace\/item\/(\d+)/;
+const siteOf = url => /facebook\.com/i.test(url || '') ? 'Facebook' : /depop\.com/i.test(url || '') ? 'Depop' : 'The page';
 const wait = ms => new Promise(r => setTimeout(r, ms));
 // Runs fn; on failure tries twice more (after 2 s, then 4 s) before giving up.
 const retry = async (fn, n = 1) => { try { return await fn(); } catch (e) { if (n >= 3) throw e; await wait(n * 2000); return retry(fn, n + 1); } };
-const done = n => `Done: ${n.added} new, ${n.updated} changed, ${n.removed} gone (now Pending sold), ${n.failed} failed.`;
+const done = n => `${n.partial ? 'Partial' : 'Done'}: ${n.added} new, ${n.updated} changed, ${n.duplicate || 0} already imported, ${n.removed} gone (now Pending sold), ${n.failed} failed.${n.skipped ? ` ${n.skipped}` : ''}`;
 const badge = t => chrome.action.setBadgeText({ text: String(t) });
 // Progress bar state (shown in the popup); status() only logs problems and milestones.
 const progress = p => chrome.storage.local.set({ progress: p });
@@ -56,101 +61,148 @@ function readListing() {
   };
 }
 
-// Runs inside a Marketplace profile page. The profile opens as a dialog over the general feed, so read and scroll only the dialog.
-async function collectIds() {
-  const links = () => [...(document.querySelector('[role="dialog"]') || document).querySelectorAll('a[href*="/marketplace/item/"]')];
-  const ids = () => [...new Set(links().map(a => a.href.match(/item\/(\d+)/)?.[1]).filter(Boolean))];
-  for (let n = 0, same = 0, k = 0; same < 3 && k++ < 40;) {
-    const last = links().at(-1);
-    last ? last.scrollIntoView({ block: 'end' }) : scrollTo(0, document.body.scrollHeight);
-    await new Promise(r => setTimeout(r, 1500));
-    const c = ids().length; same = c === n ? same + 1 : 0; n = c;
-  }
-  return ids();
-}
-
-// Runs inside a Depop shop page (page context, so Depop's own listing feed answers): every listing for sale → item fields.
-async function readDepopShop() {
-  const id = performance.getEntriesByType('resource').map(e => e.name.match(/\/shops\/(\d+)\/products/)?.[1]).find(Boolean);
-  if (!id) throw new Error('Could not find the shop on this page — is it a Depop shop link?');
-  const all = [];
-  for (let after = ''; ;) {
-    const j = await (await fetch(`https://webapi.depop.com/presentation/api/v1/shops/${id}/products/?limit=24${after ? `&after=${after}` : ''}`)).json();
-    all.push(...j.objects);
-    if (!j.page_info?.has_more) break;
-    after = j.page_info.last;
-    await new Promise(r => setTimeout(r, 500));
-  }
-  const cap = s => s && s[0].toUpperCase() + s.slice(1);
-  return all.filter(o => o.status === 'STATUS_ONSALE').map(o => {
-    const a = o.attributes ?? {}, pr = o.pricing ?? {}, desc = o.description ?? '';
-    return {
-      source: 'depop', source_id: o.slug, source_url: `https://www.depop.com/products/${o.slug}/`,
-      title: desc.split('\n')[0].trim().slice(0, 120), // Depop listings have no title; the first line serves as one
-      description: desc,
-      price: pr[pr.final_price_key]?.price_breakdown?.price?.amount ?? pr.display_price?.headline_price?.amount ?? null,
-      brand: a.brand === 'unbranded' ? 'Unbranded' : o.brand_name && o.brand_name !== 'Other' ? o.brand_name : null,
-      size: o.sizes?.[0]?.name ?? null,
-      sized_for: a.is_kids ? 'Kids' : a.gender === 'female' ? 'Women' : a.gender === 'male' ? 'Men' : null,
-      condition: a.condition === 'brand_new' ? 'New' : 'Used',
-      color: cap(a.colour?.[0]) ?? null,
-      category: [o.category_name, a.product_type, ...(a.style ?? [])].filter(Boolean).join(' '), // helps tell boots/belts apart
-      photos: (o.pictures ?? []).map(p => Object.values(p.formats).sort((x, y) => y.width - x.width)[0].url),
-    };
-  });
-}
-
 // ---- talking to the BootLister server ----
-// The session token is sent only when the request origin is the server saved in the popup. A page cannot point it elsewhere.
-let job = null;
-const sameOrigin = (saved, dest) => { try { return !!saved && !!dest && new URL(saved).origin === new URL(dest).origin; } catch { return false; } };
+// The site session is the HttpOnly auth cookie. It is read once per job and is not stored.
+const LEGACY_KEYS = ['pin', 'token', 'email', 'password', 'server'];
+chrome.storage.sync.remove(LEGACY_KEYS);
+const lock = createImportLock();
+async function readAuthCookie(origin) {
+  const url = cookieReadUrl(origin);
+  if (!url) return '';
+  const cookie = await chrome.cookies.get({ url, name: 'auth' });
+  return cookie?.value || '';
+}
+async function chooseOrigin(message) {
+  if (message?.server) return allowedBootlisterOrigin(message.server);
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true }).catch(() => []);
+  const fromTab = allowedBootlisterOrigin(tab?.url || '');
+  if (fromTab) return fromTab;
+  for (const origin of BOOTLISTER_ORIGINS) if (await readAuthCookie(origin)) return origin;
+  return '';
+}
+function sessionHeaders(session) {
+  const headers = {};
+  headers['x-auth'] = session;
+  return headers;
+}
+async function whoAmI(origin, token) {
+  const r = await fetch(`${origin}/api/me`, { headers: sessionHeaders(token), signal: AbortSignal.timeout(API_TIMEOUT_MS) });
+  if (r.status === 401) return null;
+  const body = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(body.error || 'Could not read the BootLister session.');
+  return body;
+}
+async function snapshot(message) {
+  if (message?.server && !allowedBootlisterOrigin(message.server)) return { error: 'That address is not a BootLister site.' };
+  const origin = await chooseOrigin(message);
+  if (!origin) return { error: SIGNED_OUT, signIn: `${BOOTLISTER_ORIGINS[0]}/login` };
+  const token = await readAuthCookie(origin);
+  const gate = sessionFromCookie(origin, token);
+  if (!gate.ok) return gate;
+  const me = await whoAmI(origin, gate.token);
+  if (!me) return { error: SIGNED_OUT, signIn: `${origin}/login` };
+  const actor = actorForJob({ origin, token: gate.token, role: me.role, ownSeller: me.seller, requestedSeller: message?.seller });
+  if (actor.error) return actor;
+  return { ...actor, limit: importLimit(message?.limit) };
+}
 async function api(method, body, q = '') {
-  const saved = await chrome.storage.sync.get(['server', 'seller', 'token']);
-  const server = String(job?.server || saved.server || '').replace(/\/$/, '');
-  const seller = job?.seller || saved.seller || '';
-  if (!server) throw new Error('Set the BootLister address in the extension popup.');
-  const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${seller}` };
-  if (saved.token && sameOrigin(saved.server, server)) headers['x-auth'] = saved.token;
+  const { server, headers } = lock.auth();
+  if (lock.job?.id) headers['x-import-job'] = String(lock.job.id);
+  if (lock.job?.limit) headers['x-import-limit'] = String(lock.job.limit);
   const r = await fetch(`${server}/api/items${q}`, {
     method, credentials: 'include', // the page's login cookie, when started from the page
-    headers, body: body && JSON.stringify(body),
+    headers, body: body && JSON.stringify(body), signal: AbortSignal.timeout(API_TIMEOUT_MS),
   });
   const j = await r.json();
   if (!r.ok) throw new Error(j.error);
   return j;
 }
-const send = item => api('POST', item);
+const send = item => {
+  const decision = westernBootDecision(item);
+  if (!decision.eligible) throw new Error(`Not a cowboy or western boot (${decision.kind}). ${decision.reason} Nothing was posted.`);
+  return api('POST', item);
+};
 
 // ---- tabs ----
-const run = async (tabId, func, world = 'ISOLATED') => (await chrome.scripting.executeScript({ target: { tabId }, func, world }))[0].result;
+// Listener goes on before the tab exists so a redirect during creation is still recorded.
+function armNavError() {
+  const errors = new Map();
+  const onErr = d => { if (d.frameId === 0 && d.error) errors.set(d.tabId, d.error); };
+  try { chrome.webNavigation.onErrorOccurred.addListener(onErr); } catch { /* permission missing */ }
+  return {
+    read: id => errors.get(id) || '',
+    stop() { try { chrome.webNavigation.onErrorOccurred.removeListener(onErr); } catch { /* listener already gone */ } },
+  };
+}
+// The deadline covers the executeScript promise itself. A null result is not a listing list.
+async function runCall(tabId, func, world, args, budgetMs, site) {
+  const pending = chrome.scripting.executeScript({ target: { tabId }, world, func, args });
+  const frames = await withDeadline(pending, budgetMs, `${site} didn't finish reading the page before the time limit. Nothing was imported.`);
+  return frames?.[0]?.result;
+}
 // Resolves when the tab finishes loading (or after 20 s, whichever is first).
 const loaded = tabId => new Promise(res => {
-  const done = () => { chrome.tabs.onUpdated.removeListener(l); clearTimeout(t); res(); };
+  let settled = false;
+  const done = () => { if (settled) return; settled = true; chrome.tabs.onUpdated.removeListener(l); clearTimeout(t); res(); };
   const l = (id, info) => id === tabId && info.status === 'complete' && done();
   const t = setTimeout(done, 20000);
   chrome.tabs.onUpdated.addListener(l);
+  chrome.tabs.get(tabId).then(info => { if (info?.status === 'complete') done(); }).catch(() => {});
 });
-// Opens url in a tab, waits for it to settle, runs fn(tabId), always closes the tab.
+// Opens url in a tab, waits for it to settle, runs fn(tabId, site). Leaves the tab open when the site didn't load.
 async function inTab(url, settle, fn, active = true) {
-  const tab = await chrome.tabs.create({ url, active });
-  try { await loaded(tab.id); await wait(settle); return await fn(tab.id); }
-  finally { chrome.tabs.remove(tab.id).catch(() => {}); }
+  const nav = armNavError();
+  const site = siteOf(url);
+  let tab, close = true;
+  try {
+    tab = await chrome.tabs.create({ url, active });
+    await loaded(tab.id);
+    const info = await chrome.tabs.get(tab.id);
+    const blocked = explainPageFailure({ site, tabUrl: info.url || '', title: info.title || '', netError: nav.read(tab.id), pageUrl: url });
+    if (blocked) { close = false; throw new Error(blocked); }
+    await wait(settle);
+    return await fn(tab.id, site);
+  } catch (e) {
+    const blocked = explainPageFailure({ site, message: e.message || '', netError: tab ? nav.read(tab.id) : '', pageUrl: url });
+    if (blocked) { close = false; throw new Error(blocked); }
+    if (/didn't return a result|timed out|not the requested|Nothing was imported/i.test(e.message || '')) close = false;
+    throw e;
+  } finally {
+    nav.stop();
+    if (close && tab) chrome.tabs.remove(tab.id).catch(() => {});
+  }
 }
-const importListing = url => inTab(url, 2500, async id => send(await run(id, readListing)), false);
+const importListing = url => inTab(url, 2500, async (id, site) => {
+  const expected = String(url || '').match(/\/item\/(\d+)/)?.[1] || '';
+  const raw = await retry(() => runCall(id, readListing, 'ISOLATED', [], 15000, site));
+  const item = validateItemEnvelope(raw, { source: 'facebook', expectedId: expected });
+  if (!item) throw new Error(`This Facebook listing did not match the requested item ${expected || '(missing id)'}. Nothing was imported.`);
+  return send(item);
+}, false);
 
 // ---- imports ----
 // Shared loop: importOne(entry) for each entry, retrying twice, with progress in the popup/page. Sync then moves
 // listings that are gone to Removed.
-async function importAll({ source, ids, todo, sync, importOne, pause = 0, name = e => e }) {
+async function importAll({ source, ids, todo, sync, complete, importOne, pause = 0, name = e => e }) {
   const n = { added: 0, updated: 0, failed: 0, removed: 0 };
+  let attempts = 0;
   for (const [i, entry] of todo.entries()) {
+    const gate = gateWrite({ deadline: lock.job?.deadline, written: attempts, cap: lock.job?.limit });
+    if (!gate.ok) { n.partial = true; n.skipped = gate.reason; break; }
     badge(todo.length - i);
     progress({ done: i, total: todo.length, label: `${sync ? 'Syncing' : 'Importing'} — ${n.added} added, ${n.updated} updated, ${n.failed} failed` });
-    try { const r = await retry(() => importOne(entry)); if (r.item?.updated) n.updated++; else if (r.item) n.added++; }
-    catch (e) { n.failed++; status(`${name(entry)} failed: ${e.message}`); }
+    try {
+      const r = await importOne(entry);
+      if (r?.duplicate) n.duplicate = (n.duplicate || 0) + 1;
+      else { attempts += 1; if (r.item?.updated) n.updated++; else if (r.item) n.added++; }
+    }
+    catch (e) { attempts += 1; n.failed++; status(`${name(entry)} failed: ${e.message}`); }
     if (pause) await wait(pause + Math.random() * pause); // Facebook: human pace
   }
-  if (sync) n.removed = (await api('PATCH', { action: 'sync', source, ids })).removed;
+  // Smoke cap and an unproven scroll both refuse removal, even if the page said the scan was finished.
+  const plan = planSync(!!sync, complete, ids, true);
+  if (plan.sync) n.removed = (await api('PATCH', { action: 'sync', source, ids: plan.ids })).removed;
+  if (plan.skipped) n.skipped = plan.skipped;
   return n;
 }
 
@@ -158,21 +210,64 @@ async function importAll({ source, ids, todo, sync, importOne, pause = 0, name =
 async function importFacebook(profileId, sync) {
   const known = new Set(await api('GET', null, '?source=facebook')); // first: fails if the seller isn't set up
   status('Scanning the Facebook profile for listings…');
-  const ids = await inTab(`https://www.facebook.com/marketplace/profile/${profileId}/`, 3000, id => run(id, collectIds));
-  status(`Found ${ids.length} listings on the profile`);
-  if (!ids.length) throw new Error('No listings found on this profile.');
-  return importAll({ source: 'facebook', ids, sync, todo: sync ? ids : ids.filter(id => !known.has(id)), pause: 3000,
+  const cap = lock.job?.limit;
+  const raw = await inTab(`https://www.facebook.com/marketplace/profile/${profileId}/`, 3000,
+    (id, site) => runCall(id, collectIds, 'ISOLATED', [profileId, Date.now() + 20000, 1500, cap], 25000, site));
+  const scan = acceptScan(raw, 'Facebook');
+  const ids = scan.items.filter(id => /^\d{5,20}$/.test(String(id))).slice(0, cap);
+  status(`Found ${scan.items.length} listings on the profile; this run writes at most ${cap}.`);
+  if (!ids.length) throw new Error(NO_FACEBOOK_LISTINGS);
+  if (scan.reason) status(scan.reason);
+  return importAll({ source: 'facebook', ids, sync, complete: false, todo: sync ? ids : ids.filter(id => !known.has(id)), pause: 3000,
     importOne: id => importListing(`https://www.facebook.com/marketplace/item/${id}/`), name: id => `Listing ${id}` });
 }
 
-// Depop: one visit to the shop reads every listing from Depop's own feed — no per-listing visits.
+// Depop: the shop tab's own document. Isolated world, so page scripts cannot replace querySelectorAll.
+// The result is a plain object. Zero candidates throw before any write and before "Done".
 async function importDepop(shop, sync) {
   const known = new Set(await api('GET', null, '?source=depop')); // first: fails if the seller isn't set up
   status('Reading the Depop shop…');
-  const items = await inTab(`https://www.depop.com/${shop}/`, 4000, id => run(id, readDepopShop, 'MAIN'));
-  status(`Found ${items.length} listings for sale`);
-  return importAll({ source: 'depop', ids: items.map(i => i.source_id), sync, todo: sync ? items : items.filter(i => !known.has(i.source_id)),
-    importOne: send, name: i => `"${i.title.slice(0, 40)}"` });
+  const cap = lock.job?.limit;
+  const raw = await inTab(`https://www.depop.com/${shop}/`, 250,
+    (id, site) => runCall(id, readDepopShop, 'ISOLATED', [shop, Date.now() + SHOP_READ_MS, CANDIDATE_CAP], SHOP_READ_MS + 5000, site));
+  const scan = acceptScan(raw, 'Depop');
+  const productUrls = rejectEmptyDepopShop(scan, shop);
+  lock.extendDeadline(lock.job?.id, productUrls.length);
+  if (scan.reason) status(scan.reason);
+  const todo = [];
+  const skipped = { 'non-footwear': 0, 'other-footwear': 0, uncertain: 0, unread: 0, already: 0 };
+  const notes = [scan.reason].filter(Boolean);
+  let scanned = 0;
+  let cursor = 0;
+  for (; cursor < productUrls.length; cursor++) {
+    if (todo.length >= importLimit(cap)) break;
+    if (!scanWindowOpen(lock.job?.deadline)) { notes.push('Import stopped before another product page: the time limit was too close. Nothing further was read.'); break; }
+    const productUrl = productUrls[cursor];
+    const slug = productUrl.match(/\/products\/([^/]+)\/?$/)?.[1] || '';
+    if (known.has(slug)) { skipped.already += 1; continue; }
+    scanned += 1;
+    try {
+      const page = await inTab(productUrl, 2500, (id, site) => runCall(id, readDepopProduct, 'ISOLATED', [shop, Date.now() + 15000], 20000, site));
+      const product = acceptScan(page, 'Depop');
+      const item = validateItemEnvelope(product.items[0], { source: 'depop', expectedId: slug });
+      if (!item) throw new Error(`Depop product ${slug} did not match the requested shop ${shop}. Nothing was written for it.`);
+      const decision = westernBootDecision(item);
+      if (!decision.eligible) { skipped[decision.kind] = (skipped[decision.kind] || 0) + 1; notes.push(`${slug}: ${decision.reason}`); continue; }
+      todo.push(item);
+    } catch (e) { skipped.unread += 1; notes.push(`${slug || productUrl} not read: ${e.message}`); }
+  }
+  const unopened = productUrls.length - cursor;
+  const partial = unopened > 0 || scan.partial === true;
+  const summary = bootScanSummary({ scanned, candidates: productUrls.length, eligible: todo.length, unopened, skipped, writeCap: importLimit(cap), partial });
+  if (!todo.length) {
+    if (skipped.already) return { added: 0, updated: 0, failed: 0, removed: 0, duplicate: skipped.already, partial, skipped: [summary, ...notes].filter(Boolean).join(' ') };
+    throw new Error(`${summary} ${notes.filter(Boolean).join(' ')} Nothing was imported.`.trim());
+  }
+  const result = await importAll({ source: 'depop', ids: todo.map(i => i.source_id), sync, complete: false, todo,
+    importOne: send, name: i => `"${(i.title || '').slice(0, 40)}"` });
+  result.partial = partial || result.partial === true;
+  result.skipped = [summary, result.skipped, ...notes].filter(Boolean).join(' ');
+  return result;
 }
 
 // A Facebook Marketplace profile or Depop shop link → the right importer.
@@ -182,19 +277,68 @@ function importLink(link, sync) {
   if (shop) return importDepop(shop, sync);
   throw new Error('That isn\'t a Facebook Marketplace profile or Depop shop link.');
 }
-const addCurrent = tabId => retry(async () => send(await run(tabId, readListing)));
+const addCurrent = async (tabId, pageUrl) => {
+  const expected = String(pageUrl || '').match(/\/item\/(\d+)/)?.[1] || '';
+  if (!expected) throw new Error('The listing id could not be checked against the requested page. Nothing was imported.');
+  const raw = await retry(() => runCall(tabId, readListing, 'ISOLATED', [], 15000, 'Facebook'));
+  const item = validateItemEnvelope(raw, { source: 'facebook', expectedId: expected });
+  if (!item) throw new Error(`This Facebook listing did not match the requested item ${expected}. Nothing was imported.`);
+  return send(item);
+};
 
-// Messages: { type: 'link', link, sync } (popup or page) or { type: 'listing', tabId } (popup: add the open listing).
-// Page messages also carry { server, seller }. One import at a time.
-let busy = false;
+// Every entry point (page, popup, right-click) takes the same lock and the same frozen seller.
+async function runEntry(message) {
+  if (message?.type === 'who') {
+    if (message.server && !allowedBootlisterOrigin(message.server)) return { error: 'That address is not a BootLister site.' };
+    const origin = await chooseOrigin(message);
+    const token = origin ? await readAuthCookie(origin) : '';
+    const gate = origin ? sessionFromCookie(origin, token) : { ok: false, error: SIGNED_OUT, signIn: `${BOOTLISTER_ORIGINS[0]}/login` };
+    if (!gate.ok) return { error: gate.error, signIn: gate.signIn };
+    const me = await whoAmI(origin, gate.token);
+    if (!me) return { error: SIGNED_OUT, signIn: `${origin}/login` };
+    let sellers = [];
+    if (me.role === 'admin') {
+      const r = await fetch(`${origin}/api/sellers`, { headers: sessionHeaders(gate.token), signal: AbortSignal.timeout(API_TIMEOUT_MS) });
+      const body = await r.json().catch(() => ([]));
+      if (!r.ok) return { error: body.error || 'Could not load sellers.' };
+      sellers = Array.isArray(body) ? body : [];
+    } else if (me.seller) sellers = [{ name: me.seller, display_name: me.seller }];
+    return { ok: true, role: me.role, seller: me.seller || '', sellers, origin };
+  }
+  const snap = await snapshot(message || {});
+  if (snap.error) return { error: snap.error, signIn: snap.signIn };
+  const begun = lock.begin(snap);
+  if (begun.error) return { error: begun.error };
+  try {
+    if (message?.type === 'link') {
+      const r = await importLink(message.link, message.sync);
+      await status(done(r));
+      return { r };
+    }
+    if (message?.type === 'listing' || message?.type === 'context') {
+      const pageUrl = message.url || message.link || '';
+      const link = message.type === 'context' && ITEM.test(message.link || '') ? message.link : '';
+      if (message.type === 'context' && !link && !ITEM.test(pageUrl)) throw new Error('Open a Marketplace listing first.');
+      if (message.type === 'listing' && !ITEM.test(pageUrl)) throw new Error('Open a Marketplace listing first.');
+      return { r: await (link ? importListing(link) : addCurrent(message.tabId, pageUrl)) };
+    }
+    throw new Error('Unknown request.');
+  } catch (e) {
+    await status(`Error: ${e.message || e}`);
+    return { error: e.message || String(e) };
+  } finally {
+    lock.end(begun.job.id);
+    progress(null);
+    badge('');
+  }
+}
+
 chrome.runtime.onMessage.addListener((m, _, reply) => {
-  if (busy && m.type === 'link') return reply({ error: 'An import is already running — wait for it to finish.' });
-  busy = m.type === 'link';
-  job = m.server ? { server: m.server, seller: m.seller } : null;
-  (async () => m.type === 'link' ? importLink(m.link, m.sync) : addCurrent(m.tabId))()
-    .then(r => { if (m.type === 'link') status(done(r)); reply({ r }); },
-      e => { badge('!'); status(`Error: ${e.message}`); reply({ error: e.message }); })
-    .finally(() => { busy = false; job = null; progress(null); badge(''); });
+  runEntry(m).then(r => {
+    if (r?.error) badge('!');
+    // who is the session itself. Import results stay { r } or { error, signIn }.
+    reply(m?.type === 'who' ? r : (r?.error ? { error: r.error, signIn: r.signIn } : { r: r?.r }));
+  });
   return true;
 });
 
@@ -202,12 +346,9 @@ chrome.runtime.onMessage.addListener((m, _, reply) => {
 chrome.runtime.onInstalled.addListener(() => chrome.contextMenus.create({
   id: 'bootlister', title: 'Add to BootLister', contexts: ['link', 'page'], documentUrlPatterns: ['https://*.facebook.com/*'],
 }));
-chrome.contextMenus.onClicked.addListener(async (info, tab) => {
-  const link = ITEM.test(info.linkUrl || '') ? info.linkUrl : null;
-  try {
-    if (!link && !ITEM.test(tab.url)) throw new Error();
-    await (link ? importListing(link) : addCurrent(tab.id));
-    badge('✓');
-  } catch { badge('!'); }
-  setTimeout(() => badge(''), 3000);
+chrome.contextMenus.onClicked.addListener((info, tab) => {
+  runEntry({ type: 'context', link: info.linkUrl, url: tab?.url, tabId: tab?.id }).then(r => {
+    badge(r.error ? '!' : '✓');
+    setTimeout(() => badge(''), 3000);
+  });
 });
