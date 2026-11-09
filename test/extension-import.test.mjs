@@ -415,6 +415,28 @@ Made in USA
   assert.match(summary, /Skipped 8 non-footwear, 0 other footwear, 1 uncertain, 0 unread/);
 });
 
+test('a settled shop stops after five quiet scrolls and does not use the whole read budget', async () => {
+  let scrolls = 0;
+  globalThis.window = { scrollTo() { scrolls += 1; }, scrollBy() {} };
+  const link = href => ({ href, getAttribute: () => `item listed by ${SHOP}`, scrollIntoView() {} });
+  const links = Array.from({ length: 24 }, (_, i) => link(`https://www.depop.com/products/settled-${i}-boot/`));
+  globalThis.location = { hostname: 'www.depop.com', pathname: `/${SHOP}/`, href: `https://www.depop.com/${SHOP}/` };
+  globalThis.document = {
+    readyState: 'complete', title: 'shop', body: { scrollHeight: 4000 },
+    querySelectorAll(sel) { return sel === 'a[href*="/products/"]' ? links : []; },
+  };
+  const started = Date.now();
+  const shop = await readDepopShop(SHOP, started + SHOP_READ_MS, 400, { pauseMs: 10, settle: 5 });
+  delete globalThis.window;
+  assert.equal(shop.ok, true);
+  assert.equal(shop.partial, false);
+  assert.equal(shop.limitHit, false);
+  assert.equal(shop.productUrls.length, 24);
+  assert.equal(scrolls, 5);
+  assert.match(shop.reason, /visible shop grid stopped growing/);
+  assert.ok(Date.now() - started < 1000);
+});
+
 test('the shop keeps scrolling past the first screen of links', async () => {
   let pages = 1;
   globalThis.window = { scrollTo() { pages = 2; } };
@@ -689,14 +711,26 @@ test('known links are seller-scoped, and a session is required', async () => {
     { seller: 'ada', source: 'depop', source_id: 'stored-a', source_url: 'https://www.depop.com/products/shop-slug-a/' },
     { seller: 'bob', source: 'depop', source_id: 'slug-b', source_url: 'https://www.depop.com/products/slug-b/' },
   ];
+  const rejects = [
+    { seller: 'ada', source: 'depop', source_id: 'ada-bag', source_url: 'https://www.depop.com/products/ada-bag/', gate_version: GATE_VERSION },
+    { seller: 'bob', source: 'depop', source_id: 'bob-bag', source_url: 'https://www.depop.com/products/bob-bag/', gate_version: GATE_VERSION },
+    { seller: 'ada', source: 'depop', source_id: 'ada-old', source_url: 'https://www.depop.com/products/ada-old/', gate_version: GATE_VERSION - 1 },
+  ];
   const db = {
     async knownImports(seller, source, candidates) {
-      return matchKnown(rows.filter(r => r.seller === seller && r.source === source), candidates);
+      const mine = row => row.seller === seller && row.source === source;
+      return {
+        ...matchKnown(rows.filter(mine), candidates),
+        rejected: matchKnown(visibleRejects(rejects.filter(mine), GATE_VERSION), candidates).known,
+      };
     },
   };
   const candidates = [
     { id: 'shop-slug-a', url: 'https://www.depop.com/products/shop-slug-a/' },
     { id: 'slug-b', url: 'https://www.depop.com/products/slug-b/' },
+    { id: 'ada-bag', url: 'https://www.depop.com/products/ada-bag/' },
+    { id: 'bob-bag', url: 'https://www.depop.com/products/bob-bag/' },
+    { id: 'ada-old', url: 'https://www.depop.com/products/ada-old/' },
   ];
   const call = (token, authorization) => knownApi({
     method: 'POST', url: 'http://localhost/api/import/known',
@@ -714,9 +748,13 @@ test('known links are seller-scoped, and a session is required', async () => {
   const own = await call(ada, '');
   assert.deepEqual(own.known.map(k => k.source_id), ['stored-a']);
   assert.equal(own.known[0].id, 'shop-slug-a');
+  assert.deepEqual(own.rejected.map(k => k.source_id), ['ada-bag']);
+  assert.equal(own.rejected.some(k => k.source_id === 'bob-bag' || k.source_id === 'ada-old'), false);
   const admin = await sessionToken('admin', secret);
   const bobs = await call(admin, 'Bearer bob');
   assert.deepEqual(bobs.known.map(k => k.source_id), ['slug-b']);
+  assert.deepEqual(bobs.rejected.map(k => k.source_id), ['bob-bag']);
+  assert.equal(bobs.rejected.some(k => k.source_id === 'ada-bag'), false);
 });
 
 test('already imported links are not reopened unless re-check is on, and skipped links are not gone', () => {
@@ -726,8 +764,7 @@ test('already imported links are not reopened unless re-check is on, and skipped
   assert.equal(REJECT_BATCH, 100);
   assert.equal(REJECT_WRITE_CAP, 100);
   assert.equal(JOB_DEADLINE_MAX_MS, 15 * 60 * 1000);
-  assert.ok(SHOP_READ_MS > 3 * 60 * 1000);
-  assert.ok(SHOP_READ_MS < JOB_DEADLINE_MAX_MS);
+  assert.equal(SHOP_READ_MS, 8 * 60 * 1000);
   const urls = [
     'https://www.depop.com/products/shop-slug-a/',
     'https://www.depop.com/products/bag-slug/',
