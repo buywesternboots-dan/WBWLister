@@ -1,64 +1,47 @@
 const $ = id => document.getElementById(id);
 const IMPORTABLE = /marketplace\/profile\/\d+|depop\.com\/(?!products\/)[\w.-]+/;
 const say = t => { $('status').textContent = t; };
-const originOf = url => { try { return new URL(url).origin; } catch { return ''; } };
+let signedIn = false;
 
-// Seller dropdown from the server; picking a seller fills in their saved Facebook/Depop link.
-// The password is never written to chrome.storage. Only the session token is kept.
-let sellers = [];
-async function signIn() {
-  const server = $('server').value.trim().replace(/\/$/, '');
-  const email = $('email').value.trim(), password = $('pin').value;
-  if (!server) return '';
-  await chrome.storage.sync.remove('pin');
-  if (!password) {
-    const saved = await chrome.storage.sync.get(['token', 'server']);
-    if (saved.token && originOf(saved.server) === originOf(server)) return saved.token;
-    return '';
-  }
-  if (!email) return '';
-  const r = await fetch(`${server}/api/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password }) }).catch(() => null);
-  const j = await r?.json().catch(() => ({})) ?? {};
-  if (!r?.ok || !j.token) { say(j.error || 'Could not sign in.'); await chrome.storage.sync.remove('token'); return ''; }
-  await chrome.storage.sync.set({ server, email, token: j.token });
-  $('pin').value = '';
-  return j.token;
+function showSignIn(url) {
+  const link = $('signin');
+  if (!url) { link.hidden = true; return; }
+  link.href = url;
+  link.hidden = false;
 }
-async function loadSellers(selected) {
-  const server = $('server').value.trim().replace(/\/$/, '');
-  const token = await signIn();
-  if (!server || !token) return;
-  sellers = await fetch(`${server}/api/sellers`, { headers: { 'x-auth': token } }).then(r => r.json()).catch(() => []);
-  if (!Array.isArray(sellers)) { say(sellers.error ?? 'Could not load sellers.'); sellers = []; return; }
+
+async function loadSession() {
+  const res = await chrome.runtime.sendMessage({ type: 'who' });
+  signedIn = !!res?.ok;
+  showSignIn(res?.signIn);
+  if (!signedIn) { say(res?.error || 'Sign in on BootLister in this browser, then try again. This extension does not have its own sign-in.'); return; }
   const sel = $('seller');
   sel.replaceChildren();
   const blank = document.createElement('option');
   blank.value = '';
   blank.textContent = 'Pick a seller…';
   sel.append(blank);
-  for (const s of sellers.filter(s => s.name)) {
+  for (const s of (res.sellers || []).filter(s => s.name)) {
     const opt = document.createElement('option');
     opt.value = s.name;
-    opt.textContent = s.display_name ?? '';
+    opt.textContent = s.display_name || s.name;
     sel.append(opt);
   }
-  sel.value = selected || '';
+  if (res.role === 'seller' && res.seller) {
+    sel.value = res.seller;
+    sel.disabled = true;
+  }
+  const saved = await chrome.storage.sync.get('seller');
+  if (res.role === 'admin' && saved.seller) sel.value = saved.seller;
+  const current = (res.sellers || []).find(s => s.name === sel.value);
+  if (current?.fb_profile) $('profileUrl').value = current.fb_profile;
 }
+
 $('seller').onchange = () => {
-  const s = sellers.find(s => s.name === $('seller').value);
-  $('profileUrl').value = s?.fb_profile ?? '';
-  say(s && !s.fb_profile ? 'No Facebook/Depop link saved for this seller — add it in Seller settings, or paste one here.' : '');
+  chrome.storage.sync.set({ seller: $('seller').value });
 };
-$('server').onchange = $('email').onchange = $('pin').onchange = () => loadSellers($('seller').value);
-chrome.storage.sync.remove('pin');
-chrome.storage.sync.get(['server', 'seller', 'email'], s => {
-  $('server').value = s.server || ''; $('email').value = s.email || '';
-  loadSellers(s.seller);
-});
-// On a Facebook profile or Depop shop page, use it.
 chrome.tabs.query({ active: true, currentWindow: true }, ([t]) => { if (IMPORTABLE.test(t?.url ?? '')) $('profileUrl').value = t.url; });
 
-// Progress bar and problem log, written by the background script.
 const show = () => chrome.storage.local.get(['log', 'progress'], ({ log, progress: p }) => {
   if (log) $('log').textContent = log.join('\n');
   $('bar').style.display = p ? '' : 'none';
@@ -68,13 +51,11 @@ const show = () => chrome.storage.local.get(['log', 'progress'], ({ log, progres
 show(); chrome.storage.onChanged.addListener(show);
 
 async function start(message) {
-  if (!await signIn()) {
-    if (!$('server').value.trim() || !$('email').value.trim() || !$('pin').value) say('Enter the server address, email or phone, and password.');
-    return;
-  }
-  await chrome.storage.sync.set({ seller: $('seller').value });
-  if (!$('seller').value) return say('Pick a seller first.');
-  const { r, error } = await chrome.runtime.sendMessage(message);
+  if (!signedIn) { say('Sign in on BootLister in this browser, then try again. This extension does not have its own sign-in.'); return; }
+  if (!$('seller').value && message.type !== 'listing') return say('Pick a seller first.');
+  if ($('seller').value) message.seller = $('seller').value;
+  const { r, error, signIn } = await chrome.runtime.sendMessage(message);
+  showSignIn(signIn);
   say(error || (message.type === 'link' ? `Done: ${r.added} new, ${r.updated} changed, ${r.removed} gone (now Pending sold), ${r.failed} failed.${r.skipped ? ` ${r.skipped}` : ''}` : r.duplicate ? 'Already imported.' : 'Added.'));
 }
 const importLink = sync => {
@@ -93,3 +74,4 @@ $('listing').onclick = async () => {
   say('Adding…');
   start({ type: 'listing', tabId: tab.id, url: tab.url });
 };
+loadSession();

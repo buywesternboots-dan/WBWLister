@@ -21,6 +21,52 @@ export function gateWrite({ deadline, written, cap }) {
   return { ok: true };
 }
 
+export const BOOTLISTER_ORIGINS = Object.freeze([
+  'https://bootlister.vercel.app',
+  'https://wbw-lister.vercel.app',
+]);
+export const SIGNED_OUT = 'Sign in on BootLister in this browser, then try again. This extension does not have its own sign-in.';
+
+export function allowedBootlisterOrigin(value) {
+  try {
+    const origin = new URL(value).origin;
+    return BOOTLISTER_ORIGINS.includes(origin) ? origin : '';
+  } catch { return ''; }
+}
+
+// Cookie reads stay on an allowed origin. A hostile page cannot point this at another site.
+export function cookieReadUrl(origin) {
+  const allowed = allowedBootlisterOrigin(origin);
+  return allowed ? `${allowed}/` : '';
+}
+
+export function sessionFromCookie(origin, cookieValue) {
+  const allowed = allowedBootlisterOrigin(origin);
+  if (!allowed) return { ok: false, error: 'That address is not a BootLister site.' };
+  const token = String(cookieValue || '').trim();
+  if (!token) return { ok: false, error: SIGNED_OUT, signIn: `${allowed}/login` };
+  return { ok: true, origin: allowed, token };
+}
+
+// Seller sessions stay on their own seller. The token string is copied for this job only.
+export function actorForJob({ origin, token, role, ownSeller, requestedSeller }) {
+  const server = allowedBootlisterOrigin(origin);
+  if (!server) return { error: 'That address is not a BootLister site.' };
+  const session = String(token || '').trim();
+  if (!session) return { error: SIGNED_OUT, signIn: `${server}/login` };
+  if (role === 'seller') {
+    const seller = String(ownSeller || '').trim().toLowerCase();
+    if (!seller) return { error: SIGNED_OUT, signIn: `${server}/login` };
+    return { server, seller, token: session, tokenServer: server };
+  }
+  if (role === 'admin') {
+    const seller = String(requestedSeller || '').trim().toLowerCase();
+    if (!seller) return { error: 'Pick a seller first.' };
+    return { server, seller, token: session, tokenServer: server };
+  }
+  return { error: SIGNED_OUT, signIn: `${server}/login` };
+}
+
 export function sameOrigin(saved, dest) {
   try { return !!saved && !!dest && new URL(saved).origin === new URL(dest).origin; }
   catch { return false; }

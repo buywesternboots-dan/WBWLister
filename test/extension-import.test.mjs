@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import {
   acceptScan, collectIds, depopSellerHandle, explainPageFailure, pageScriptEmpty, readDepopProduct, readDepopShop, NO_FACEBOOK_LISTINGS,
 } from '../extension/import-page.mjs';
-import { createImportLock, gateWrite, navListenerArmedBeforeTabCreate, planSync, smokeCap, validateItemEnvelope, withDeadline } from '../extension/import-job.mjs';
+import { actorForJob, allowedBootlisterOrigin, cookieReadUrl, createImportLock, gateWrite, navListenerArmedBeforeTabCreate, planSync, sessionFromCookie, SIGNED_OUT, smokeCap, validateItemEnvelope, withDeadline } from '../extension/import-job.mjs';
 import { itemsApi } from '../lib/items-api.js';
 import { nextImportCount } from '../lib/import-cap.js';
 import { sessionToken } from '../lib/session.js';
@@ -260,6 +260,28 @@ test('one import job can create two listings and not a third', async () => {
   assert.equal(read('lib/items-api.js').toString().includes('new Map'), false);
 });
 
+test('the extension uses the site session and refuses a hostile origin', () => {
+  assert.equal(cookieReadUrl('https://evil.example/phish'), '');
+  assert.equal(cookieReadUrl('https://bootlister.vercel.app.evil.example/'), '');
+  assert.equal(allowedBootlisterOrigin('https://not-bootlister.example'), '');
+  assert.equal(cookieReadUrl('https://bootlister.vercel.app/inventory'), 'https://bootlister.vercel.app/');
+  const signedOut = sessionFromCookie('https://wbw-lister.vercel.app', '');
+  assert.equal(signedOut.ok, false);
+  assert.equal(signedOut.error, SIGNED_OUT);
+  assert.equal(signedOut.signIn, 'https://wbw-lister.vercel.app/login');
+  const hostile = sessionFromCookie('https://evil.example', 'stolen');
+  assert.match(hostile.error, /not a BootLister site/);
+  assert.equal(hostile.token, undefined);
+  const input = { origin: 'https://bootlister.vercel.app', token: 'site-session', role: 'seller', ownSeller: 'ada', requestedSeller: 'other' };
+  const sellerJob = actorForJob(input);
+  input.token = 'changed';
+  assert.equal(sellerJob.seller, 'ada');
+  assert.equal(sellerJob.token, 'site-session');
+  assert.equal(actorForJob({ origin: 'https://bootlister.vercel.app', token: 'site-session', role: 'admin', requestedSeller: 'Ada Boots' }).seller, 'ada boots');
+  assert.match(actorForJob({ origin: 'https://evil.example', token: 'x', role: 'admin', requestedSeller: 'ada' }).error, /not a BootLister site/);
+  assert.equal(actorForJob({ origin: 'https://bootlister.vercel.app', token: '', role: 'admin', requestedSeller: 'ada' }).signIn, 'https://bootlister.vercel.app/login');
+});
+
 test('the smoke cap, worker envelope, and job deadline gate writes', () => {
   assert.equal(smokeCap(undefined), 2);
   assert.equal(smokeCap(9), 2);
@@ -357,7 +379,8 @@ test('the committed extension zip matches source and its service worker parses',
   const api = bg.slice(bg.indexOf('async function api'), bg.indexOf('const send'));
   assert.equal(/chrome\.storage/.test(api), false);
   assert.match(api, /lock\.auth\(\)/);
-  assert.match(bg, /sameOrigin\(saved\.server, server\)/);
+  assert.match(bg, /cookieReadUrl/);
+  assert.match(bg, /allowedBootlisterOrigin/);
   assert.match(bg, /runEntry/);
   const depop = bg.slice(bg.indexOf('async function importDepop'), bg.indexOf('function importLink'));
   assert.match(depop, /validateItemEnvelope/);
@@ -367,8 +390,8 @@ test('the committed extension zip matches source and its service worker parses',
   assert.match(read('app/screen.js').toString(), /n\.skipped/);
   assert.match(read('extension/popup.js').toString(), /r\.skipped/);
   const manifest = JSON.parse(read('extension/manifest.json').toString());
-  assert.equal(manifest.version, '0.7');
-  const zip = readZip(read('public/bootlister-extension-0.7.zip'));
+  assert.equal(manifest.version, '0.8');
+  const zip = readZip(read('public/bootlister-extension-0.8.zip'));
   const loop = bg.slice(bg.indexOf('async function importAll'), bg.indexOf('async function importFacebook'));
   assert.equal(loop.includes('retry(() => importOne'), false);
   assert.match(bg, /x-import-job/);

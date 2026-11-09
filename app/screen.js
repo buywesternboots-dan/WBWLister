@@ -279,7 +279,7 @@ export default function Screen({ admin = false }) {
       </div>
       {!admin && <p className="help">Your job is to double-check each listing before it goes live, including anything shown in yellow. When you approve it, it is published right away. It is marked exported here — WBW is not connected yet, so nothing is sent to the live site.</p>}
       {admin && who && <p className="help">When a seller approves a listing, it is published here right away. You can still see and edit every listing. Export CSV is the file for WBW. Nothing is sent to the live site yet.</p>}
-      {!ext && EXTENSION_LINK.test(link) && <p className="help">Facebook and Depop import through the BootLister Chrome extension:
+      {!ext && EXTENSION_LINK.test(link) && <p className="help">Facebook and Depop import through the BootLister Chrome extension, which uses the sign-in already in this browser:
         1) download it with the <a href="/wbw-importer.zip" download>Chrome extension</a> link and unzip it; 2) open chrome://extensions and turn on
         Developer mode; 3) click Load unpacked and pick the unzipped wbw-importer folder; 4) reload this page.</p>}
 

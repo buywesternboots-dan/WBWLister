@@ -1,8 +1,6 @@
 <!doctype html>
 <html><body style="width:260px;font:14px system-ui;padding:12px;display:flex;flex-direction:column;gap:8px">
-  <input id="server" placeholder="BootLister address">
-  <input id="email" type="text" placeholder="Email, phone, or admin" autocomplete="username">
-  <input id="pin" type="password" placeholder="Password" autocomplete="current-password">
+  <p style="margin:0">Uses the BootLister sign-in already in this browser.</p>
   <select id="seller"><option value="">Pick a seller…</option></select>
   <input id="profileUrl" placeholder="Marketplace profile or Depop shop link">
   <label>Smoke test limit (max 2) <input id="limit" type="number" min="1" max="2" value="2"></label>
@@ -10,6 +8,7 @@
   <button id="sync">Sync with this shop/profile</button>
   <button id="listing">Add this Facebook listing</button>
   <p id="status" style="margin:0;color:#555"></p>
+  <a id="signin" href="https://bootlister.vercel.app/login" target="_blank" hidden>Sign in on BootLister</a>
   <progress id="bar" style="width:100%;display:none"></progress><small id="barLabel" style="color:#555"></small>
   <pre id="log" style="margin:0;font-size:11px;white-space:pre-wrap;color:#555;max-height:200px;overflow:auto"></pre>
   <small id="ver" style="color:#888"></small>

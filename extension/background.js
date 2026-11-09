@@ -1,5 +1,5 @@
 import { acceptScan, collectIds, explainPageFailure, readDepopProduct, readDepopShop, NO_FACEBOOK_LISTINGS } from './import-page.mjs';
-import { API_TIMEOUT_MS, createImportLock, gateWrite, JOB_TIMEOUT_MS, planSync, sameOrigin, smokeCap, validateItemEnvelope, withDeadline } from './import-job.mjs';
+import { API_TIMEOUT_MS, actorForJob, allowedBootlisterOrigin, BOOTLISTER_ORIGINS, cookieReadUrl, createImportLock, gateWrite, JOB_TIMEOUT_MS, planSync, sessionFromCookie, SIGNED_OUT, smokeCap, validateItemEnvelope, withDeadline } from './import-job.mjs';
 
 const ITEM = /facebook\.com\/marketplace\/item\/(\d+)/;
 const siteOf = url => /facebook\.com/i.test(url || '') ? 'Facebook' : /depop\.com/i.test(url || '') ? 'Depop' : 'The page';
@@ -61,14 +61,48 @@ function readListing() {
 }
 
 // ---- talking to the BootLister server ----
-// Seller, server, and token are copied when a job starts. Later popup edits do not change this job.
+// The site session is the HttpOnly auth cookie. It is read once per job and is not stored.
+const LEGACY_KEYS = ['pin', 'token', 'email', 'password', 'server'];
+chrome.storage.sync.remove(LEGACY_KEYS);
 const lock = createImportLock();
+async function readAuthCookie(origin) {
+  const url = cookieReadUrl(origin);
+  if (!url) return '';
+  const cookie = await chrome.cookies.get({ url, name: 'auth' });
+  return cookie?.value || '';
+}
+async function chooseOrigin(message) {
+  if (message?.server) return allowedBootlisterOrigin(message.server);
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true }).catch(() => []);
+  const fromTab = allowedBootlisterOrigin(tab?.url || '');
+  if (fromTab) return fromTab;
+  for (const origin of BOOTLISTER_ORIGINS) if (await readAuthCookie(origin)) return origin;
+  return '';
+}
+function sessionHeaders(session) {
+  const headers = {};
+  headers['x-auth'] = session;
+  return headers;
+}
+async function whoAmI(origin, token) {
+  const r = await fetch(`${origin}/api/me`, { headers: sessionHeaders(token), signal: AbortSignal.timeout(API_TIMEOUT_MS) });
+  if (r.status === 401) return null;
+  const body = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(body.error || 'Could not read the BootLister session.');
+  return body;
+}
 async function snapshot(message) {
-  const saved = await chrome.storage.sync.get(['server', 'seller', 'token']);
-  const server = String(message?.server || saved.server || '').replace(/\/$/, '');
-  const seller = String(message?.seller || saved.seller || '').trim().toLowerCase();
-  const token = saved.token && sameOrigin(saved.server, server) ? saved.token : '';
-  return { server, seller, token, tokenServer: server, limit: smokeCap(message?.limit), deadline: Date.now() + JOB_TIMEOUT_MS };
+  if (message?.server && !allowedBootlisterOrigin(message.server)) return { error: 'That address is not a BootLister site.' };
+  const origin = await chooseOrigin(message);
+  if (!origin) return { error: SIGNED_OUT, signIn: `${BOOTLISTER_ORIGINS[0]}/login` };
+  const token = await readAuthCookie(origin);
+  const gate = sessionFromCookie(origin, token);
+  if (!gate.ok) return gate;
+  const me = await whoAmI(origin, gate.token);
+  if (!me) return { error: SIGNED_OUT, signIn: `${origin}/login` };
+  const actor = actorForJob({ origin, token: gate.token, role: me.role, ownSeller: me.seller, requestedSeller: message?.seller });
+  if (actor.error) return actor;
+  return { ...actor, limit: smokeCap(message?.limit), deadline: Date.now() + JOB_TIMEOUT_MS };
 }
 async function api(method, body, q = '') {
   const { server, headers } = lock.auth();
@@ -225,7 +259,25 @@ const addCurrent = async (tabId, pageUrl) => {
 
 // Every entry point (page, popup, right-click) takes the same lock and the same frozen seller.
 async function runEntry(message) {
-  const begun = lock.begin(await snapshot(message || {}));
+  if (message?.type === 'who') {
+    const origin = await chooseOrigin(message);
+    const token = origin ? await readAuthCookie(origin) : '';
+    const gate = origin ? sessionFromCookie(origin, token) : { ok: false, error: SIGNED_OUT, signIn: `${BOOTLISTER_ORIGINS[0]}/login` };
+    if (!gate.ok) return { error: gate.error, signIn: gate.signIn };
+    const me = await whoAmI(origin, gate.token);
+    if (!me) return { error: SIGNED_OUT, signIn: `${origin}/login` };
+    let sellers = [];
+    if (me.role === 'admin') {
+      const r = await fetch(`${origin}/api/sellers`, { headers: sessionHeaders(gate.token), signal: AbortSignal.timeout(API_TIMEOUT_MS) });
+      const body = await r.json().catch(() => ([]));
+      if (!r.ok) return { error: body.error || 'Could not load sellers.' };
+      sellers = Array.isArray(body) ? body : [];
+    } else if (me.seller) sellers = [{ name: me.seller, display_name: me.seller }];
+    return { ok: true, role: me.role, seller: me.seller || '', sellers, origin };
+  }
+  const snap = await snapshot(message || {});
+  if (snap.error) return { error: snap.error, signIn: snap.signIn };
+  const begun = lock.begin(snap);
   if (begun.error) return { error: begun.error };
   try {
     if (message?.type === 'link') {
