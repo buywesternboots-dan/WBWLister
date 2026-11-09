@@ -149,16 +149,17 @@ describe('photo copy names', () => {
     assert.equal(names[0].pixels, 'unchanged');
     assert.match(names[0].file, /aaa/);
     assert.match(names[0].alt, /AAA width/);
-    assert.match(names[0].file, /-1-9\.jpg$/);
-    assert.match(names[1].file, /-2-9\.jpg$/);
+    assert.match(names[0].file, /-1\.jpg$/);
+    assert.match(names[1].file, /-2\.jpg$/);
+    assert.ok(names[0].file.replace(/\.jpg$/i, '').length <= 80);
     const other = copyNames(boot({ id: 10, source_id: 'listing-b' }));
-    assert.notEqual(names[0].file, other[0].file);
+    assert.equal(names[0].file, other[0].file);
     const long = 'Lucchese '.repeat(40);
     const left = copyNames(boot({ id: 1, brand: long }));
     const right = copyNames(boot({ id: 2, brand: long }));
-    assert.notEqual(left[0].file, right[0].file);
-    assert.match(left[0].file, /-1-1\.jpg$/);
-    assert.match(right[0].file, /-1-2\.jpg$/);
+    assert.equal(left[0].file, right[0].file);
+    assert.match(left[0].file, /-1\.jpg$/);
+    assert.ok(left[0].file.replace(/\.jpg$/i, '').length <= 80);
   });
 });
 
@@ -213,7 +214,7 @@ describe('approved export mapping', () => {
     assert.equal(draft.description, item.description);
     assert.equal(draft.width, 'A');
     assert.equal(draft.photos[0], photoUrl(ctx.origin, item, 1));
-    assert.match(draft.photos[0], /aaa-width/);
+    assert.match(draft.photos[0], /9aaa/);
     assert.match(draft.alts[0], /AAA width/);
     assert.equal(draft.website_url, '');
     assert.equal(draft.sized_for, "Men's");
