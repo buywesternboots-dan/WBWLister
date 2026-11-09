@@ -24,11 +24,13 @@ export function westernBootDecision(item) {
   return { eligible: false, kind: 'uncertain', reason: 'The listing does not clearly say cowboy or western boot. Uncertain items are not imported. The product slug was not used.' };
 }
 
-export function bootScanSummary({ scanned = 0, candidates = 0, eligible = 0, unopened = 0, skipped = {} } = {}) {
+export function bootScanSummary({ scanned = 0, candidates = 0, eligible = 0, unopened = 0, skipped = {}, writeCap = 100, partial = false } = {}) {
   const bags = skipped['non-footwear'] || 0;
   const shoes = skipped['other-footwear'] || 0;
   const unsure = skipped.uncertain || 0;
   const unread = skipped.unread || 0;
+  const already = skipped.already || 0;
   const rest = unopened === 1 ? ' 1 candidate link was not opened.' : unopened ? ` ${unopened} candidate links were not opened.` : '';
-  return `Scanned ${scanned} of ${candidates} candidate pages. Skipped ${bags} non-footwear, ${shoes} other footwear, ${unsure} uncertain, ${unread} unread. Eligible western boots: ${eligible}.${rest} At most 2 are written. This scan is not the whole shop. Sync will not remove listings.`;
+  const coverage = partial || unopened ? 'Partial coverage.' : 'Every queued candidate was checked.';
+  return `Scanned ${scanned} of ${candidates} candidate pages. Skipped ${bags} non-footwear, ${shoes} other footwear, ${unsure} uncertain, ${unread} unread, ${already} already imported. Eligible western boots: ${eligible}.${rest} Import limit ${writeCap}. ${coverage} This scan is not the whole shop. Sync will not remove listings.`;
 }

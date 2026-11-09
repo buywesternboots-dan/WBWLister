@@ -1,26 +1,36 @@
 // Import orchestration that does not touch Chrome. The service worker freezes one job at a time.
 
-// Smoke runs stay tiny. A higher number in the popup cannot raise this.
-// The shop may be scanned past this cap so later western boots are not hidden behind bags.
-export const SMOKE_CAP = 2;
-export const SHOP_SCAN_CAP = 24;
+// A shop import writes every eligible western boot unless the popup sets a smaller test limit.
+// Nothing can raise the safety bound. The shop scan can look past the write limit so bags do not hide boots.
+export const WRITE_CAP = 100;
+export const CANDIDATE_CAP = 200;
 export const SCAN_RESERVE_MS = 8000;
 export const API_TIMEOUT_MS = 20000;
-export const JOB_TIMEOUT_MS = 120000;
+export const PAGE_BUDGET_MS = 12000;
+export const SHOP_READ_MS = 50000;
+export const JOB_DEADLINE_MAX_MS = 15 * 60 * 1000;
 
-export function smokeCap(value) {
+export function importLimit(value) {
+  if (value == null || value === '') return WRITE_CAP;
   const n = Number(value);
-  if (!Number.isInteger(n) || n < 1) return SMOKE_CAP;
-  return Math.min(n, SMOKE_CAP);
+  if (!Number.isInteger(n) || n < 1) return WRITE_CAP;
+  return Math.min(n, WRITE_CAP);
+}
+
+// After the shop count is known, the job may run long enough to open those pages, and no longer than the maximum.
+export function scaledDeadline(started, count, now = Date.now()) {
+  const n = Math.max(0, Math.min(CANDIDATE_CAP, Number(count) || 0));
+  const span = Math.min(JOB_DEADLINE_MAX_MS, SHOP_READ_MS + 20000 + n * PAGE_BUDGET_MS);
+  return Math.min(started + JOB_DEADLINE_MAX_MS, now + span);
 }
 
 // Checked in the worker immediately before a write. A past deadline or a full cap writes nothing.
 export function gateWrite({ deadline, written, cap }) {
-  const limit = smokeCap(cap);
+  const limit = importLimit(cap);
   if (!(typeof deadline === 'number' && deadline > Date.now()))
     return { ok: false, reason: 'Import stopped: the time limit for this run was reached. Nothing further was written, and sync did not remove listings.' };
   if ((written || 0) >= limit)
-    return { ok: false, reason: `Smoke test limit is ${limit} listing${limit === 1 ? '' : 's'} per run. Sync will not remove listings.` };
+    return { ok: false, reason: `Import limit is ${limit} listing${limit === 1 ? '' : 's'} per run. Sync will not remove listings.` };
   return { ok: true };
 }
 
@@ -114,12 +124,17 @@ export function createImportLock() {
       if (!server) return { error: 'Set the BootLister address in the extension popup.' };
       if (!seller) return { error: 'Pick a seller first.' };
       const token = request?.token && sameOrigin(request.tokenServer || '', server) ? String(request.token) : '';
-      const limit = smokeCap(request?.limit);
-      const maxDeadline = Date.now() + JOB_TIMEOUT_MS;
+      const limit = importLimit(request?.limit);
+      const started = Date.now();
+      const maxDeadline = started + JOB_DEADLINE_MAX_MS;
       const requestedDeadline = Number(request?.deadline);
       const deadline = Number.isFinite(requestedDeadline) ? Math.min(requestedDeadline, maxDeadline) : maxDeadline;
-      job = Object.freeze({ id: crypto.randomUUID(), server, seller, token, limit, deadline });
+      job = Object.freeze({ id: crypto.randomUUID(), server, seller, token, limit, deadline, started });
       return { job };
+    },
+    extendDeadline(id, count) {
+      if (!job || job.id !== id) return;
+      job = Object.freeze({ ...job, deadline: scaledDeadline(job.started, count) });
     },
     auth() {
       if (!job) throw new Error('No import is running.');

@@ -56,13 +56,16 @@ async function start(message) {
   if ($('seller').value) message.seller = $('seller').value;
   const { r, error, signIn } = await chrome.runtime.sendMessage(message);
   showSignIn(signIn);
-  say(error || (message.type === 'link' ? `Done: ${r.added} new, ${r.updated} changed, ${r.removed} gone (now Pending sold), ${r.failed} failed.${r.skipped ? ` ${r.skipped}` : ''}` : r.duplicate ? 'Already imported.' : 'Added.'));
+  const word = r?.partial ? 'Partial' : 'Done';
+  say(error || (message.type === 'link' ? `${word}: ${r.added} new, ${r.updated} changed, ${r.duplicate || 0} already imported, ${r.removed} gone (now Pending sold), ${r.failed} failed.${r.skipped ? ` ${r.skipped}` : ''}` : r.duplicate ? 'Already imported.' : 'Added.'));
 }
 const importLink = sync => {
   const link = $('profileUrl').value.trim();
   if (!IMPORTABLE.test(link)) return say('Paste a Facebook Marketplace profile link (facebook.com/marketplace/profile/…) or a Depop shop link (depop.com/…).');
   say('Working — you can close this; the icon shows items left.');
-  const limit = Math.min(2, Math.max(1, parseInt($('limit').value, 10) || 2));
+  const raw = $('limit').value.trim();
+  const parsed = parseInt(raw, 10);
+  const limit = raw && Number.isInteger(parsed) ? Math.min(100, Math.max(1, parsed)) : 100;
   start({ type: 'link', link, sync, limit });
 };
 $('ver').textContent = `Extension ${chrome.runtime.getManifest().version}`;

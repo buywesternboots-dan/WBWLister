@@ -360,7 +360,11 @@ export default function Screen({ admin = false }) {
           </h2>
           {visible.map(i => <div key={i.id} className="item">
             <input type="checkbox" checked={sel.has(i.id)} onChange={() => toggle(i.id)} />
-            {i.photos[0] ? <img src={i.photos[0]} alt="" loading="lazy" /> : <div className="noimg" />}
+            <div className="pics">
+              {i.photos?.[0] ? <img src={i.photos[0]} alt="" loading="lazy" /> : <div className="noimg" />}
+              <small className="photocount">{i.photos?.length || 0} stored photo{(i.photos?.length || 0) === 1 ? '' : 's'}</small>
+              {(i.photos || []).slice(1, 8).map((src, n) => <img key={n} src={src} alt="" loading="lazy" />)}
+            </div>
             {edit?.id === i.id ? <div className="form">
               {FIELDS.map(f => <label key={f} className={unverified(i).includes(f) ? 'guess' : flagged(i).includes(f) ? 'miss' : ''}>
                 <span>{LABELS[f]}{unverified(i).includes(f) && ' — auto-filled, verify'}
@@ -380,6 +384,7 @@ export default function Screen({ admin = false }) {
               {i.source === 'listperfectly' && <small>List Perfectly{i.markets ? ` · listed on ${i.markets}` : ''}</small>}
               {i.changed_at && <small className="warn">Changed at source — review before it goes back to WBW</small>}
               {i.status === 'pending' && <small className="warn">Gone from the source — confirm sold, or it's marked sold in {daysLeft(i)} days</small>}
+              {i.source_condition && <small>Source condition: {i.source_condition}</small>}
               {i.boot === 'unsure' && <small>{Math.round((i.boot_score ?? 0) * 100)}% likely a boot</small>}
               {missing(i).length > 0 && <small className="err">Missing: {missing(i).map(label).join(', ')}</small>}
               {unverified(i).length > 0 && <small className="warn">Verify: {unverified(i).map(label).join(', ')}</small>}
@@ -431,6 +436,7 @@ h2{font-size:15px;margin:20px 0 8px;color:#6b5a4a;display:flex;flex-wrap:wrap;ga
 .compare{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 @media(max-width:640px){.compare{grid-template-columns:1fr}}
 .item img,.noimg{width:72px;height:72px;object-fit:cover;border-radius:6px;background:#eee;flex-shrink:0}
+.pics{display:flex;flex-wrap:wrap;gap:4px;width:148px;align-items:center}.pics img,.pics .noimg{width:48px;height:48px}.photocount{flex:1 0 100%;font-size:12px;color:#6b5a4a}
 .info{display:flex;flex-direction:column;cursor:pointer;flex:1;min-width:0}.info small{color:#8a7a6a}
 .form{display:flex;flex-direction:column;gap:6px;flex:1}.form label>span{display:flex;align-items:center}
 dl{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:4px 12px;margin:6px 0;font-size:13px}dt{color:#8a7a6a;font-size:11px}dd{margin:0}

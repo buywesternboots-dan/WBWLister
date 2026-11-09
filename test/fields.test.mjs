@@ -97,6 +97,8 @@ Asking price: $400
     assert.ok(made.keywords.includes('Custom'));
     const quiet = enrich({ title: 'Pair of boots', description: 'Nice pair, worn some.' });
     assert.equal(quiet.condition, 'Broken In');
+    assert.equal(enrich({ title: 'Cowboy boots', description: 'Western boots', condition: 'Fair' }).condition, 'Broken In');
+    assert.equal(enrich({ title: 'Cowboy boots', description: 'Western boots', condition: 'Good' }).condition, 'Broken In');
     assert.equal(quiet.material, null);
     assert.equal(quiet.material_cut, null);
     assert.equal(quiet.keywords, null);

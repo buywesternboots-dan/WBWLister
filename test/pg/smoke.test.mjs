@@ -129,10 +129,13 @@ Lucchese cowboy boots,sku-9,80,LP old heel,Lucchese,${photo}
     assert.equal(gone[0].style_ref, null);
 
     const job = crypto.randomUUID();
-    assert.equal(await claimImportWrite('ada', job), 1);
-    assert.equal(await claimImportWrite('ada', job), 2);
-    await assert.rejects(() => claimImportWrite('ada', job), /2 listing writes/);
-    assert.equal(await claimImportWrite('ada', crypto.randomUUID()), 1);
+    assert.equal(await claimImportWrite('ada', job, 2), 1);
+    assert.equal(await claimImportWrite('ada', job, 2), 2);
+    await assert.rejects(() => claimImportWrite('ada', job, 2), /2 listing writes/);
+    const wide = crypto.randomUUID();
+    assert.equal(await claimImportWrite('ada', wide, 100), 1);
+    assert.equal(await claimImportWrite('ada', wide, 100), 2);
+    assert.equal(await claimImportWrite('ada', wide, 100), 3);
     const writes = await raw.query(`select n from import_writes where seller = 'ada' and job = $1`, [job]);
     assert.equal(writes[0].n, 2);
 

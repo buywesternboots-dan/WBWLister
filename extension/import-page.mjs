@@ -20,12 +20,12 @@ export function acceptScan(raw, site) {
   if (!data || typeof data !== 'object' || data.ok !== true) throw new Error(data?.error || pageScriptEmpty(site));
   if (!Array.isArray(data.value)) throw new Error(`${site} didn't return a listing list. Nothing was imported.`);
   const productUrls = Array.isArray(data.productUrls) ? data.productUrls.filter(u => typeof u === 'string') : [];
-  return { items: data.value, productUrls, complete: data.complete === true, reason: typeof data.reason === 'string' ? data.reason : '' };
+  return { items: data.value, productUrls, complete: data.complete === true, partial: data.partial === true, reason: typeof data.reason === 'string' ? data.reason : '' };
 }
 
 // An accepted scan with no product links is not a finished import. Callers must not report "0 new".
 export function rejectEmptyDepopShop(scan, shop) {
-  const urls = (scan?.productUrls || []).filter(u => typeof u === 'string' && /^https:\/\/www\.depop\.com\/products\/[^/]+\/$/.test(u)).slice(0, 24);
+  const urls = (scan?.productUrls || []).filter(u => typeof u === 'string' && /^https:\/\/www\.depop\.com\/products\/[^/]+\/$/.test(u)).slice(0, 200);
   if (urls.length) return urls;
   const why = typeof scan?.reason === 'string' && scan.reason ? scan.reason : `Depop shop ${shop} produced no candidate listings.`;
   throw new Error(/Nothing was imported/.test(why) ? why : `${why} Nothing was imported.`);
@@ -83,9 +83,9 @@ export function depopSellerHandle(href) {
 // Runs in the Depop shop tab. Listing anchors are counted in the light DOM and in open shadow
 // roots. The scan cap is how many links to queue, not how many to write. Zero candidates is an
 // incomplete read, not an empty import. No Depop feed API.
-export async function readDepopShop(shop, deadlineMs, cap = 24) {
+export async function readDepopShop(shop, deadlineMs, cap = 200) {
   const fail = error => ({ ok: false, complete: false, error });
-  const limit = Number.isInteger(cap) && cap >= 1 ? Math.min(cap, 24) : 24;
+  const limit = Number.isInteger(cap) && cap >= 1 ? Math.min(cap, 200) : 200;
   const clip = (s, n) => String(s ?? '').replace(/\s+/g, ' ').trim().slice(0, n);
   try {
     if (!/^[\w.-]+$/.test(shop || '') || shop === 'products') return fail('That is not a Depop shop link. Nothing was imported.');
@@ -132,8 +132,9 @@ export async function readDepopShop(shop, deadlineMs, cap = 24) {
         seen.add(slug);
         productUrls.push(`https://www.depop.com/products/${slug}/`);
       }
+      const last = bag.anchors[bag.anchors.length - 1];
       return {
-        productUrls, exact, otherListed, samples, shadows: bag.shadows, productAnchors: bag.anchors.length,
+        productUrls, exact, otherListed, samples, shadows: bag.shadows, productAnchors: bag.anchors.length, last,
         readyState: String(document.readyState || 'unknown'), title: clip(document.title, 120),
         href: clip(location.href, 180), hasBody: !!document.body,
       };
@@ -141,20 +142,22 @@ export async function readDepopShop(shop, deadlineMs, cap = 24) {
     let snap = collect();
     let stable = 0;
     while (snap.productUrls.length < limit && deadlineMs > Date.now() + 200) {
-      if (snap.productUrls.length > 0 && snap.readyState === 'complete' && stable >= 2) break;
+      if (snap.productUrls.length > 0 && snap.readyState === 'complete' && stable >= 3) break;
       const before = snap.productUrls.length;
+      if (snap.last && typeof snap.last.scrollIntoView === 'function') snap.last.scrollIntoView({ block: 'end' });
       await new Promise(r => setTimeout(r, 400));
       if (!onShop()) return fail(`This tab left the requested Depop shop ${shop} (${clip(location.href, 180)}). Nothing was imported.`);
       snap = collect();
       stable = snap.productUrls.length === before ? stable + 1 : 0;
     }
     const queued = snap.productUrls.slice(0, limit);
+    const partial = stable < 3;
     const evidence = `Tab ${snap.href}. readyState ${snap.readyState}. Title "${snap.title || '(none)'}". Document body ${snap.hasBody ? 'present' : 'missing'}. Product anchors ${snap.productAnchors}. Exact label "item listed by ${shop}": ${snap.exact}. Unique product links: ${snap.productUrls.length}. Other "item listed by" anchors: ${snap.otherListed}. Open shadow roots walked: ${snap.shadows}. Sample product aria-labels: ${snap.samples.length ? snap.samples.join(' | ') : '(none)'}. Closed shadow roots were not opened.`;
     if (!queued.length)
       return fail(`Depop shop ${shop} was not imported. No candidate anchors were available before the time limit, so this is an incomplete or unrecognized page, not a finished import. ${evidence} Nothing was imported. Sync will not remove listings.`);
     return {
-      ok: true, complete: false, value: [], productUrls: queued,
-      reason: `Depop shop ${shop}: ${queued.length} candidate links queued in page order for a western-boot check (scan cap ${limit}). At most 2 will be written. This is not the whole shop. ${evidence} Sync will not remove listings.`,
+      ok: true, complete: false, partial, value: [], productUrls: queued,
+      reason: `Depop shop ${shop}: ${queued.length} candidate links queued in page order for a western-boot check (scan cap ${limit}).${partial ? ' Scroll stopped before the grid settled, so this may not be the whole shop.' : ' The visible grid stopped growing.'} ${evidence} Sync will not remove listings.`,
     };
   } catch (e) {
     return fail(e?.message || 'Depop shop read failed. Nothing was imported.');
@@ -254,7 +257,7 @@ export async function collectIds(profileId, deadlineMs, stepMs = 1500, cap = 2) 
     return fail('Facebook did not show this profile dialog, so the general Marketplace feed was not scanned. Nothing was imported.');
   const links = () => [...dialog.querySelectorAll('a[href*="/marketplace/item/"]')];
   const ids = () => [...new Set(links().map(a => String(a.href || '').match(/\/item\/(\d{5,20})/)?.[1]).filter(Boolean))];
-  const limit = Number.isInteger(cap) && cap >= 1 ? Math.min(cap, 2) : 2;
+  const limit = Number.isInteger(cap) && cap >= 1 ? Math.min(cap, 100) : 100;
   const unproven = 'Facebook scrolling stopped, but that does not prove every listing was seen. Sync will not remove listings.';
   if (!links().length) return { ok: true, value: [], complete: false, reason: 'Facebook did not show listings in this profile dialog. Sync will not remove listings.' };
   if (ids().length >= limit) return { ok: true, value: ids().slice(0, limit), complete: false, reason: unproven };

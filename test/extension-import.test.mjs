@@ -9,7 +9,7 @@ import {
   acceptScan, collectIds, depopSellerHandle, explainPageFailure, pageScriptEmpty, readDepopProduct, readDepopShop, rejectEmptyDepopShop, NO_FACEBOOK_LISTINGS,
 } from '../extension/import-page.mjs';
 import { westernBootDecision, bootScanSummary } from '../extension/boot-gate.mjs';
-import { actorForJob, allowedBootlisterOrigin, cookieReadUrl, createImportLock, gateWrite, navListenerArmedBeforeTabCreate, planSync, scanWindowOpen, sessionFromCookie, SHOP_SCAN_CAP, SIGNED_OUT, smokeCap, validateItemEnvelope, withDeadline } from '../extension/import-job.mjs';
+import { actorForJob, allowedBootlisterOrigin, CANDIDATE_CAP, cookieReadUrl, createImportLock, gateWrite, importLimit, JOB_DEADLINE_MAX_MS, navListenerArmedBeforeTabCreate, planSync, scanWindowOpen, sessionFromCookie, SIGNED_OUT, validateItemEnvelope, withDeadline } from '../extension/import-job.mjs';
 import { itemsApi } from '../lib/items-api.js';
 import { nextImportCount } from '../lib/import-cap.js';
 import { sessionToken } from '../lib/session.js';
@@ -140,9 +140,9 @@ test('the observed Depop page supplies the listing and the slug is not the accou
     'https://www.depop.com/products/old-west-suede/',
   ]);
   assert.match(shop.reason, /6 candidate links queued in page order for a western-boot check \(scan cap 9\)/);
-  assert.match(shop.reason, /At most 2 will be written/);
+  assert.match(shop.reason, /Sync will not remove listings/);
   assert.match(shop.reason, /Exact label "item listed by nuclear_nostalgia": 7/);
-  assert.match(shop.reason, /not the whole shop/);
+  assert.match(shop.reason, /may not be the whole shop/);
   assert.deepEqual(JSON.parse(JSON.stringify(shop)), shop);
   assert.deepEqual(rejectEmptyDepopShop(shop, SHOP), shop.productUrls);
 
@@ -260,6 +260,25 @@ test('a Depop shop with no candidate anchors fails instead of importing nothing'
   assert.ok(passes >= 2);
   assert.deepEqual(late.productUrls, [LIVE_PRODUCT, 'https://www.depop.com/products/benny-caiman-western/']);
   assert.equal(late.complete, false);
+
+  let phase = 0;
+  const link = href => ({ href, getAttribute: () => `item listed by ${SHOP}`, scrollIntoView() { phase = 1; } });
+  globalThis.location = { hostname: 'www.depop.com', pathname: `/${SHOP}/`, href: `https://www.depop.com/${SHOP}/` };
+  globalThis.document = {
+    readyState: 'complete', title: 'shop', body: {},
+    querySelectorAll(sel) {
+      if (sel !== 'a[href*="/products/"]') return [];
+      const rows = [link('https://www.depop.com/products/first-boot/')];
+      if (phase) rows.push(link('https://www.depop.com/products/second-boot/'));
+      return rows;
+    },
+  };
+  const grown = await readDepopShop(SHOP, Date.now() + 4000, 10);
+  assert.deepEqual(grown.productUrls, [
+    'https://www.depop.com/products/first-boot/',
+    'https://www.depop.com/products/second-boot/',
+  ]);
+  assert.equal(grown.partial, false);
 });
 
 test('a truncated description line is not replaced with the generated heading', async () => {
@@ -302,17 +321,18 @@ test('one import job can create two listings and not a third', async () => {
   assert.throws(() => nextImportCount(0, '1'), /missing its job/);
   const jobA = crypto.randomUUID();
   const jobB = crypto.randomUUID();
-  assert.equal(nextImportCount(0, jobA), 1);
-  assert.equal(nextImportCount(1, jobA), 2);
-  assert.throws(() => nextImportCount(2, jobA), /2 listing writes/);
+  assert.equal(nextImportCount(0, jobA, 2), 1);
+  assert.equal(nextImportCount(1, jobA, 2), 2);
+  assert.throws(() => nextImportCount(2, jobA, 2), /2 listing writes/);
+  assert.equal(nextImportCount(2, jobA, 100), 3);
   const secret = 'signing-secret';
   const token = await sessionToken('admin', secret);
   const env = { NODE_ENV: 'production', ADMIN_PASSWORD: 'staff-secret', APP_PASSWORD: secret };
   const counts = new Map();
   const db = {
-    async claimImportWrite(seller, job) {
+    async claimImportWrite(seller, job, limit) {
       const key = `${seller}\n${String(job || '').trim()}`;
-      counts.set(key, nextImportCount(counts.get(key) || 0, job));
+      counts.set(key, nextImportCount(counts.get(key) || 0, job, limit));
     },
     async createItem(seller, raw) { return { id: raw.source_id, seller }; },
   };
@@ -322,6 +342,7 @@ test('one import job can create two listings and not a third', async () => {
       const key = String(name).toLowerCase();
       if (key === 'x-auth') return token;
       if (key === 'x-import-job') return job;
+      if (key === 'x-import-limit') return '2';
       if (key === 'authorization') return 'Bearer import-test';
       return '';
     } },
@@ -384,6 +405,12 @@ test('only cowboy or western boots are eligible, and bags ahead of boots are ski
   assert.equal(saved.item.id, 'should-not');
   assert.equal(calls.claim, 1);
   assert.equal(calls.create, 1);
+  db.unchangedImport = (_seller, raw) => raw.source_id === boot.source_id;
+  const again = await post({ ...boot, source: 'depop', price: '50.00', photos: ['https://example.test/a.jpg'] });
+  assert.equal(again.duplicate, true);
+  assert.equal(again.item, null);
+  assert.equal(calls.claim, 1);
+  assert.equal(calls.create, 1);
 
   const order = [briefcase, tote, sneaker, boot, second, third];
   const skipped = { 'non-footwear': 0, 'other-footwear': 0, uncertain: 0, unread: 0 };
@@ -401,12 +428,13 @@ test('only cowboy or western boots are eligible, and bags ahead of boots are ski
   assert.equal(scanned, 5);
   assert.equal(order.length - scanned, 1);
   assert.deepEqual(skipped, { 'non-footwear': 2, 'other-footwear': 1, uncertain: 0, unread: 0 });
-  const summary = bootScanSummary({ scanned, candidates: order.length, eligible: eligible.length, unopened: order.length - scanned, skipped });
+  const summary = bootScanSummary({ scanned, candidates: order.length, eligible: eligible.length, unopened: order.length - scanned, skipped, writeCap: 2, partial: true });
   assert.match(summary, /Scanned 5 of 6/);
   assert.match(summary, /Skipped 2 non-footwear, 1 other footwear, 0 uncertain/);
   assert.match(summary, /Eligible western boots: 2/);
   assert.match(summary, /1 candidate link was not opened/);
-  assert.match(summary, /At most 2 are written/);
+  assert.match(summary, /Import limit 2/);
+  assert.match(summary, /Partial coverage/);
   assert.equal(scanWindowOpen(Date.now() + 1000), false);
 });
 
@@ -432,11 +460,13 @@ test('the extension uses the site session and refuses a hostile origin', () => {
   assert.equal(actorForJob({ origin: 'https://bootlister.vercel.app', token: '', role: 'admin', requestedSeller: 'ada' }).signIn, 'https://bootlister.vercel.app/login');
 });
 
-test('the smoke cap, worker envelope, and job deadline gate writes', () => {
-  assert.equal(smokeCap(undefined), 2);
-  assert.equal(smokeCap(9), 2);
-  assert.equal(smokeCap(1), 1);
-  assert.equal(smokeCap('2'), 2);
+test('the import limit, worker envelope, and job deadline gate writes', () => {
+  assert.equal(importLimit(undefined), 100);
+  assert.equal(importLimit(''), 100);
+  assert.equal(importLimit(9), 9);
+  assert.equal(importLimit(1), 1);
+  assert.equal(importLimit('2'), 2);
+  assert.equal(importLimit(400), 100);
   const good = {
     source: 'depop', source_id: LIVE_SLUG, source_url: `https://www.depop.com/products/${LIVE_SLUG}/`,
     title: "Women's Brown and Black Boots", description: '', price: '50.00', photos: ['https://media.example/boot-0.jpg'],
@@ -451,14 +481,20 @@ test('the smoke cap, worker envelope, and job deadline gate writes', () => {
   }, { source: 'facebook', expectedId: '100000111' });
   assert.equal(fb?.source_id, '100000111');
   assert.equal(validateItemEnvelope(fb, { source: 'facebook', expectedId: '100000222' }), null);
-  assert.equal(gateWrite({ deadline: Date.now() + 1000, written: 2, cap: 9 }).ok, false);
-  assert.match(gateWrite({ deadline: Date.now() + 1000, written: 2, cap: 2 }).reason, /Smoke test limit is 2/);
+  assert.equal(gateWrite({ deadline: Date.now() + 1000, written: 2, cap: 9 }).ok, true);
+  assert.equal(gateWrite({ deadline: Date.now() + 1000, written: 9, cap: 9 }).ok, false);
+  assert.match(gateWrite({ deadline: Date.now() + 1000, written: 2, cap: 2 }).reason, /Import limit is 2/);
   assert.equal(gateWrite({ deadline: Date.now() - 1, written: 0, cap: 2 }).ok, false);
   assert.match(gateWrite({ deadline: Date.now() - 1, written: 0, cap: 2 }).reason, /time limit/);
   const lock = createImportLock();
   const job = lock.begin({ server: 'https://bootlister.vercel.app', seller: 'import-test', token: '', tokenServer: 'https://bootlister.vercel.app', limit: 400, deadline: Date.now() + 999999999 });
-  assert.equal(job.job.limit, 2);
-  assert.ok(job.job.deadline <= Date.now() + 120000);
+  assert.equal(job.job.limit, 100);
+  assert.ok(job.job.deadline <= Date.now() + JOB_DEADLINE_MAX_MS);
+  assert.ok(job.job.deadline > Date.now() + JOB_DEADLINE_MAX_MS - 5000);
+  const started = job.job.started;
+  lock.extendDeadline(job.job.id, 6);
+  assert.ok(lock.job.deadline > Date.now() + 60000);
+  assert.ok(lock.job.deadline < started + JOB_DEADLINE_MAX_MS);
   lock.end(job.job.id);
 });
 
@@ -539,18 +575,21 @@ test('the committed extension zip matches source and its service worker parses',
   assert.match(depop, /readDepopProduct, 'ISOLATED'/);
   assert.equal(depop.includes("'MAIN'"), false);
   assert.match(depop, /rejectEmptyDepopShop/);
-  assert.match(depop, /SHOP_SCAN_CAP/);
+  assert.match(depop, /CANDIDATE_CAP/);
   assert.match(depop, /westernBootDecision/);
   assert.match(depop, /bootScanSummary/);
-  assert.equal(SHOP_SCAN_CAP, 24);
+  assert.match(depop, /extendDeadline/);
+  assert.equal(CANDIDATE_CAP, 200);
   assert.match(bg, /info\?\.status === 'complete'/);
   assert.match(bg, /AbortSignal\.timeout\(API_TIMEOUT_MS\)/);
   assert.match(bg, /expectedId: expected/);
   assert.match(read('app/screen.js').toString(), /n\.skipped/);
+  assert.match(read('app/screen.js').toString(), /stored photo/);
+  assert.match(read('app/screen.js').toString(), /Source condition/);
   assert.match(read('extension/popup.js').toString(), /r\.skipped/);
   const manifest = JSON.parse(read('extension/manifest.json').toString());
-  assert.equal(manifest.version, '0.11');
-  const zip = readZip(read('public/bootlister-extension-0.11.zip'));
+  assert.equal(manifest.version, '0.12');
+  const zip = readZip(read('public/bootlister-extension-0.12.zip'));
   const loop = bg.slice(bg.indexOf('async function importAll'), bg.indexOf('async function importFacebook'));
   assert.equal(loop.includes('retry(() => importOne'), false);
   assert.match(bg, /x-import-job/);
