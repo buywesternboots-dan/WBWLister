@@ -273,7 +273,7 @@ test('a Depop shop with no candidate anchors fails instead of importing nothing'
       return rows;
     },
   };
-  const grown = await readDepopShop(SHOP, Date.now() + 4000, 10);
+  const grown = await readDepopShop(SHOP, Date.now() + 8000, 10);
   assert.deepEqual(grown.productUrls, [
     'https://www.depop.com/products/first-boot/',
     'https://www.depop.com/products/second-boot/',
@@ -354,6 +354,71 @@ test('one import job can create two listings and not a third', async () => {
   assert.equal((await call(jobB, 'three')).item.id, 'three');
   await assert.rejects(() => call('1', 'four'), /missing its job/);
   assert.equal(read('lib/items-api.js').toString().includes('new Map'), false);
+});
+
+test('a clear boot title is not rejected by heel caps or later bag words', () => {
+  const shrunken = {
+    source_id: 'nuclearanostalgia-tony-lama-vintage-90s-shrunken-b50c',
+    title: 'TONY LAMA vintage 90s shrunken bull shoulder western boots',
+    description: `TONY LAMA vintage 90s shrunken bull shoulder western boots
+Men's size 13 D
+has some cracking in the footbed that isn't photographable but some good cushioned insoles would help a lot
+The heel caps have been replaced to extend the life of the boots
+Classic black leather western boots featuring shrunken bull shoulder vamps
+Made in USA
+
+#western #westernsleaze #indiesleaze #tonylama #americana`,
+  };
+  const cherry = {
+    source_id: 'nucletr_nostalgia-tony-lama-vintage-80s-black-100f',
+    title: 'TONY LAMA vintage 80s black cherry western boots',
+    description: `TONY LAMA vintage 80s black cherry western boots
+Men's size 11 D
+Used condition has some minor cracks on the leather near the toes (the cracks do not go through) and the heel caps have been replaced to extend the life of the boots
+Absolutely stunning handcrafted cowboy boots in a beautiful black cherry colorway
+Made in USA
+
+#tonylama #western #westernsleaze #indiesleaze #americana`,
+  };
+  for (const item of [shrunken, cherry]) {
+    const decision = westernBootDecision(item);
+    assert.equal(decision.eligible, true, item.source_id);
+    assert.equal(decision.kind, 'western-boot');
+    assert.match(decision.reason, /slug was not used/);
+  }
+  assert.equal(westernBootDecision({ ...shrunken, description: `${shrunken.description}\n#bag #wallet` }).eligible, true);
+  assert.equal(westernBootDecision({
+    title: 'DAN POST vintage 70s teju western boots',
+    description: 'DAN POST vintage 70s teju western boots\nThe heel caps have been replaced to extend the life of the boots\n#wallet',
+    source_id: 'nuc9ear_nostalgia-dan-post-vintage-70s-teju-049c',
+  }).eligible, true);
+  assert.equal(westernBootDecision({
+    title: 'JUSTIN vintage 90s square toe western boots',
+    description: 'JUSTIN vintage 90s square toe western boots\nThe heel caps have been replaced\ncomes with a dust bag',
+    source_id: 'nuclear_nostylgia-justin-vintage-90s-square-toe-6c31',
+  }).eligible, true);
+  assert.equal(westernBootDecision({ title: 'STAUD ida tote bag', description: 'cowboy boots in the photo\n#westernboots' }).kind, 'non-footwear');
+  assert.equal(westernBootDecision({ title: 'Leather wallet', description: 'Tony Lama cowboy boots' }).eligible, false);
+});
+
+test('the shop keeps scrolling past the first screen of links', async () => {
+  let pages = 1;
+  globalThis.window = { scrollTo() { pages = 2; } };
+  const link = href => ({ href, getAttribute: () => `item listed by ${SHOP}`, scrollIntoView() {} });
+  const batch = (n, prefix) => Array.from({ length: n }, (_, i) => link(`https://www.depop.com/products/${prefix}-${i}-boot/`));
+  globalThis.location = { hostname: 'www.depop.com', pathname: `/${SHOP}/`, href: `https://www.depop.com/${SHOP}/` };
+  globalThis.document = {
+    readyState: 'complete', title: 'shop', body: { scrollHeight: 8000 },
+    querySelectorAll(sel) {
+      if (sel !== 'a[href*="/products/"]') return [];
+      return pages === 1 ? batch(24, 'first') : [...batch(24, 'first'), ...batch(24, 'next')];
+    },
+  };
+  const shop = await readDepopShop(SHOP, Date.now() + 8000, 200);
+  delete globalThis.window;
+  assert.equal(shop.productUrls.length, 48);
+  assert.equal(shop.partial, false);
+  assert.match(shop.reason, /visible grid stopped growing/);
 });
 
 test('only cowboy or western boots are eligible, and bags ahead of boots are skipped', async () => {
@@ -588,8 +653,8 @@ test('the committed extension zip matches source and its service worker parses',
   assert.match(read('app/screen.js').toString(), /Source condition/);
   assert.match(read('extension/popup.js').toString(), /r\.skipped/);
   const manifest = JSON.parse(read('extension/manifest.json').toString());
-  assert.equal(manifest.version, '0.12');
-  const zip = readZip(read('public/bootlister-extension-0.12.zip'));
+  assert.equal(manifest.version, '0.13');
+  const zip = readZip(read('public/bootlister-extension-0.13.zip'));
   const loop = bg.slice(bg.indexOf('async function importAll'), bg.indexOf('async function importFacebook'));
   assert.equal(loop.includes('retry(() => importOne'), false);
   assert.match(bg, /x-import-job/);
