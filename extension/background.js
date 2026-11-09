@@ -1,14 +1,15 @@
 import { acceptScan, collectIds, explainPageFailure, readDepopProduct, readDepopShop, rejectEmptyDepopShop, NO_FACEBOOK_LISTINGS } from './import-page.mjs';
-import { bootScanSummary, westernBootDecision } from './boot-gate.mjs';
-import { API_TIMEOUT_MS, actorForJob, allowedBootlisterOrigin, BOOTLISTER_ORIGINS, CANDIDATE_CAP, cookieReadUrl, createImportLock, gateWrite, importLimit, planKnownSkips, planSync, presenceIds, scanWindowOpen, sessionFromCookie, SHOP_READ_MS, SIGNED_OUT, validateItemEnvelope, withDeadline } from './import-job.mjs';
+import { bootScanSummary, rejectToStore, westernBootDecision } from './boot-gate.mjs';
+import { API_TIMEOUT_MS, actorForJob, allowedBootlisterOrigin, BOOTLISTER_ORIGINS, CANDIDATE_CAP, cookieReadUrl, createImportLock, gateWrite, importLimit, planKnownSkips, planSync, presenceIds, REJECT_BATCH, scanWindowOpen, sessionFromCookie, SHOP_READ_MS, SIGNED_OUT, validateItemEnvelope, withDeadline } from './import-job.mjs';
 
 const ITEM = /facebook\.com\/marketplace\/item\/(\d+)/;
 const siteOf = url => /facebook\.com/i.test(url || '') ? 'Facebook' : /depop\.com/i.test(url || '') ? 'Depop' : 'The page';
 const wait = ms => new Promise(r => setTimeout(r, ms));
 // Runs fn; on failure tries twice more (after 2 s, then 4 s) before giving up.
 const retry = async (fn, n = 1) => { try { return await fn(); } catch (e) { if (n >= 3) throw e; await wait(n * 2000); return retry(fn, n + 1); } };
-const alreadyLine = n => n.recheck ? `${n.duplicate || 0} already imported` : `${n.duplicate || 0} already imported (skipped, not reopened)`;
-const done = n => `${n.partial ? 'Partial' : 'Done'}: ${n.added} new, ${n.updated} changed, ${alreadyLine(n)}, ${n.removed} gone (now Pending sold), ${n.failed} failed.${n.scanLimit ? ` ${n.scanLimit}` : ''}${n.skipped ? ` ${n.skipped}` : ''}`;
+const alreadyLine = n => n.recheck ? `${n.duplicate || 0} already imported` : `${n.duplicate || 0} already imported (skipped)`;
+const priorLine = n => n.recheck ? '' : `, ${n.prior || 0} previously not boots (skipped)`;
+const done = n => `${n.partial ? 'Partial' : 'Done'}: ${n.added} new, ${n.updated} changed, ${alreadyLine(n)}${priorLine(n)}, ${n.removed} gone (now Pending sold), ${n.failed} failed.${n.scanLimit ? ` ${n.scanLimit}` : ''}${n.skipped ? ` ${n.skipped}` : ''}`;
 const badge = t => chrome.action.setBadgeText({ text: String(t) });
 // Progress bar state (shown in the popup); status() only logs problems and milestones.
 const progress = p => chrome.storage.local.set({ progress: p });
@@ -117,6 +118,12 @@ async function api(method, body, q = '', path = '/api/items') {
   const j = await r.json();
   if (!r.ok) throw new Error(j.error);
   return j;
+}
+async function rememberRejects(rows) {
+  for (let i = 0; i < rows.length; i += REJECT_BATCH) {
+    const rejects = rows.slice(i, i + REJECT_BATCH);
+    await api('POST', { source: 'depop', rejects }, '', '/api/import/rejects');
+  }
 }
 const send = item => {
   const decision = westernBootDecision(item);
@@ -238,7 +245,8 @@ async function importDepop(shop, sync, recheck) {
   const known = recheck ? { known: [] } : await api('POST', { source: 'depop', candidates }, '', '/api/import/known');
   const planned = planKnownSkips(productUrls, known, { recheck: !!recheck });
   const todo = [];
-  const skipped = { 'non-footwear': 0, 'other-footwear': 0, uncertain: 0, unread: 0, already: planned.skipped.length };
+  const remembered = [];
+  const skipped = { 'non-footwear': 0, 'other-footwear': 0, uncertain: 0, unread: 0, already: planned.skipped.length, prior: planned.rejected.length };
   const notes = [scan.reason].filter(Boolean);
   let scanned = 0;
   let cursor = 0;
@@ -254,16 +262,25 @@ async function importDepop(shop, sync, recheck) {
       const item = validateItemEnvelope(product.items[0], { source: 'depop', expectedId: slug });
       if (!item) throw new Error(`Depop product ${slug} did not match the requested shop ${shop}. Nothing was written for it.`);
       const decision = westernBootDecision(item);
-      if (!decision.eligible) { skipped[decision.kind] = (skipped[decision.kind] || 0) + 1; notes.push(`${slug}: ${decision.reason}`); continue; }
+      if (!decision.eligible) {
+        skipped[decision.kind] = (skipped[decision.kind] || 0) + 1;
+        const reason = rejectToStore(decision);
+        if (reason) remembered.push({ source_id: slug, source_url: productUrl, reason });
+        notes.push(`${slug}: ${decision.reason}`);
+        continue;
+      }
       todo.push(item);
     } catch (e) { skipped.unread += 1; notes.push(`${slug || productUrl} not read: ${e.message}`); }
   }
   const unopened = planned.open.length - cursor;
   const partial = unopened > 0 || scan.partial === true;
+  try { await rememberRejects(remembered); }
+  catch (e) { notes.push(`Could not remember non-boots: ${e.message}`); }
   const summary = bootScanSummary({ scanned, candidates: productUrls.length, eligible: todo.length, unopened, skipped, writeCap: importLimit(cap), partial, limitHit: scan.limitHit === true });
   const present = presenceIds(planned.presentIds, todo.map(i => i.source_id));
+  const scanLimit = scan.limitHit ? `Shop scroll hit its read limit before the grid settled (${productUrls.length} links queued). This may not be the whole shop.` : '';
   if (!todo.length) {
-    if (skipped.already) return { added: 0, updated: 0, failed: 0, removed: 0, duplicate: skipped.already, recheck: !!recheck, partial, scanLimit: scan.limitHit ? 'Shop scroll hit its read limit before the grid settled. This may not be the whole shop.' : '', skipped: [summary, ...notes].filter(Boolean).join(' ') };
+    if (skipped.already || skipped.prior) return { added: 0, updated: 0, failed: 0, removed: 0, duplicate: skipped.already, prior: skipped.prior, recheck: !!recheck, partial, scanLimit, skipped: [summary, ...notes].filter(Boolean).join(' ') };
     throw new Error(`${summary} ${notes.filter(Boolean).join(' ')} Nothing was imported.`.trim());
   }
   const result = await importAll({ source: 'depop', ids: present, sync, complete: false, todo,
@@ -271,7 +288,8 @@ async function importDepop(shop, sync, recheck) {
   result.partial = partial || result.partial === true;
   result.recheck = !!recheck;
   result.duplicate = (result.duplicate || 0) + skipped.already;
-  result.scanLimit = scan.limitHit ? 'Shop scroll hit its read limit before the grid settled. This may not be the whole shop.' : '';
+  result.prior = skipped.prior;
+  result.scanLimit = scanLimit;
   result.skipped = [summary, result.skipped, ...notes].filter(Boolean).join(' ');
   return result;
 }

@@ -57,8 +57,9 @@ async function start(message) {
   const { r, error, signIn } = await chrome.runtime.sendMessage(message);
   showSignIn(signIn);
   const word = r?.partial ? 'Partial' : 'Done';
-  const already = r?.recheck ? `${r?.duplicate || 0} already imported` : `${r?.duplicate || 0} already imported (skipped, not reopened)`;
-  say(error || (message.type === 'link' ? `${word}: ${r.added} new, ${r.updated} changed, ${already}, ${r.removed} gone (now Pending sold), ${r.failed} failed.${r.scanLimit ? ` ${r.scanLimit}` : ''}${r.skipped ? ` ${r.skipped}` : ''}` : r.duplicate ? 'Already imported.' : 'Added.'));
+  const already = r?.recheck ? `${r?.duplicate || 0} already imported` : `${r?.duplicate || 0} already imported (skipped)`;
+  const prior = r?.recheck ? '' : `, ${r?.prior || 0} previously not boots (skipped)`;
+  say(error || (message.type === 'link' ? `${word}: ${r.added} new, ${r.updated} changed, ${already}${prior}, ${r.removed} gone (now Pending sold), ${r.failed} failed.${r.scanLimit ? ` ${r.scanLimit}` : ''}${r.skipped ? ` ${r.skipped}` : ''}` : r.duplicate ? 'Already imported.' : 'Added.'));
 }
 const importLink = sync => {
   const link = $('profileUrl').value.trim();

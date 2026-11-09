@@ -7,7 +7,10 @@ export const CANDIDATE_CAP = 400;
 export const SCAN_RESERVE_MS = 8000;
 export const API_TIMEOUT_MS = 20000;
 export const PAGE_BUDGET_MS = 12000;
-export const SHOP_READ_MS = 180000;
+// The shop grid is slow. Three minutes of 4s pauses stopped near 40 links.
+// Eight minutes still leaves time in the 15-minute job to open new pages. The 400 link cap stays.
+export const SHOP_READ_MS = 8 * 60 * 1000;
+export const REJECT_BATCH = 100;
 export const JOB_DEADLINE_MAX_MS = 15 * 60 * 1000;
 
 export function importLimit(value) {
@@ -111,29 +114,39 @@ const normUrl = url => {
   } catch { return ''; }
 };
 
-// Default: do not open a page the server already has. Recheck opens every candidate, as before.
-export function planKnownSkips(productUrls, known, { recheck = false } = {}) {
-  const urls = Array.isArray(productUrls) ? productUrls : [];
-  if (recheck) return { open: urls.slice(), skipped: [], presentIds: [], recheck: true };
+function indexRows(rows) {
   const stored = new Map();
-  for (const row of known?.known || []) {
+  for (const row of rows || []) {
     const sourceId = String(row?.source_id || row?.id || '');
     if (!sourceId) continue;
     if (row?.id) stored.set(String(row.id), sourceId);
     const url = normUrl(row?.url || '');
     if (url) stored.set(url, sourceId);
   }
+  return stored;
+}
+
+// Default: do not open a page already imported or already ruled out. Recheck opens every candidate.
+// Rejected ids are not "present" listings, so a later sync cannot treat them as gone or kept.
+export function planKnownSkips(productUrls, known, { recheck = false } = {}) {
+  const urls = Array.isArray(productUrls) ? productUrls : [];
+  if (recheck) return { open: urls.slice(), skipped: [], rejected: [], presentIds: [], recheck: true };
+  const imported = indexRows(known?.known);
+  const ruledOut = indexRows(known?.rejected);
   const open = [];
   const skipped = [];
+  const rejected = [];
   const presentIds = [];
   for (const url of urls) {
     const id = depopId(url);
-    const sourceId = stored.get(id) || stored.get(normUrl(url));
-    if (!sourceId) { open.push(url); continue; }
-    skipped.push(url);
-    presentIds.push(sourceId);
+    const key = normUrl(url);
+    const sourceId = imported.get(id) || imported.get(key);
+    if (sourceId) { skipped.push(url); presentIds.push(sourceId); continue; }
+    const rejectId = ruledOut.get(id) || ruledOut.get(key);
+    if (rejectId) { rejected.push(url); continue; }
+    open.push(url);
   }
-  return { open, skipped, presentIds, recheck: false };
+  return { open, skipped, rejected, presentIds, recheck: false };
 }
 
 // Known listings stay in the seen set. A later sync must not treat a skipped page as gone.

@@ -187,17 +187,20 @@ export async function readDepopShop(shop, deadlineMs, cap = 400, pace) {
     else if (stop !== 'settled' && queued.length >= limit) stop = 'cap';
     const settled = stop === 'settled' || stop === 'sold';
     const partial = !settled;
-    const limitHit = stop === 'cap' || stop === 'time';
+    const limitHit = stop === 'time';
+    const capHit = stop === 'cap';
     const evidence = `Tab ${snap.href}. readyState ${snap.readyState}. Title "${snap.title || '(none)'}". Document body ${snap.hasBody ? 'present' : 'missing'}. Product anchors ${snap.productAnchors}. Exact label "item listed by ${shop}": ${snap.exact}. Unique selling links: ${snap.productUrls.length}. Sold-section links skipped: ${snap.soldLinks}. Other "item listed by" anchors: ${snap.otherListed}. Open shadow roots walked: ${snap.shadows}. Sample product aria-labels: ${snap.samples.length ? snap.samples.join(' | ') : '(none)'}. Closed shadow roots were not opened.`;
     if (!queued.length)
       return fail(`Depop shop ${shop} was not imported. No candidate anchors were available before the time limit, so this is an incomplete or unrecognized page, not a finished import. ${evidence} Nothing was imported. Sync will not remove listings.`);
     const how = stop === 'sold'
       ? ' Stopped at the Sold items section. Sold listings were not queued.'
       : limitHit
-        ? ' Shop scroll hit its read limit before the grid settled. This may not be the whole shop.'
-        : ' The visible shop grid stopped growing.';
+        ? ` Shop scroll hit its read limit before the grid settled (${queued.length} links queued). This may not be the whole shop.`
+        : capHit
+          ? ` Queued ${queued.length} candidate links, the scan cap.`
+          : ' The visible shop grid stopped growing.';
     return {
-      ok: true, complete: false, partial, limitHit, value: [], productUrls: queued,
+      ok: true, complete: false, partial, limitHit, capHit, value: [], productUrls: queued,
       reason: `Depop shop ${shop}: ${queued.length} candidate links queued in page order for a western-boot check (scan cap ${limit}).${how} ${evidence} Sync will not remove listings.`,
     };
   } catch (e) {

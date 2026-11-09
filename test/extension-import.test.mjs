@@ -8,10 +8,10 @@ import { fileURLToPath } from 'node:url';
 import {
   acceptScan, collectIds, depopSellerHandle, explainPageFailure, pageScriptEmpty, readDepopProduct, readDepopShop, rejectEmptyDepopShop, NO_FACEBOOK_LISTINGS,
 } from '../extension/import-page.mjs';
-import { westernBootDecision, bootScanSummary } from '../extension/boot-gate.mjs';
-import { absentIds, actorForJob, allowedBootlisterOrigin, CANDIDATE_CAP, cookieReadUrl, createImportLock, gateWrite, importLimit, JOB_DEADLINE_MAX_MS, navListenerArmedBeforeTabCreate, planKnownSkips, planSync, presenceIds, scanWindowOpen, sessionFromCookie, SIGNED_OUT, validateItemEnvelope, WRITE_CAP, withDeadline } from '../extension/import-job.mjs';
-import { knownApi } from '../lib/known-api.js';
-import { matchKnown } from '../lib/known.js';
+import { westernBootDecision, bootScanSummary, GATE_VERSION, rejectToStore } from '../extension/boot-gate.mjs';
+import { absentIds, actorForJob, allowedBootlisterOrigin, CANDIDATE_CAP, cookieReadUrl, createImportLock, gateWrite, importLimit, JOB_DEADLINE_MAX_MS, navListenerArmedBeforeTabCreate, planKnownSkips, planSync, presenceIds, REJECT_BATCH, scanWindowOpen, sessionFromCookie, SHOP_READ_MS, SIGNED_OUT, validateItemEnvelope, WRITE_CAP, withDeadline } from '../extension/import-job.mjs';
+import { knownApi, rejectApi } from '../lib/known-api.js';
+import { acceptRejectRows, matchKnown, REJECT_WRITE_CAP, visibleRejects } from '../lib/known.js';
 import { IMPORT_WRITE_CAP } from '../lib/import-cap.js';
 import { itemsApi } from '../lib/items-api.js';
 import { nextImportCount } from '../lib/import-cap.js';
@@ -411,7 +411,7 @@ Made in USA
     assert.equal(westernBootDecision({ title, description: title }).eligible, false, title);
   }
   const summary = bootScanSummary({ scanned: 57, candidates: 72, eligible: 38, skipped: { 'non-footwear': 8, uncertain: 1, already: 15 }, writeCap: 100 });
-  assert.match(summary, /15 already imported \(skipped, not reopened\)/);
+  assert.match(summary, /15 already imported \(skipped\)/);
   assert.match(summary, /Skipped 8 non-footwear, 0 other footwear, 1 uncertain, 0 unread/);
 });
 
@@ -723,36 +723,114 @@ test('already imported links are not reopened unless re-check is on, and skipped
   assert.equal(WRITE_CAP, 100);
   assert.equal(CANDIDATE_CAP, 400);
   assert.equal(IMPORT_WRITE_CAP, 100);
+  assert.equal(REJECT_BATCH, 100);
+  assert.equal(REJECT_WRITE_CAP, 100);
   assert.equal(JOB_DEADLINE_MAX_MS, 15 * 60 * 1000);
+  assert.ok(SHOP_READ_MS > 3 * 60 * 1000);
+  assert.ok(SHOP_READ_MS < JOB_DEADLINE_MAX_MS);
   const urls = [
     'https://www.depop.com/products/shop-slug-a/',
+    'https://www.depop.com/products/bag-slug/',
     'https://www.depop.com/products/new-boot/',
   ];
-  const known = { known: [{ id: 'shop-slug-a', url: urls[0], source_id: 'stored-a' }] };
+  const known = {
+    known: [{ id: 'shop-slug-a', url: urls[0], source_id: 'stored-a' }],
+    rejected: [{ id: 'bag-slug', url: urls[1], source_id: 'bag-slug' }],
+  };
   const skipped = planKnownSkips(urls, known);
-  assert.deepEqual(skipped.open, [urls[1]]);
+  assert.deepEqual(skipped.open, [urls[2]]);
   assert.deepEqual(skipped.skipped, [urls[0]]);
+  assert.deepEqual(skipped.rejected, [urls[1]]);
   assert.deepEqual(skipped.presentIds, ['stored-a']);
+  assert.equal(skipped.presentIds.includes('bag-slug'), false);
   const seen = presenceIds(skipped.presentIds, ['new-boot']);
   assert.deepEqual(absentIds(['stored-a', 'new-boot', 'left-the-shop'], seen), ['left-the-shop']);
+  assert.equal(seen.includes('bag-slug'), false);
   const plan = planSync(true, true, seen, false);
   assert.equal(plan.sync, true);
   assert.ok(plan.ids.includes('stored-a'));
+  assert.equal(plan.ids.includes('bag-slug'), false);
   assert.equal(plan.ids.includes('left-the-shop'), false);
   const recheck = planKnownSkips(urls, known, { recheck: true });
   assert.deepEqual(recheck.open, urls);
   assert.equal(recheck.skipped.length, 0);
+  assert.equal(recheck.rejected.length, 0);
   assert.equal(recheck.recheck, true);
   const popup = read('extension/popup.html').toString();
-  assert.match(popup, /Also re-check already imported listings/);
+  assert.match(popup, /Also re-check already imported and non-boot listings/);
   assert.equal(/id="recheck"[^>]*checked/.test(popup), false);
-  assert.match(read('extension/popup.js').toString(), /recheck: \$ \('recheck'\)\.checked|recheck: \$\('recheck'\)\.checked/);
+  assert.match(read('extension/popup.js').toString(), /recheck: \$\('recheck'\)\.checked/);
+  assert.match(read('extension/popup.js').toString(), /previously not boots \(skipped\)/);
   const depop = read('extension/background.js').toString();
   assert.match(depop, /\/api\/import\/known/);
+  assert.match(depop, /\/api\/import\/rejects/);
   assert.match(depop, /planKnownSkips/);
   assert.match(depop, /presenceIds/);
   assert.match(depop, /complete: false/);
-  assert.match(depop, /already imported \(skipped, not reopened\)/);
+  assert.match(depop, /already imported \(skipped\)/);
+  assert.match(depop, /previously not boots \(skipped\)/);
+  const summary = bootScanSummary({ scanned: 1, candidates: 3, eligible: 1, skipped: { already: 1, prior: 1 }, writeCap: 100 });
+  assert.match(summary, /1 already imported \(skipped\)/);
+  assert.match(summary, /1 previously not boots \(skipped\)/);
+});
+
+test('non-boot rejects are stored for this seller only, and uncertain is not', async () => {
+  assert.equal(rejectToStore({ eligible: false, kind: 'uncertain' }), '');
+  assert.equal(rejectToStore({ eligible: false, kind: 'non-footwear' }), 'non-footwear');
+  assert.equal(rejectToStore({ eligible: false, kind: 'other-footwear' }), 'other-footwear');
+  assert.equal(rejectToStore({ eligible: false, kind: 'non-footwear', store: 'boot-modifier' }), 'boot-modifier');
+  assert.equal(rejectToStore({ eligible: true, kind: 'western-boot' }), '');
+  const kept = acceptRejectRows([
+    { source_id: 'bag', reason: 'non-footwear' },
+    { source_id: 'shoe', reason: 'other-footwear' },
+    { source_id: 'buckle', reason: 'boot-modifier' },
+    { source_id: 'maybe', reason: 'uncertain' },
+    { source_id: 'miss', reason: 'unread' },
+  ]);
+  assert.deepEqual(kept.map(r => r.reason), ['non-footwear', 'other-footwear', 'boot-modifier']);
+  const old = visibleRejects([{ source_id: 'bag', gate_version: GATE_VERSION - 1 }, { source_id: 'shoe', gate_version: GATE_VERSION }], GATE_VERSION);
+  assert.deepEqual(old.map(r => r.source_id), ['shoe']);
+  const secret = 'signing-secret';
+  const env = { NODE_ENV: 'production', ADMIN_PASSWORD: 'staff-secret', APP_PASSWORD: secret };
+  const saved = [];
+  const db = {
+    async saveRejects(seller, source, rows) {
+      const accepted = acceptRejectRows(rows);
+      saved.push({ seller, source, accepted });
+      return { saved: accepted.length };
+    },
+  };
+  const ada = await sessionToken('seller:ada', secret);
+  const headers = (token, authorization) => ({ get(name) {
+    const key = String(name).toLowerCase();
+    if (key === 'x-auth') return token;
+    if (key === 'authorization') return authorization;
+    return '';
+  } });
+  await assert.rejects(() => rejectApi({
+    method: 'POST', url: 'http://localhost/api/import/rejects', headers: headers('', ''),
+    json: async () => ({ source: 'depop', rejects: [{ source_id: 'bag', reason: 'non-footwear' }] }),
+  }, db, env), /log in/);
+  await assert.rejects(() => rejectApi({
+    method: 'POST', url: 'http://localhost/api/import/rejects', headers: headers(ada, 'Bearer bob'),
+    json: async () => ({ source: 'depop', rejects: [{ source_id: 'bag', reason: 'non-footwear' }] }),
+  }, db, env), /own items/);
+  const tooMany = Array.from({ length: 101 }, (_, i) => ({ source_id: `id-${i}`, reason: 'non-footwear' }));
+  await assert.rejects(() => rejectApi({
+    method: 'POST', url: 'http://localhost/api/import/rejects', headers: headers(ada, ''),
+    json: async () => ({ source: 'depop', rejects: tooMany }),
+  }, db, env), /too large/);
+  const result = await rejectApi({
+    method: 'POST', url: 'http://localhost/api/import/rejects', headers: headers(ada, ''),
+    json: async () => ({ source: 'depop', rejects: [
+      { source_id: 'bag', reason: 'non-footwear' },
+      { source_id: 'maybe', reason: 'uncertain' },
+    ] }),
+  }, db, env);
+  assert.equal(result.saved, 1);
+  assert.equal(saved[0].seller, 'ada');
+  assert.deepEqual(saved[0].accepted.map(r => r.source_id), ['bag']);
+  assert.equal(saved.some(row => row.seller === 'bob'), false);
 });
 
 test('the committed extension zip matches source and its service worker parses', () => {
@@ -788,8 +866,8 @@ test('the committed extension zip matches source and its service worker parses',
   assert.match(read('app/screen.js').toString(), /Source condition/);
   assert.match(read('extension/popup.js').toString(), /r\.skipped/);
   const manifest = JSON.parse(read('extension/manifest.json').toString());
-  assert.equal(manifest.version, '0.15');
-  const zip = readZip(read('public/bootlister-extension-0.15.zip'));
+  assert.equal(manifest.version, '0.16');
+  const zip = readZip(read('public/bootlister-extension-0.16.zip'));
   const loop = bg.slice(bg.indexOf('async function importAll'), bg.indexOf('async function importFacebook'));
   assert.equal(loop.includes('retry(() => importOne'), false);
   assert.match(bg, /x-import-job/);
