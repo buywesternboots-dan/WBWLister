@@ -78,6 +78,7 @@ describe('group price in comments', () => {
       ['see notes\ngroup price $100\nthanks', '100'],
       ['MSRP $500\ngroup price $100', '100'],
       ['size 10D\ngroup: 80', '80'],
+      ['shipping $5, group price 100', '100'],
     ];
     for (const [text, price] of ok) assert.deepEqual(parseGroupPrice(text), { price, missing: false }, text);
   });
@@ -103,8 +104,18 @@ describe('group price in comments', () => {
       'group price ~$100',
       'group price $100.999',
       'group price $007',
-      'shipping $5, group price 100',
     ]) assert.deepEqual(parseGroupPrice(text), { price: null, missing: true }, text);
+  });
+
+  it('uses 135 from the Seller Notes sample and ignores the other amounts and dates', () => {
+    const sample = 'Original LP: $288 Group price: $135 Min Price $174 Ceiling: $374 F1 1st Floor: $244 F2 2nd Floor: $229 PHOTOS BY: TIM LD: 1/4/25 RL: 4/6/25 DIEGO Dan Marisa';
+    const parsed = parseGroupPrice(sample);
+    assert.deepEqual(parsed, { price: '135', missing: false });
+    for (const n of ['288', '174', '374', '244', '229', '1/4/25', '4/6/25']) assert.notEqual(parsed.price, n);
+    assert.deepEqual(parseGroupPrice(sample.replace('Group price: $135', 'Group price:$135')), { price: '135', missing: false });
+    assert.deepEqual(parseGroupPrice(sample.replace('Group price: $135', 'group price: $135.00')), { price: '135.00', missing: false });
+    for (const text of ['Original LP: $288', 'Min Price $174', 'Ceiling: $374', 'F1 1st Floor: $244', 'F2 2nd Floor: $229', 'LD: 1/4/25', 'RL: 4/6/25'])
+      assert.deepEqual(parseGroupPrice(text), { price: null, missing: true }, text);
   });
 });
 
@@ -140,6 +151,30 @@ describe('Dan Hoffenberg List Perfectly import', () => {
     assert.equal(byDate('2024-02-01 00:00:02').description, 'group price $1');
     const mapped = JSON.stringify(mapLpCsv(text, { museum: true }));
     assert.equal(mapped.includes(SECRET), false);
+  });
+
+  it('reads Seller Notes and keeps 135 instead of the spreadsheet price', async () => {
+    const sample = 'Original LP: $288 Group price: $135 Min Price $174 Ceiling: $374 F1 1st Floor: $244 F2 2nd Floor: $229 PHOTOS BY: TIM LD: 1/4/25 RL: 4/6/25 DIEGO Dan Marisa';
+    const db = memory();
+    const text = `Title,SKU,Price,Seller Notes\n"Lucchese cowboy boots","s1","288","${sample}"\n`;
+    const opened = await runLpImport(text, db, '@DanHoffenberg');
+    assert.equal(opened.new, 1);
+    assert.equal(opened.missingGroupPrice, 0);
+    assert.equal(db.rows[0].price, '135');
+    assert.equal(db.rows[0].wbw_price, '135');
+    assert.equal(db.rows[0].missing_group_price, false);
+    const blob = JSON.stringify(db.rows[0]);
+    assert.equal(blob.includes('PHOTOS BY'), false);
+    assert.equal(blob.includes('1/4/25'), false);
+    assert.equal(blob.includes('DIEGO'), false);
+    const cents = sample.replace('Group price: $135', 'group price: $135.00');
+    const db2 = memory();
+    await runLpImport(`Title,SKU,Price,SELLER NOTES\n"Lucchese cowboy boots","s2","288","${cents}"\n`, db2, 'DanHoffenberg');
+    assert.equal(db2.rows[0].price, '135.00');
+    const tight = sample.replace('Group price: $135', 'Group price:$135');
+    const db3 = memory();
+    await runLpImport(`Title,SKU,Price,seller notes\n"Lucchese cowboy boots","s3","288","${tight}"\n`, db3, { name: 'other', display_name: '@DanHoffenberg' });
+    assert.equal(db3.rows[0].price, '135');
   });
 
   it('uses the group price for the username @DanHoffenberg', async () => {
