@@ -5,6 +5,7 @@ import { exportRecord } from '../lib/export.js';
 import { applyAutoOptimization, optimize } from '../lib/optimize.js';
 import { extractModel, listingModel } from '../lib/model.js';
 import { altText, fileName } from '../lib/seo.js';
+import { enrich } from '../lib/wbw.js';
 
 const read = p => readFileSync(new URL(`../${p}`, import.meta.url), 'utf8');
 
@@ -74,6 +75,32 @@ test('model extraction keeps leading zeros and skips sizes and prices', () => {
   assert.equal(listingModel({ description: 'The number 0030 is on the pull strap.', verified: ['id_text'], id_text: "1940's FRYE Boot Company Vintage" }), '');
   assert.equal(listingModel({ verified: ['id_text'], id_text: '1047 12928507', description: 'Worn.' }), '1047 12928507');
   assert.equal(listingModel({ description: 'Style: 0030\nWorn some.', verified: [] }), '0030');
+});
+
+test('listing text keeps a guessed fact, and a guess that is not written stays out', () => {
+  const parsed = enrich({ title: TITLE, description: DESCRIPTION, price: '480' });
+  assert.ok(parsed.guessed.includes('brand'));
+  assert.ok(parsed.guessed.includes('material'));
+  assert.equal(parsed.brand, 'Liberty');
+  assert.equal(parsed.color, 'Black');
+  const item = {
+    ...parsed, id: 2408, title: TITLE, description: DESCRIPTION,
+    photos: Array.from({ length: 17 }, (_, i) => `https://cdn.example/p${i + 1}.jpg`),
+  };
+  assert.equal(fileName(item, 1), 'liberty-boot-co-mens-320942-black-brown-leather-cowboy-boots-12d-1.jpg');
+  const alt = altText(item, 2, 17);
+  assert.match(alt, /Liberty Men's 320942/);
+  assert.match(alt, /Black, Brown/);
+  assert.match(alt, /Leather/);
+  assert.match(alt, /size 12/);
+  assert.match(alt, /D width/);
+  assert.match(alt, /photo 2 of 17/);
+  const hidden = {
+    brand: 'Lucchese', material: 'Alligator', guessed: ['material'], verified: ['brand'], boot: 'boot',
+    width: 'AAA', size: '9', title: 'Nice pair', description: 'Ships tomorrow.', photos: ['https://cdn.example/a.jpg'],
+  };
+  assert.equal(fileName(hidden, 1).includes('alligator'), false);
+  assert.equal(altText(hidden, 1).includes('Alligator'), false);
 });
 
 test('filenames are deduped, capped, and ordered without a guessed angle', () => {
