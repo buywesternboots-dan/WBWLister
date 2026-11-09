@@ -20,7 +20,13 @@ export function acceptScan(raw, site) {
   if (!data || typeof data !== 'object' || data.ok !== true) throw new Error(data?.error || pageScriptEmpty(site));
   if (!Array.isArray(data.value)) throw new Error(`${site} didn't return a listing list. Nothing was imported.`);
   const productUrls = Array.isArray(data.productUrls) ? data.productUrls.filter(u => typeof u === 'string') : [];
-  return { items: data.value, productUrls, complete: data.complete === true, partial: data.partial === true, reason: typeof data.reason === 'string' ? data.reason : '' };
+  const strings = key => Array.isArray(data[key]) ? data[key].filter(s => typeof s === 'string') : [];
+  return {
+    items: data.value, productUrls, complete: data.complete === true, partial: data.partial === true,
+    reason: typeof data.reason === 'string' ? data.reason : '',
+    chips: strings('chips'), cardTexts: strings('cardTexts'), pageUrl: typeof data.pageUrl === 'string' ? data.pageUrl : '',
+    limitHit: data.limitHit === true,
+  };
 }
 
 // An accepted scan with no product links is not a finished import. Callers must not report "0 new".
@@ -152,12 +158,29 @@ export async function readDepopShop(shop, deadlineMs, cap = 400, pace) {
         seen.add(slug);
         productUrls.push(`https://www.depop.com/products/${slug}/`);
       }
+      const cardTexts = [];
+      for (const a of bag.anchors) {
+        const card = clip(a.textContent || a.innerText, 160);
+        if (card && cardTexts.length < 12 && !cardTexts.includes(card)) cardTexts.push(card);
+      }
       return {
         productUrls, exact, otherListed, samples, shadows: bag.shadows, productAnchors: bag.anchors.length, last,
-        sold: !!(heading || soldLinks), soldLinks,
+        sold: !!(heading || soldLinks), soldLinks, cardTexts,
         readyState: String(document.readyState || 'unknown'), title: clip(document.title, 120),
         href: clip(location.href, 180), hasBody: !!document.body,
       };
+    };
+    const chipTexts = () => {
+      const out = [];
+      let nodes = [];
+      try { nodes = document.querySelectorAll?.('button, [role="button"], [aria-pressed]') || []; }
+      catch { nodes = []; }
+      for (const n of nodes) {
+        const t = clip(n?.textContent, 40);
+        if (!t || !/^(women|men|footwear|boots)(\s*\/\s*(women|men|footwear|boots))?$/i.test(t)) continue;
+        if (!out.includes(t)) out.push(t);
+      }
+      return out;
     };
     const scrollGrid = snap => {
       const win = typeof window !== 'undefined' ? window : null;
@@ -174,7 +197,7 @@ export async function readDepopShop(shop, deadlineMs, cap = 400, pace) {
     // Depop adds shop cards slowly. Each scroll waits, and only five unchanged waits count as settled.
     // The Sold items block is the end of the selling grid; those links are not queued.
     while (snap.productUrls.length < limit && !snap.sold && deadlineMs > Date.now() + pauseMs) {
-      if (snap.productUrls.length > 0 && snap.readyState === 'complete' && stable >= settle) { stop = 'settled'; break; }
+      if (snap.readyState === 'complete' && stable >= settle && (snap.productUrls.length > 0 || pace?.allowEmpty)) { stop = 'settled'; break; }
       const before = snap.productUrls.length;
       scrollGrid(snap);
       await new Promise(r => setTimeout(r, pauseMs));
@@ -189,8 +212,10 @@ export async function readDepopShop(shop, deadlineMs, cap = 400, pace) {
     const partial = !settled;
     const limitHit = stop === 'time';
     const capHit = stop === 'cap';
-    const evidence = `Tab ${snap.href}. readyState ${snap.readyState}. Title "${snap.title || '(none)'}". Document body ${snap.hasBody ? 'present' : 'missing'}. Product anchors ${snap.productAnchors}. Exact label "item listed by ${shop}": ${snap.exact}. Unique selling links: ${snap.productUrls.length}. Sold-section links skipped: ${snap.soldLinks}. Other "item listed by" anchors: ${snap.otherListed}. Open shadow roots walked: ${snap.shadows}. Sample product aria-labels: ${snap.samples.length ? snap.samples.join(' | ') : '(none)'}. Closed shadow roots were not opened.`;
-    if (!queued.length)
+    const chips = chipTexts();
+    const pageUrl = String(location.href || '');
+    const evidence = `Tab ${snap.href}. readyState ${snap.readyState}. Title "${snap.title || '(none)'}". Document body ${snap.hasBody ? 'present' : 'missing'}. Product anchors ${snap.productAnchors}. Exact label "item listed by ${shop}": ${snap.exact}. Unique selling links: ${snap.productUrls.length}. Sold-section links skipped: ${snap.soldLinks}. Other "item listed by" anchors: ${snap.otherListed}. Open shadow roots walked: ${snap.shadows}. Sample product aria-labels: ${snap.samples.length ? snap.samples.join(' | ') : '(none)'}. Filter chips: ${chips.length ? chips.join(' | ') : '(none)'}. Closed shadow roots were not opened.`;
+    if (!queued.length && !pace?.allowEmpty)
       return fail(`Depop shop ${shop} was not imported. No candidate anchors were available before the time limit, so this is an incomplete or unrecognized page, not a finished import. ${evidence} Nothing was imported. Sync will not remove listings.`);
     const how = stop === 'sold'
       ? ' Stopped at the Sold items section. Sold listings were not queued.'
@@ -201,6 +226,7 @@ export async function readDepopShop(shop, deadlineMs, cap = 400, pace) {
           : ' The visible shop grid stopped growing.';
     return {
       ok: true, complete: false, partial, limitHit, capHit, value: [], productUrls: queued,
+      chips, cardTexts: snap.cardTexts || [], pageUrl,
       reason: `Depop shop ${shop}: ${queued.length} candidate links queued in page order for a western-boot check (scan cap ${limit}).${how} ${evidence} Sync will not remove listings.`,
     };
   } catch (e) {

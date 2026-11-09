@@ -9,7 +9,7 @@ import {
   acceptScan, collectIds, depopSellerHandle, explainPageFailure, pageScriptEmpty, readDepopProduct, readDepopShop, rejectEmptyDepopShop, NO_FACEBOOK_LISTINGS,
 } from '../extension/import-page.mjs';
 import { westernBootDecision, bootScanSummary, GATE_VERSION, rejectToStore } from '../extension/boot-gate.mjs';
-import { absentIds, actorForJob, allowedBootlisterOrigin, CANDIDATE_CAP, cookieReadUrl, createImportLock, gateWrite, importLimit, JOB_DEADLINE_MAX_MS, navListenerArmedBeforeTabCreate, planKnownSkips, planSync, presenceIds, REJECT_BATCH, scanWindowOpen, sessionFromCookie, SHOP_READ_MS, SIGNED_OUT, validateItemEnvelope, WRITE_CAP, withDeadline } from '../extension/import-job.mjs';
+import { absentIds, actorForJob, allowedBootlisterOrigin, CANDIDATE_CAP, cardIsNonFootwear, cookieReadUrl, createImportLock, depopBootFilters, gateWrite, importLimit, JOB_DEADLINE_MAX_MS, navListenerArmedBeforeTabCreate, planFilteredShop, planKnownSkips, planSync, presenceIds, REJECT_BATCH, scanWindowOpen, sessionFromCookie, SHOP_READ_MS, SIGNED_OUT, validateItemEnvelope, WRITE_CAP, withDeadline } from '../extension/import-job.mjs';
 import { knownApi, rejectApi } from '../lib/known-api.js';
 import { acceptRejectRows, matchKnown, REJECT_WRITE_CAP, visibleRejects } from '../lib/known.js';
 import { IMPORT_WRITE_CAP } from '../lib/import-cap.js';
@@ -870,6 +870,60 @@ test('non-boot rejects are stored for this seller only, and uncertain is not', a
   assert.equal(saved.some(row => row.seller === 'bob'), false);
 });
 
+test('depop boot filters dedupe links and fall back when the filter does not stick', () => {
+  const filters = depopBootFilters('nuclear_nostalgia');
+  assert.deepEqual(filters.map(f => f.url), [
+    'https://www.depop.com/nuclear_nostalgia/?groups=footwear&gender=female&productTypes=boots',
+    'https://www.depop.com/nuclear_nostalgia/?groups=footwear&gender=male&productTypes=boots',
+    'https://www.depop.com/nuclear_nostalgia/?groups=footwear&productTypes=boots',
+  ]);
+  for (const filter of filters) {
+    assert.equal(filter.url.includes('category='), false);
+    assert.equal(filter.url.includes('categories='), false);
+    assert.equal(filter.url.includes('subcategory='), false);
+    assert.equal(filter.url.includes('sellerUsername'), false);
+  }
+  const women = 'https://www.depop.com/products/women-boot/';
+  const shared = 'https://www.depop.com/products/shared-boot/';
+  const men = 'https://www.depop.com/products/men-boot/';
+  const plan = planFilteredShop([
+    { ...filters[0], chips: ['Women / Footwear', 'Boots'], cardTexts: ['lace-up moto boots'], href: filters[0].url, urls: [women, shared] },
+    { ...filters[1], chips: ['Men / Footwear', 'Boots'], cardTexts: ['lace-up moto boots'], href: filters[1].url, urls: [shared, men] },
+    { ...filters[2], chips: [], cardTexts: [], href: 'https://www.depop.com/nuclear_nostalgia/', urls: [women, 'https://www.depop.com/products/extra-boot/'] },
+  ]);
+  assert.equal(plan.ok, true);
+  assert.deepEqual(plan.urls, [women, shared, men]);
+  assert.match(plan.note, /Boots only \(fast\)/);
+  assert.match(plan.note, /Women 2, Men 2/);
+  assert.match(plan.note, /All boots skipped \(no filter\)/);
+  assert.equal(cardIsNonFootwear('lace-up moto boots'), false);
+  assert.equal(cardIsNonFootwear('leather tote bag'), true);
+  const bag = planFilteredShop([
+    { ...filters[0], chips: ['Women / Footwear', 'Boots'], cardTexts: ['leather tote bag'], href: filters[0].url, urls: [women] },
+  ]);
+  assert.equal(bag.fallback, true);
+  assert.match(bag.reason, /Women: non-footwear/);
+  const same = planFilteredShop([
+    { ...filters[0], chips: ['Women / Footwear', 'Boots'], cardTexts: ['lace-up moto boots'], href: filters[0].url, urls: [shared] },
+    { ...filters[1], chips: ['Men / Footwear', 'Boots'], cardTexts: ['lace-up moto boots'], href: filters[1].url, urls: [shared] },
+  ]);
+  assert.equal(same.fallback, true);
+  assert.match(same.reason, /same count/);
+  const nochip = planFilteredShop([
+    { ...filters[0], chips: [], cardTexts: ['lace-up moto boots'], href: filters[0].url, urls: [women] },
+  ]);
+  assert.equal(nochip.fallback, true);
+  assert.match(nochip.reason, /no chip/);
+  const popup = read('extension/popup.html').toString();
+  assert.match(popup, /Boots only \(fast\)/);
+  assert.match(popup, /Full shop \(slower, catches mis-categorized boots\)/);
+  assert.ok(popup.indexOf('value="boots"') < popup.indexOf('value="full"'));
+  assert.match(read('extension/popup.js').toString(), /modeNote/);
+  assert.equal(CANDIDATE_CAP, 400);
+  assert.equal(WRITE_CAP, 100);
+  assert.equal(JOB_DEADLINE_MAX_MS, 15 * 60 * 1000);
+});
+
 test('the committed extension zip matches source and its service worker parses', () => {
   const bg = read('extension/background.js').toString();
   assert.equal(navListenerArmedBeforeTabCreate(bg), true);
@@ -880,7 +934,7 @@ test('the committed extension zip matches source and its service worker parses',
   assert.match(bg, /cookieReadUrl/);
   assert.match(bg, /allowedBootlisterOrigin/);
   assert.match(bg, /runEntry/);
-  const depop = bg.slice(bg.indexOf('async function importDepop'), bg.indexOf('function importLink'));
+  const depop = bg.slice(bg.indexOf('async function readShopGrid'), bg.indexOf('function importLink'));
   assert.match(depop, /validateItemEnvelope/);
   assert.match(depop, /complete: false/);
   assert.match(depop, /readDepopShop, 'ISOLATED'/);
