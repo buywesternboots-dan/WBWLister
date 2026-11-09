@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { describe, it } from 'node:test';
 import { sellerSlug } from '../lib/auth.js';
 import { CSV } from '../lib/export.js';
-import { isMuseumSeller, lpHash, mapLpCsv, MUSEUM_SELLER_SLUG, parseGroupPrice, runLpImport } from '../lib/lp.js';
+import { isMuseumSeller, lpHash, mapLpCsv, MUSEUM_SELLER_KEY, parseGroupPrice, runLpImport } from '../lib/lp.js';
 import { enrich, FIELDS } from '../lib/wbw.js';
 
 const DAN = { name: 'dan-hoffenberg', display_name: 'Dan Hoffenberg' };
@@ -43,15 +43,20 @@ function legacyHash(item, extra) {
 }
 
 describe('museum seller identity', () => {
-  it('is Dan Hoffenberg by the registration slug or the display name', () => {
-    assert.equal(sellerSlug('Dan Hoffenberg'), MUSEUM_SELLER_SLUG);
-    assert.equal(MUSEUM_SELLER_SLUG, 'dan-hoffenberg');
-    assert.equal(isMuseumSeller('dan-hoffenberg'), true);
-    assert.equal(isMuseumSeller('  Dan-Hoffenberg  '), true);
-    assert.equal(isMuseumSeller({ name: 'shoeseum', display_name: 'Dan Hoffenberg' }), true);
+  it('matches @DanHoffenberg and the same name with spaces or hyphens', () => {
+    assert.equal(MUSEUM_SELLER_KEY, 'danhoffenberg');
+    assert.equal(isMuseumSeller(sellerSlug('Dan Hoffenberg')), true);
+    for (const name of ['@DanHoffenberg', 'DanHoffenberg', 'danhoffenberg', 'dan-hoffenberg', 'Dan Hoffenberg', '  @Dan_Hoffenberg  ', 'dan_hoffenberg'])
+      assert.equal(isMuseumSeller(name), true, name);
+    assert.equal(isMuseumSeller({ name: '@DanHoffenberg', display_name: 'Museum' }), true);
+    assert.equal(isMuseumSeller({ name: 'shoeseum', display_name: '@DanHoffenberg' }), true);
     assert.equal(isMuseumSeller({ name: 'dan-hoffenberg', display_name: 'Museum' }), true);
-    assert.equal(isMuseumSeller({ seller: 'dan-hoffenberg', display_name: 'Dan-Hoffenberg' }), true);
+    assert.equal(isMuseumSeller({ seller: 'DanHoffenberg', display_name: 'Other shop' }), true);
     assert.equal(isMuseumSeller({ name: 'dan-hoffenberg-2', display_name: '  Dan   Hoffenberg ' }), true);
+    for (const name of ['danhoffenberg2', '@danhoffenberg2', 'dan-hoff', 'Dan Hoff', 'dan_hoffenberg_2', 'dan-hoffenberg-2'])
+      assert.equal(isMuseumSeller(name), false, name);
+    assert.equal(isMuseumSeller({ name: 'danhoffenberg2', display_name: 'danhoffenberg2' }), false);
+    assert.equal(isMuseumSeller({ name: 'dan-hoff', display_name: 'Dan Hoff' }), false);
     assert.equal(isMuseumSeller({ name: 'ada', display_name: 'Ada Boots' }), false);
     assert.equal(isMuseumSeller({ name: 'museum', display_name: 'Dan Hoffenberg Boots' }), false);
     assert.equal(isMuseumSeller({ name: 'danny-hoffenberg', display_name: 'Danny Hoffenberg' }), false);
@@ -137,6 +142,16 @@ describe('Dan Hoffenberg List Perfectly import', () => {
     assert.equal(mapped.includes(SECRET), false);
   });
 
+  it('uses the group price for the username @DanHoffenberg', async () => {
+    const db = memory();
+    const opened = await runLpImport(csv([boot({ Notes: 'group price $88', Price: '245' })]), db, '@DanHoffenberg');
+    assert.equal(opened.new, 1);
+    assert.equal(opened.missingGroupPrice, 0);
+    assert.equal(db.rows[0].price, '88');
+    assert.equal(db.rows[0].wbw_price, '88');
+    assert.equal(db.rows[0].missing_group_price, false);
+  });
+
   it('reads a Comments header when Notes is absent', async () => {
     const db = memory();
     const text = 'Title,SKU,Price,Comment\n"Lucchese cowboy boots","c1","10","group: $64"\n';
@@ -150,7 +165,7 @@ describe('Dan Hoffenberg List Perfectly import', () => {
   it('leaves every other seller on the spreadsheet price with no flag', async () => {
     const notes = `group price $10\n${SECRET}`;
     const text = csv([boot({ Notes: notes, Price: '245' })]);
-    for (const seller of ['ada', { name: 'ada', display_name: 'Ada' }, { name: 'museum', display_name: 'Dan Hoffenberg Boots' }, { name: 'danny-hoffenberg', display_name: 'Danny Hoffenberg' }]) {
+    for (const seller of ['ada', 'danhoffenberg2', 'dan-hoff', { name: 'ada', display_name: 'Ada' }, { name: 'danhoffenberg2', display_name: '@danhoffenberg2' }, { name: 'dan-hoff', display_name: 'Dan Hoff' }, { name: 'museum', display_name: 'Dan Hoffenberg Boots' }, { name: 'danny-hoffenberg', display_name: 'Danny Hoffenberg' }]) {
       const db = memory();
       const opened = await runLpImport(text, db, seller);
       assert.equal(opened.missingGroupPrice, 0, JSON.stringify(seller));
