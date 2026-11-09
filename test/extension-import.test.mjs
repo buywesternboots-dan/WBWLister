@@ -9,7 +9,10 @@ import {
   acceptScan, collectIds, depopSellerHandle, explainPageFailure, pageScriptEmpty, readDepopProduct, readDepopShop, rejectEmptyDepopShop, NO_FACEBOOK_LISTINGS,
 } from '../extension/import-page.mjs';
 import { westernBootDecision, bootScanSummary } from '../extension/boot-gate.mjs';
-import { actorForJob, allowedBootlisterOrigin, CANDIDATE_CAP, cookieReadUrl, createImportLock, gateWrite, importLimit, JOB_DEADLINE_MAX_MS, navListenerArmedBeforeTabCreate, planSync, scanWindowOpen, sessionFromCookie, SIGNED_OUT, validateItemEnvelope, withDeadline } from '../extension/import-job.mjs';
+import { absentIds, actorForJob, allowedBootlisterOrigin, CANDIDATE_CAP, cookieReadUrl, createImportLock, gateWrite, importLimit, JOB_DEADLINE_MAX_MS, navListenerArmedBeforeTabCreate, planKnownSkips, planSync, presenceIds, scanWindowOpen, sessionFromCookie, SIGNED_OUT, validateItemEnvelope, WRITE_CAP, withDeadline } from '../extension/import-job.mjs';
+import { knownApi } from '../lib/known-api.js';
+import { matchKnown } from '../lib/known.js';
+import { IMPORT_WRITE_CAP } from '../lib/import-cap.js';
 import { itemsApi } from '../lib/items-api.js';
 import { nextImportCount } from '../lib/import-cap.js';
 import { sessionToken } from '../lib/session.js';
@@ -142,7 +145,9 @@ test('the observed Depop page supplies the listing and the slug is not the accou
   assert.match(shop.reason, /6 candidate links queued in page order for a western-boot check \(scan cap 9\)/);
   assert.match(shop.reason, /Sync will not remove listings/);
   assert.match(shop.reason, /Exact label "item listed by nuclear_nostalgia": 7/);
+  assert.match(shop.reason, /Shop scroll hit its read limit before the grid settled/);
   assert.match(shop.reason, /may not be the whole shop/);
+  assert.equal(shop.limitHit, true);
   assert.deepEqual(JSON.parse(JSON.stringify(shop)), shop);
   assert.deepEqual(rejectEmptyDepopShop(shop, SHOP), shop.productUrls);
 
@@ -406,7 +411,7 @@ Made in USA
     assert.equal(westernBootDecision({ title, description: title }).eligible, false, title);
   }
   const summary = bootScanSummary({ scanned: 57, candidates: 72, eligible: 38, skipped: { 'non-footwear': 8, uncertain: 1, already: 15 }, writeCap: 100 });
-  assert.equal(summary.includes('already imported'), false);
+  assert.match(summary, /15 already imported \(skipped, not reopened\)/);
   assert.match(summary, /Skipped 8 non-footwear, 0 other footwear, 1 uncertain, 0 unread/);
 });
 
@@ -677,6 +682,79 @@ test('one import lock covers every entry and ignores later setting changes', () 
   assert.equal(mismatched.job.token, '');
 });
 
+test('known links are seller-scoped, and a session is required', async () => {
+  const secret = 'signing-secret';
+  const env = { NODE_ENV: 'production', ADMIN_PASSWORD: 'staff-secret', APP_PASSWORD: secret };
+  const rows = [
+    { seller: 'ada', source: 'depop', source_id: 'stored-a', source_url: 'https://www.depop.com/products/shop-slug-a/' },
+    { seller: 'bob', source: 'depop', source_id: 'slug-b', source_url: 'https://www.depop.com/products/slug-b/' },
+  ];
+  const db = {
+    async knownImports(seller, source, candidates) {
+      return matchKnown(rows.filter(r => r.seller === seller && r.source === source), candidates);
+    },
+  };
+  const candidates = [
+    { id: 'shop-slug-a', url: 'https://www.depop.com/products/shop-slug-a/' },
+    { id: 'slug-b', url: 'https://www.depop.com/products/slug-b/' },
+  ];
+  const call = (token, authorization) => knownApi({
+    method: 'POST', url: 'http://localhost/api/import/known',
+    headers: { get(name) {
+      const key = String(name).toLowerCase();
+      if (key === 'x-auth') return token;
+      if (key === 'authorization') return authorization;
+      return '';
+    } },
+    json: async () => ({ source: 'depop', candidates }),
+  }, db, env);
+  await assert.rejects(() => call('', ''), /log in/);
+  const ada = await sessionToken('seller:ada', secret);
+  await assert.rejects(() => call(ada, 'Bearer bob'), /own items/);
+  const own = await call(ada, '');
+  assert.deepEqual(own.known.map(k => k.source_id), ['stored-a']);
+  assert.equal(own.known[0].id, 'shop-slug-a');
+  const admin = await sessionToken('admin', secret);
+  const bobs = await call(admin, 'Bearer bob');
+  assert.deepEqual(bobs.known.map(k => k.source_id), ['slug-b']);
+});
+
+test('already imported links are not reopened unless re-check is on, and skipped links are not gone', () => {
+  assert.equal(WRITE_CAP, 100);
+  assert.equal(CANDIDATE_CAP, 400);
+  assert.equal(IMPORT_WRITE_CAP, 100);
+  assert.equal(JOB_DEADLINE_MAX_MS, 15 * 60 * 1000);
+  const urls = [
+    'https://www.depop.com/products/shop-slug-a/',
+    'https://www.depop.com/products/new-boot/',
+  ];
+  const known = { known: [{ id: 'shop-slug-a', url: urls[0], source_id: 'stored-a' }] };
+  const skipped = planKnownSkips(urls, known);
+  assert.deepEqual(skipped.open, [urls[1]]);
+  assert.deepEqual(skipped.skipped, [urls[0]]);
+  assert.deepEqual(skipped.presentIds, ['stored-a']);
+  const seen = presenceIds(skipped.presentIds, ['new-boot']);
+  assert.deepEqual(absentIds(['stored-a', 'new-boot', 'left-the-shop'], seen), ['left-the-shop']);
+  const plan = planSync(true, true, seen, false);
+  assert.equal(plan.sync, true);
+  assert.ok(plan.ids.includes('stored-a'));
+  assert.equal(plan.ids.includes('left-the-shop'), false);
+  const recheck = planKnownSkips(urls, known, { recheck: true });
+  assert.deepEqual(recheck.open, urls);
+  assert.equal(recheck.skipped.length, 0);
+  assert.equal(recheck.recheck, true);
+  const popup = read('extension/popup.html').toString();
+  assert.match(popup, /Also re-check already imported listings/);
+  assert.equal(/id="recheck"[^>]*checked/.test(popup), false);
+  assert.match(read('extension/popup.js').toString(), /recheck: \$ \('recheck'\)\.checked|recheck: \$\('recheck'\)\.checked/);
+  const depop = read('extension/background.js').toString();
+  assert.match(depop, /\/api\/import\/known/);
+  assert.match(depop, /planKnownSkips/);
+  assert.match(depop, /presenceIds/);
+  assert.match(depop, /complete: false/);
+  assert.match(depop, /already imported \(skipped, not reopened\)/);
+});
+
 test('the committed extension zip matches source and its service worker parses', () => {
   const bg = read('extension/background.js').toString();
   assert.equal(navListenerArmedBeforeTabCreate(bg), true);
@@ -698,6 +776,8 @@ test('the committed extension zip matches source and its service worker parses',
   assert.match(depop, /westernBootDecision/);
   assert.match(depop, /bootScanSummary/);
   assert.match(depop, /result\.duplicate = \(result\.duplicate \|\| 0\) \+ skipped\.already/);
+  assert.match(depop, /planKnownSkips/);
+  assert.match(read('extension/popup.js').toString(), /scanLimit/);
   assert.match(depop, /extendDeadline/);
   assert.equal(CANDIDATE_CAP, 400);
   assert.match(bg, /info\?\.status === 'complete'/);
@@ -708,8 +788,8 @@ test('the committed extension zip matches source and its service worker parses',
   assert.match(read('app/screen.js').toString(), /Source condition/);
   assert.match(read('extension/popup.js').toString(), /r\.skipped/);
   const manifest = JSON.parse(read('extension/manifest.json').toString());
-  assert.equal(manifest.version, '0.14');
-  const zip = readZip(read('public/bootlister-extension-0.14.zip'));
+  assert.equal(manifest.version, '0.15');
+  const zip = readZip(read('public/bootlister-extension-0.15.zip'));
   const loop = bg.slice(bg.indexOf('async function importAll'), bg.indexOf('async function importFacebook'));
   assert.equal(loop.includes('retry(() => importOne'), false);
   assert.match(bg, /x-import-job/);

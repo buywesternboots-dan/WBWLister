@@ -100,6 +100,60 @@ export function withDeadline(promise, ms, message) {
   ]);
 }
 
+const depopId = url => {
+  const m = String(url || '').match(/depop\.com\/products\/([^/?#]+)\/?$/i);
+  return m ? decodeURIComponent(m[1]) : '';
+};
+const normUrl = url => {
+  try {
+    const u = new URL(String(url));
+    return `${u.protocol}//${u.hostname.toLowerCase()}${u.pathname.replace(/\/+$/, '')}`;
+  } catch { return ''; }
+};
+
+// Default: do not open a page the server already has. Recheck opens every candidate, as before.
+export function planKnownSkips(productUrls, known, { recheck = false } = {}) {
+  const urls = Array.isArray(productUrls) ? productUrls : [];
+  if (recheck) return { open: urls.slice(), skipped: [], presentIds: [], recheck: true };
+  const stored = new Map();
+  for (const row of known?.known || []) {
+    const sourceId = String(row?.source_id || row?.id || '');
+    if (!sourceId) continue;
+    if (row?.id) stored.set(String(row.id), sourceId);
+    const url = normUrl(row?.url || '');
+    if (url) stored.set(url, sourceId);
+  }
+  const open = [];
+  const skipped = [];
+  const presentIds = [];
+  for (const url of urls) {
+    const id = depopId(url);
+    const sourceId = stored.get(id) || stored.get(normUrl(url));
+    if (!sourceId) { open.push(url); continue; }
+    skipped.push(url);
+    presentIds.push(sourceId);
+  }
+  return { open, skipped, presentIds, recheck: false };
+}
+
+// Known listings stay in the seen set. A later sync must not treat a skipped page as gone.
+export function presenceIds(knownIds, openedIds) {
+  const out = [];
+  const seen = new Set();
+  for (const id of [...(knownIds || []), ...(openedIds || [])]) {
+    const s = String(id || '');
+    if (!s || seen.has(s)) continue;
+    seen.add(s);
+    out.push(s);
+  }
+  return out;
+}
+
+export function absentIds(storedIds, seenIds) {
+  const seen = new Set((seenIds || []).map(id => String(id)));
+  return (storedIds || []).map(id => String(id)).filter(id => id && !seen.has(id));
+}
+
 // Sync removal deletes listings that were not in the scan. An uncertain scan must not do that.
 export function planSync(syncRequested, complete, ids, capped = false) {
   if (!syncRequested) return { sync: false };

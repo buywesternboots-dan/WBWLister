@@ -170,10 +170,11 @@ export async function readDepopShop(shop, deadlineMs, cap = 400, pace) {
     };
     let snap = collect();
     let stable = 0;
+    let stop = 'time';
     // Depop adds shop cards slowly. Each scroll waits, and only five unchanged waits count as settled.
     // The Sold items block is the end of the selling grid; those links are not queued.
     while (snap.productUrls.length < limit && !snap.sold && deadlineMs > Date.now() + pauseMs) {
-      if (snap.productUrls.length > 0 && snap.readyState === 'complete' && stable >= settle) break;
+      if (snap.productUrls.length > 0 && snap.readyState === 'complete' && stable >= settle) { stop = 'settled'; break; }
       const before = snap.productUrls.length;
       scrollGrid(snap);
       await new Promise(r => setTimeout(r, pauseMs));
@@ -182,18 +183,21 @@ export async function readDepopShop(shop, deadlineMs, cap = 400, pace) {
       stable = snap.productUrls.length === before ? stable + 1 : 0;
     }
     const queued = snap.productUrls.slice(0, limit);
-    const settled = snap.sold || (snap.productUrls.length > 0 && stable >= settle);
+    if (snap.sold) stop = 'sold';
+    else if (stop !== 'settled' && queued.length >= limit) stop = 'cap';
+    const settled = stop === 'settled' || stop === 'sold';
     const partial = !settled;
+    const limitHit = stop === 'cap' || stop === 'time';
     const evidence = `Tab ${snap.href}. readyState ${snap.readyState}. Title "${snap.title || '(none)'}". Document body ${snap.hasBody ? 'present' : 'missing'}. Product anchors ${snap.productAnchors}. Exact label "item listed by ${shop}": ${snap.exact}. Unique selling links: ${snap.productUrls.length}. Sold-section links skipped: ${snap.soldLinks}. Other "item listed by" anchors: ${snap.otherListed}. Open shadow roots walked: ${snap.shadows}. Sample product aria-labels: ${snap.samples.length ? snap.samples.join(' | ') : '(none)'}. Closed shadow roots were not opened.`;
     if (!queued.length)
       return fail(`Depop shop ${shop} was not imported. No candidate anchors were available before the time limit, so this is an incomplete or unrecognized page, not a finished import. ${evidence} Nothing was imported. Sync will not remove listings.`);
-    const how = snap.sold
+    const how = stop === 'sold'
       ? ' Stopped at the Sold items section. Sold listings were not queued.'
-      : partial
-        ? ' Scroll stopped before the grid settled, so this may not be the whole shop.'
+      : limitHit
+        ? ' Shop scroll hit its read limit before the grid settled. This may not be the whole shop.'
         : ' The visible shop grid stopped growing.';
     return {
-      ok: true, complete: false, partial, value: [], productUrls: queued,
+      ok: true, complete: false, partial, limitHit, value: [], productUrls: queued,
       reason: `Depop shop ${shop}: ${queued.length} candidate links queued in page order for a western-boot check (scan cap ${limit}).${how} ${evidence} Sync will not remove listings.`,
     };
   } catch (e) {

@@ -1,13 +1,14 @@
 import { acceptScan, collectIds, explainPageFailure, readDepopProduct, readDepopShop, rejectEmptyDepopShop, NO_FACEBOOK_LISTINGS } from './import-page.mjs';
 import { bootScanSummary, westernBootDecision } from './boot-gate.mjs';
-import { API_TIMEOUT_MS, actorForJob, allowedBootlisterOrigin, BOOTLISTER_ORIGINS, CANDIDATE_CAP, cookieReadUrl, createImportLock, gateWrite, importLimit, planSync, scanWindowOpen, sessionFromCookie, SHOP_READ_MS, SIGNED_OUT, validateItemEnvelope, withDeadline } from './import-job.mjs';
+import { API_TIMEOUT_MS, actorForJob, allowedBootlisterOrigin, BOOTLISTER_ORIGINS, CANDIDATE_CAP, cookieReadUrl, createImportLock, gateWrite, importLimit, planKnownSkips, planSync, presenceIds, scanWindowOpen, sessionFromCookie, SHOP_READ_MS, SIGNED_OUT, validateItemEnvelope, withDeadline } from './import-job.mjs';
 
 const ITEM = /facebook\.com\/marketplace\/item\/(\d+)/;
 const siteOf = url => /facebook\.com/i.test(url || '') ? 'Facebook' : /depop\.com/i.test(url || '') ? 'Depop' : 'The page';
 const wait = ms => new Promise(r => setTimeout(r, ms));
 // Runs fn; on failure tries twice more (after 2 s, then 4 s) before giving up.
 const retry = async (fn, n = 1) => { try { return await fn(); } catch (e) { if (n >= 3) throw e; await wait(n * 2000); return retry(fn, n + 1); } };
-const done = n => `${n.partial ? 'Partial' : 'Done'}: ${n.added} new, ${n.updated} changed, ${n.duplicate || 0} already imported, ${n.removed} gone (now Pending sold), ${n.failed} failed.${n.skipped ? ` ${n.skipped}` : ''}`;
+const alreadyLine = n => n.recheck ? `${n.duplicate || 0} already imported` : `${n.duplicate || 0} already imported (skipped, not reopened)`;
+const done = n => `${n.partial ? 'Partial' : 'Done'}: ${n.added} new, ${n.updated} changed, ${alreadyLine(n)}, ${n.removed} gone (now Pending sold), ${n.failed} failed.${n.scanLimit ? ` ${n.scanLimit}` : ''}${n.skipped ? ` ${n.skipped}` : ''}`;
 const badge = t => chrome.action.setBadgeText({ text: String(t) });
 // Progress bar state (shown in the popup); status() only logs problems and milestones.
 const progress = p => chrome.storage.local.set({ progress: p });
@@ -105,11 +106,11 @@ async function snapshot(message) {
   if (actor.error) return actor;
   return { ...actor, limit: importLimit(message?.limit) };
 }
-async function api(method, body, q = '') {
+async function api(method, body, q = '', path = '/api/items') {
   const { server, headers } = lock.auth();
   if (lock.job?.id) headers['x-import-job'] = String(lock.job.id);
   if (lock.job?.limit) headers['x-import-limit'] = String(lock.job.limit);
-  const r = await fetch(`${server}/api/items${q}`, {
+  const r = await fetch(`${server}${path}${q}`, {
     method, credentials: 'include', // the page's login cookie, when started from the page
     headers, body: body && JSON.stringify(body), signal: AbortSignal.timeout(API_TIMEOUT_MS),
   });
@@ -224,8 +225,7 @@ async function importFacebook(profileId, sync) {
 
 // Depop: the shop tab's own document. Isolated world, so page scripts cannot replace querySelectorAll.
 // The result is a plain object. Zero candidates throw before any write and before "Done".
-async function importDepop(shop, sync) {
-  const known = new Set(await api('GET', null, '?source=depop')); // first: fails if the seller isn't set up
+async function importDepop(shop, sync, recheck) {
   status('Reading the Depop shop…');
   const cap = lock.job?.limit;
   const raw = await inTab(`https://www.depop.com/${shop}/`, 250,
@@ -234,17 +234,19 @@ async function importDepop(shop, sync) {
   const productUrls = rejectEmptyDepopShop(scan, shop);
   lock.extendDeadline(lock.job?.id, productUrls.length);
   if (scan.reason) status(scan.reason);
+  const candidates = productUrls.map(url => ({ id: url.match(/\/products\/([^/]+)\/?$/)?.[1] || '', url }));
+  const known = recheck ? { known: [] } : await api('POST', { source: 'depop', candidates }, '', '/api/import/known');
+  const planned = planKnownSkips(productUrls, known, { recheck: !!recheck });
   const todo = [];
-  const skipped = { 'non-footwear': 0, 'other-footwear': 0, uncertain: 0, unread: 0, already: 0 };
+  const skipped = { 'non-footwear': 0, 'other-footwear': 0, uncertain: 0, unread: 0, already: planned.skipped.length };
   const notes = [scan.reason].filter(Boolean);
   let scanned = 0;
   let cursor = 0;
-  for (; cursor < productUrls.length; cursor++) {
+  for (; cursor < planned.open.length; cursor++) {
     if (todo.length >= importLimit(cap)) break;
     if (!scanWindowOpen(lock.job?.deadline)) { notes.push('Import stopped before another product page: the time limit was too close. Nothing further was read.'); break; }
-    const productUrl = productUrls[cursor];
+    const productUrl = planned.open[cursor];
     const slug = productUrl.match(/\/products\/([^/]+)\/?$/)?.[1] || '';
-    if (known.has(slug)) { skipped.already += 1; continue; }
     scanned += 1;
     try {
       const page = await inTab(productUrl, 2500, (id, site) => runCall(id, readDepopProduct, 'ISOLATED', [shop, Date.now() + 15000], 20000, site));
@@ -256,26 +258,29 @@ async function importDepop(shop, sync) {
       todo.push(item);
     } catch (e) { skipped.unread += 1; notes.push(`${slug || productUrl} not read: ${e.message}`); }
   }
-  const unopened = productUrls.length - cursor;
+  const unopened = planned.open.length - cursor;
   const partial = unopened > 0 || scan.partial === true;
-  const summary = bootScanSummary({ scanned, candidates: productUrls.length, eligible: todo.length, unopened, skipped, writeCap: importLimit(cap), partial });
+  const summary = bootScanSummary({ scanned, candidates: productUrls.length, eligible: todo.length, unopened, skipped, writeCap: importLimit(cap), partial, limitHit: scan.limitHit === true });
+  const present = presenceIds(planned.presentIds, todo.map(i => i.source_id));
   if (!todo.length) {
-    if (skipped.already) return { added: 0, updated: 0, failed: 0, removed: 0, duplicate: skipped.already, partial, skipped: [summary, ...notes].filter(Boolean).join(' ') };
+    if (skipped.already) return { added: 0, updated: 0, failed: 0, removed: 0, duplicate: skipped.already, recheck: !!recheck, partial, scanLimit: scan.limitHit ? 'Shop scroll hit its read limit before the grid settled. This may not be the whole shop.' : '', skipped: [summary, ...notes].filter(Boolean).join(' ') };
     throw new Error(`${summary} ${notes.filter(Boolean).join(' ')} Nothing was imported.`.trim());
   }
-  const result = await importAll({ source: 'depop', ids: todo.map(i => i.source_id), sync, complete: false, todo,
+  const result = await importAll({ source: 'depop', ids: present, sync, complete: false, todo,
     importOne: send, name: i => `"${(i.title || '').slice(0, 40)}"` });
   result.partial = partial || result.partial === true;
+  result.recheck = !!recheck;
   result.duplicate = (result.duplicate || 0) + skipped.already;
+  result.scanLimit = scan.limitHit ? 'Shop scroll hit its read limit before the grid settled. This may not be the whole shop.' : '';
   result.skipped = [summary, result.skipped, ...notes].filter(Boolean).join(' ');
   return result;
 }
 
 // A Facebook Marketplace profile or Depop shop link → the right importer.
-function importLink(link, sync) {
+function importLink(link, sync, recheck) {
   const fb = link?.match(/marketplace\/profile\/(\d+)/)?.[1], shop = link?.match(/depop\.com\/(?!products\/)([\w.-]+)/)?.[1];
   if (fb) return importFacebook(fb, sync);
-  if (shop) return importDepop(shop, sync);
+  if (shop) return importDepop(shop, sync, recheck);
   throw new Error('That isn\'t a Facebook Marketplace profile or Depop shop link.');
 }
 const addCurrent = async (tabId, pageUrl) => {
@@ -312,7 +317,7 @@ async function runEntry(message) {
   if (begun.error) return { error: begun.error };
   try {
     if (message?.type === 'link') {
-      const r = await importLink(message.link, message.sync);
+      const r = await importLink(message.link, message.sync, message.recheck);
       await status(done(r));
       return { r };
     }
