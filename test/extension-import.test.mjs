@@ -390,8 +390,8 @@ test('the committed extension zip matches source and its service worker parses',
   assert.match(read('app/screen.js').toString(), /n\.skipped/);
   assert.match(read('extension/popup.js').toString(), /r\.skipped/);
   const manifest = JSON.parse(read('extension/manifest.json').toString());
-  assert.equal(manifest.version, '0.8');
-  const zip = readZip(read('public/bootlister-extension-0.8.zip'));
+  assert.equal(manifest.version, '0.9');
+  const zip = readZip(read('public/bootlister-extension-0.9.zip'));
   const loop = bg.slice(bg.indexOf('async function importAll'), bg.indexOf('async function importFacebook'));
   assert.equal(loop.includes('retry(() => importOne'), false);
   assert.match(bg, /x-import-job/);

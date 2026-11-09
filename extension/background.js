@@ -260,6 +260,7 @@ const addCurrent = async (tabId, pageUrl) => {
 // Every entry point (page, popup, right-click) takes the same lock and the same frozen seller.
 async function runEntry(message) {
   if (message?.type === 'who') {
+    if (message.server && !allowedBootlisterOrigin(message.server)) return { error: 'That address is not a BootLister site.' };
     const origin = await chooseOrigin(message);
     const token = origin ? await readAuthCookie(origin) : '';
     const gate = origin ? sessionFromCookie(origin, token) : { ok: false, error: SIGNED_OUT, signIn: `${BOOTLISTER_ORIGINS[0]}/login` };
@@ -304,7 +305,11 @@ async function runEntry(message) {
 }
 
 chrome.runtime.onMessage.addListener((m, _, reply) => {
-  runEntry(m).then(r => { if (r.error) badge('!'); reply(r.error ? { error: r.error } : { r: r.r }); });
+  runEntry(m).then(r => {
+    if (r?.error) badge('!');
+    // who is the session itself. Import results stay { r } or { error, signIn }.
+    reply(m?.type === 'who' ? r : (r?.error ? { error: r.error, signIn: r.signIn } : { r: r?.r }));
+  });
   return true;
 });
 
