@@ -7,7 +7,87 @@ export const CANDIDATE_CAP = 400;
 export const SCAN_RESERVE_MS = 8000;
 export const API_TIMEOUT_MS = 20000;
 export const PAGE_BUDGET_MS = 12000;
-export const SHOP_READ_MS = 180000;
+// The shop grid is slow. Three minutes of 4s pauses stopped near 40 links.
+// Eight minutes still leaves time in the 15-minute job to open new pages. The 400 link cap stays.
+export const SHOP_READ_MS = 8 * 60 * 1000;
+export const REJECT_BATCH = 100;
+export const SHOP_MODE_BOOTS = 'Boots only (fast)';
+export const SHOP_MODE_FULL = 'Full shop (slower, catches mis-categorized boots)';
+
+// Depop's own shop filters. category, categories, subcategory, and sellerUsername are not used.
+export function depopBootFilters(shop) {
+  const path = `https://www.depop.com/${shop}/`;
+  return [
+    { id: 'female', label: 'Women', gender: 'female', url: `${path}?groups=footwear&gender=female&productTypes=boots` },
+    { id: 'male', label: 'Men', gender: 'male', url: `${path}?groups=footwear&gender=male&productTypes=boots` },
+    { id: 'boots', label: 'All boots', gender: '', url: `${path}?groups=footwear&productTypes=boots` },
+  ];
+}
+
+const CARD_NON_FOOT = /\b(briefcases?|totes?|handbags?|purses?|backpacks?|wallets?|belts?|buckles?|hats?|shirts?|t-?shirts?|jackets?|dresses?|jeans|jewelry|necklaces?)\b/i;
+const CARD_BOOT = /\b(boots?|booties|botas)\b/i;
+const CARD_BOOT_MOD = /\bboots?[\s-]+(belts?|buckles?|bags?|hats?|bolos?)\b|\bboot(?:belts?|buckles?|bags?|hats?)\b/i;
+
+// A lace-up or moto boot stays. A bag, or "boot" used for a buckle, means the boots filter did not stick.
+export function cardIsNonFootwear(text) {
+  const t = String(text || '');
+  if (!t) return false;
+  if (CARD_BOOT_MOD.test(t)) return true;
+  if (CARD_BOOT.test(t)) return false;
+  return CARD_NON_FOOT.test(t);
+}
+
+export function chipsShowBoots(chips, gender) {
+  const text = (chips || []).join('\n');
+  if (!/\bboots?\b/i.test(text)) return false;
+  if (gender === 'female') return /\bwomen\b/i.test(text) || /\bfemale\b/i.test(text);
+  if (gender === 'male') return /\bmen\b/i.test(text) || /\bmale\b/i.test(text);
+  return /\bfootwear\b/i.test(text) || /\bboots?\b/i.test(text);
+}
+
+function paramsStuck(variant, href) {
+  const url = String(href || '');
+  if (!/[?&]groups=footwear\b/.test(url) || !/[?&]productTypes=boots\b/.test(url)) return false;
+  if (variant.gender && !new RegExp(`[?&]gender=${variant.gender}\\b`).test(url)) return false;
+  return true;
+}
+
+// Gender filters that do not stick fail the fast mode. The ungendered boots URL is skipped instead.
+export function planFilteredShop(reports) {
+  const keep = [];
+  const notes = [];
+  for (const report of reports || []) {
+    const label = report.label || report.id || 'Filter';
+    const badCard = (report.cardTexts || []).find(cardIsNonFootwear);
+    if (badCard) {
+      if (report.gender) return { ok: false, fallback: true, reason: `${label}: non-footwear on the filtered grid` };
+      notes.push(`${label} skipped (non-footwear)`);
+      continue;
+    }
+    const stuck = paramsStuck(report, report.href) && chipsShowBoots(report.chips, report.gender);
+    if (!stuck) {
+      if (!report.gender) { notes.push(`${label} skipped (no filter)`); continue; }
+      const why = chipsShowBoots(report.chips, report.gender) ? 'filter params were dropped' : 'no chip';
+      return { ok: false, fallback: true, reason: `${label}: ${why}` };
+    }
+    keep.push(report);
+  }
+  const women = keep.find(r => r.gender === 'female');
+  const men = keep.find(r => r.gender === 'male');
+  if (women && men && (women.urls || []).length && (women.urls || []).join('\n') === (men.urls || []).join('\n'))
+    return { ok: false, fallback: true, reason: 'Women and Men returned the same count as each other, so the filter was not applied' };
+  if (!keep.some(r => r.gender)) return { ok: false, fallback: true, reason: 'no filtered grid applied' };
+  const seen = new Set();
+  const urls = [];
+  for (const report of keep) for (const url of report.urls || []) {
+    if (!url || seen.has(url)) continue;
+    seen.add(url);
+    urls.push(url);
+  }
+  const counts = keep.map(r => `${r.label} ${(r.urls || []).length}`).join(', ');
+  const extra = notes.length ? ` ${notes.join('. ')}.` : '';
+  return { ok: true, urls, note: `${SHOP_MODE_BOOTS}. ${counts}.${extra}` };
+}
 export const JOB_DEADLINE_MAX_MS = 15 * 60 * 1000;
 
 export function importLimit(value) {
@@ -111,29 +191,39 @@ const normUrl = url => {
   } catch { return ''; }
 };
 
-// Default: do not open a page the server already has. Recheck opens every candidate, as before.
-export function planKnownSkips(productUrls, known, { recheck = false } = {}) {
-  const urls = Array.isArray(productUrls) ? productUrls : [];
-  if (recheck) return { open: urls.slice(), skipped: [], presentIds: [], recheck: true };
+function indexRows(rows) {
   const stored = new Map();
-  for (const row of known?.known || []) {
+  for (const row of rows || []) {
     const sourceId = String(row?.source_id || row?.id || '');
     if (!sourceId) continue;
     if (row?.id) stored.set(String(row.id), sourceId);
     const url = normUrl(row?.url || '');
     if (url) stored.set(url, sourceId);
   }
+  return stored;
+}
+
+// Default: do not open a page already imported or already ruled out. Recheck opens every candidate.
+// Rejected ids are not "present" listings, so a later sync cannot treat them as gone or kept.
+export function planKnownSkips(productUrls, known, { recheck = false } = {}) {
+  const urls = Array.isArray(productUrls) ? productUrls : [];
+  if (recheck) return { open: urls.slice(), skipped: [], rejected: [], presentIds: [], recheck: true };
+  const imported = indexRows(known?.known);
+  const ruledOut = indexRows(known?.rejected);
   const open = [];
   const skipped = [];
+  const rejected = [];
   const presentIds = [];
   for (const url of urls) {
     const id = depopId(url);
-    const sourceId = stored.get(id) || stored.get(normUrl(url));
-    if (!sourceId) { open.push(url); continue; }
-    skipped.push(url);
-    presentIds.push(sourceId);
+    const key = normUrl(url);
+    const sourceId = imported.get(id) || imported.get(key);
+    if (sourceId) { skipped.push(url); presentIds.push(sourceId); continue; }
+    const rejectId = ruledOut.get(id) || ruledOut.get(key);
+    if (rejectId) { rejected.push(url); continue; }
+    open.push(url);
   }
-  return { open, skipped, presentIds, recheck: false };
+  return { open, skipped, rejected, presentIds, recheck: false };
 }
 
 // Known listings stay in the seen set. A later sync must not treat a skipped page as gone.
