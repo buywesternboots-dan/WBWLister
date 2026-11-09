@@ -3,11 +3,11 @@
 // A shop import writes every eligible western boot unless the popup sets a smaller test limit.
 // Nothing can raise the safety bound. The shop scan can look past the write limit so bags do not hide boots.
 export const WRITE_CAP = 100;
-export const CANDIDATE_CAP = 200;
+export const CANDIDATE_CAP = 400;
 export const SCAN_RESERVE_MS = 8000;
 export const API_TIMEOUT_MS = 20000;
 export const PAGE_BUDGET_MS = 12000;
-export const SHOP_READ_MS = 50000;
+export const SHOP_READ_MS = 180000;
 export const JOB_DEADLINE_MAX_MS = 15 * 60 * 1000;
 
 export function importLimit(value) {

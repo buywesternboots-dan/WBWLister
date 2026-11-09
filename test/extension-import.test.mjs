@@ -256,7 +256,7 @@ test('a Depop shop with no candidate anchors fails instead of importing nothing'
       return [listed(LIVE_PRODUCT, SHOP), listed('https://www.depop.com/products/benny-caiman-western/', SHOP)];
     },
   };
-  const late = await readDepopShop(SHOP, Date.now() + 2000, 2);
+  const late = await readDepopShop(SHOP, Date.now() + 2000, 2, { pauseMs: 30, settle: 2 });
   assert.ok(passes >= 2);
   assert.deepEqual(late.productUrls, [LIVE_PRODUCT, 'https://www.depop.com/products/benny-caiman-western/']);
   assert.equal(late.complete, false);
@@ -273,7 +273,7 @@ test('a Depop shop with no candidate anchors fails instead of importing nothing'
       return rows;
     },
   };
-  const grown = await readDepopShop(SHOP, Date.now() + 8000, 10);
+  const grown = await readDepopShop(SHOP, Date.now() + 2000, 10, { pauseMs: 20, settle: 5 });
   assert.deepEqual(grown.productUrls, [
     'https://www.depop.com/products/first-boot/',
     'https://www.depop.com/products/second-boot/',
@@ -399,6 +399,15 @@ Made in USA
   }).eligible, true);
   assert.equal(westernBootDecision({ title: 'STAUD ida tote bag', description: 'cowboy boots in the photo\n#westernboots' }).kind, 'non-footwear');
   assert.equal(westernBootDecision({ title: 'Leather wallet', description: 'Tony Lama cowboy boots' }).eligible, false);
+  const buckle = westernBootDecision({ title: '1970s vintage cowboy boot belt buckle', description: '1970s vintage cowboy boot belt buckle\n$25', price: '25' });
+  assert.equal(buckle.eligible, false);
+  assert.equal(buckle.kind, 'non-footwear');
+  for (const title of ['boot charm', 'boot jack', 'boot bag', 'cowboy boot bolo']) {
+    assert.equal(westernBootDecision({ title, description: title }).eligible, false, title);
+  }
+  const summary = bootScanSummary({ scanned: 57, candidates: 72, eligible: 38, skipped: { 'non-footwear': 8, uncertain: 1, already: 15 }, writeCap: 100 });
+  assert.equal(summary.includes('already imported'), false);
+  assert.match(summary, /Skipped 8 non-footwear, 0 other footwear, 1 uncertain, 0 unread/);
 });
 
 test('the shop keeps scrolling past the first screen of links', async () => {
@@ -414,11 +423,56 @@ test('the shop keeps scrolling past the first screen of links', async () => {
       return pages === 1 ? batch(24, 'first') : [...batch(24, 'first'), ...batch(24, 'next')];
     },
   };
-  const shop = await readDepopShop(SHOP, Date.now() + 8000, 200);
+  const shop = await readDepopShop(SHOP, Date.now() + 3000, 400, { pauseMs: 20, settle: 5 });
   delete globalThis.window;
   assert.equal(shop.productUrls.length, 48);
   assert.equal(shop.partial, false);
-  assert.match(shop.reason, /visible grid stopped growing/);
+  assert.match(shop.reason, /visible shop grid stopped growing/);
+});
+
+test('a slow shop page is not treated as finished before later cards load', async () => {
+  let scrolls = 0;
+  globalThis.window = {
+    scrollTo() { scrolls += 1; },
+    scrollBy() {},
+  };
+  const link = href => ({ href, getAttribute: () => `item listed by ${SHOP}`, scrollIntoView() {} });
+  const batch = (n, prefix) => Array.from({ length: n }, (_, i) => link(`https://www.depop.com/products/${prefix}-${i}-boot/`));
+  globalThis.location = { hostname: 'www.depop.com', pathname: `/${SHOP}/`, href: `https://www.depop.com/${SHOP}/` };
+  globalThis.document = {
+    readyState: 'complete', title: 'shop', body: { scrollHeight: 9000 },
+    querySelectorAll(sel) {
+      if (sel !== 'a[href*="/products/"]') return [];
+      return scrolls >= 4 ? [...batch(24, 'first'), ...batch(24, 'later')] : batch(24, 'first');
+    },
+  };
+  const shop = await readDepopShop(SHOP, Date.now() + 5000, 400, { pauseMs: 15, settle: 5 });
+  delete globalThis.window;
+  assert.ok(scrolls >= 4);
+  assert.equal(shop.productUrls.length, 48);
+  assert.equal(shop.partial, false);
+  assert.match(shop.reason, /visible shop grid stopped growing/);
+});
+
+test('sold-section links are not queued', async () => {
+  const selling = { href: 'https://www.depop.com/products/selling-boot/', getAttribute: () => `item listed by ${SHOP}`, scrollIntoView() {}, afterSold: false };
+  const sold = { href: 'https://www.depop.com/products/sold-boot/', getAttribute: () => `item listed by ${SHOP}`, scrollIntoView() {}, afterSold: true };
+  const heading = { textContent: 'Sold items', compareDocumentPosition: node => node.afterSold ? 4 : 0 };
+  globalThis.location = { hostname: 'www.depop.com', pathname: `/${SHOP}/`, href: `https://www.depop.com/${SHOP}/` };
+  globalThis.document = {
+    readyState: 'complete', title: 'shop', body: {},
+    querySelectorAll(sel) {
+      if (String(sel).includes('h1')) return [heading];
+      if (sel === 'a[href*="/products/"]') return [selling, sold];
+      return [];
+    },
+  };
+  const shop = await readDepopShop(SHOP, Date.now() + 2000, 400, { pauseMs: 20, settle: 5 });
+  assert.deepEqual(shop.productUrls, ['https://www.depop.com/products/selling-boot/']);
+  assert.equal(shop.partial, false);
+  assert.match(shop.reason, /Sold items/);
+  assert.match(shop.reason, /Sold-section links skipped: 1/);
+  assert.equal(shop.reason.includes('visible shop grid stopped growing'), false);
 });
 
 test('only cowboy or western boots are eligible, and bags ahead of boots are skipped', async () => {
@@ -643,8 +697,9 @@ test('the committed extension zip matches source and its service worker parses',
   assert.match(depop, /CANDIDATE_CAP/);
   assert.match(depop, /westernBootDecision/);
   assert.match(depop, /bootScanSummary/);
+  assert.match(depop, /result\.duplicate = \(result\.duplicate \|\| 0\) \+ skipped\.already/);
   assert.match(depop, /extendDeadline/);
-  assert.equal(CANDIDATE_CAP, 200);
+  assert.equal(CANDIDATE_CAP, 400);
   assert.match(bg, /info\?\.status === 'complete'/);
   assert.match(bg, /AbortSignal\.timeout\(API_TIMEOUT_MS\)/);
   assert.match(bg, /expectedId: expected/);
@@ -653,8 +708,8 @@ test('the committed extension zip matches source and its service worker parses',
   assert.match(read('app/screen.js').toString(), /Source condition/);
   assert.match(read('extension/popup.js').toString(), /r\.skipped/);
   const manifest = JSON.parse(read('extension/manifest.json').toString());
-  assert.equal(manifest.version, '0.13');
-  const zip = readZip(read('public/bootlister-extension-0.13.zip'));
+  assert.equal(manifest.version, '0.14');
+  const zip = readZip(read('public/bootlister-extension-0.14.zip'));
   const loop = bg.slice(bg.indexOf('async function importAll'), bg.indexOf('async function importFacebook'));
   assert.equal(loop.includes('retry(() => importOne'), false);
   assert.match(bg, /x-import-job/);

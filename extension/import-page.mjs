@@ -25,7 +25,7 @@ export function acceptScan(raw, site) {
 
 // An accepted scan with no product links is not a finished import. Callers must not report "0 new".
 export function rejectEmptyDepopShop(scan, shop) {
-  const urls = (scan?.productUrls || []).filter(u => typeof u === 'string' && /^https:\/\/www\.depop\.com\/products\/[^/]+\/$/.test(u)).slice(0, 200);
+  const urls = (scan?.productUrls || []).filter(u => typeof u === 'string' && /^https:\/\/www\.depop\.com\/products\/[^/]+\/$/.test(u)).slice(0, 400);
   if (urls.length) return urls;
   const why = typeof scan?.reason === 'string' && scan.reason ? scan.reason : `Depop shop ${shop} produced no candidate listings.`;
   throw new Error(/Nothing was imported/.test(why) ? why : `${why} Nothing was imported.`);
@@ -83,9 +83,11 @@ export function depopSellerHandle(href) {
 // Runs in the Depop shop tab. Listing anchors are counted in the light DOM and in open shadow
 // roots. The scan cap is how many links to queue, not how many to write. Zero candidates is an
 // incomplete read, not an empty import. No Depop feed API.
-export async function readDepopShop(shop, deadlineMs, cap = 200) {
+export async function readDepopShop(shop, deadlineMs, cap = 400, pace) {
   const fail = error => ({ ok: false, complete: false, error });
-  const limit = Number.isInteger(cap) && cap >= 1 ? Math.min(cap, 200) : 200;
+  const limit = Number.isInteger(cap) && cap >= 1 ? Math.min(cap, 400) : 400;
+  const pauseMs = Number.isInteger(pace?.pauseMs) && pace.pauseMs >= 0 ? pace.pauseMs : 4000;
+  const settle = Number.isInteger(pace?.settle) && pace.settle >= 1 ? pace.settle : 5;
   const clip = (s, n) => String(s ?? '').replace(/\s+/g, ' ').trim().slice(0, n);
   try {
     if (!/^[\w.-]+$/.test(shop || '') || shop === 'products') return fail('That is not a Depop shop link. Nothing was imported.');
@@ -96,6 +98,19 @@ export async function readDepopShop(shop, deadlineMs, cap = 200) {
     };
     if (!onShop()) return fail(`This tab is not the requested Depop shop ${shop} (${clip(location.href, 180) || 'no url'}). Nothing was imported.`);
     const listedBy = `item listed by ${shop}`;
+    const soldHeading = () => {
+      const heads = document.querySelectorAll?.('h1, h2, h3, h4, h5, h6, [role="heading"]') || [];
+      for (const h of heads) {
+        if (/^sold items$/i.test(String(h.textContent || '').replace(/\s+/g, ' ').trim())) return h;
+      }
+      return null;
+    };
+    const inSold = (node, heading) => {
+      for (let n = node; n; n = n.parentElement) {
+        if (/^sold items$/i.test(String(n.getAttribute?.('aria-label') || '').trim())) return true;
+      }
+      return !!(heading && typeof heading.compareDocumentPosition === 'function' && (heading.compareDocumentPosition(node) & 4) === 4);
+    };
     const collect = () => {
       const bag = { anchors: [], shadows: 0 };
       const walk = (root, depth) => {
@@ -108,12 +123,16 @@ export async function readDepopShop(shop, deadlineMs, cap = 200) {
         }
       };
       walk(document, 0);
+      const heading = soldHeading();
       const productUrls = [];
       const seen = new Set();
       const samples = [];
       let exact = 0;
       let otherListed = 0;
+      let soldLinks = 0;
+      let last = null;
       for (const a of bag.anchors) {
+        if (inSold(a, heading)) { soldLinks += 1; continue; }
         const label = String(a.getAttribute?.('aria-label') || '');
         const shown = clip(label, 80);
         if (shown && samples.length < 3 && !samples.includes(shown)) samples.push(shown);
@@ -122,6 +141,7 @@ export async function readDepopShop(shop, deadlineMs, cap = 200) {
           continue;
         }
         exact += 1;
+        last = a;
         let slug = '';
         try {
           const u = new URL(a.href, location.href);
@@ -132,39 +152,49 @@ export async function readDepopShop(shop, deadlineMs, cap = 200) {
         seen.add(slug);
         productUrls.push(`https://www.depop.com/products/${slug}/`);
       }
-      const last = bag.anchors[bag.anchors.length - 1];
       return {
         productUrls, exact, otherListed, samples, shadows: bag.shadows, productAnchors: bag.anchors.length, last,
+        sold: !!(heading || soldLinks), soldLinks,
         readyState: String(document.readyState || 'unknown'), title: clip(document.title, 120),
         href: clip(location.href, 180), hasBody: !!document.body,
       };
     };
     const scrollGrid = snap => {
-      const height = Math.max(document.body?.scrollHeight || 0, document.documentElement?.scrollHeight || 0);
-      if (typeof window !== 'undefined' && typeof window.scrollTo === 'function') window.scrollTo(0, height);
+      const win = typeof window !== 'undefined' ? window : null;
       if (snap.last && typeof snap.last.scrollIntoView === 'function') snap.last.scrollIntoView({ block: 'end' });
+      if (win && typeof win.scrollBy === 'function') { win.scrollBy(0, -120); win.scrollBy(0, 240); }
+      if (!snap.sold) {
+        const height = Math.max(document.body?.scrollHeight || 0, document.documentElement?.scrollHeight || 0);
+        if (win && typeof win.scrollTo === 'function') win.scrollTo(0, height);
+      }
     };
     let snap = collect();
     let stable = 0;
-    // The first screen is often 24 links. Scrolling the window to the bottom is what loads the rest.
-    // Three unchanged reads after those scrolls means the visible grid stopped growing.
-    while (snap.productUrls.length < limit && deadlineMs > Date.now() + 200) {
-      if (snap.productUrls.length > 0 && snap.readyState === 'complete' && stable >= 3) break;
+    // Depop adds shop cards slowly. Each scroll waits, and only five unchanged waits count as settled.
+    // The Sold items block is the end of the selling grid; those links are not queued.
+    while (snap.productUrls.length < limit && !snap.sold && deadlineMs > Date.now() + pauseMs) {
+      if (snap.productUrls.length > 0 && snap.readyState === 'complete' && stable >= settle) break;
       const before = snap.productUrls.length;
       scrollGrid(snap);
-      await new Promise(r => setTimeout(r, 1000));
+      await new Promise(r => setTimeout(r, pauseMs));
       if (!onShop()) return fail(`This tab left the requested Depop shop ${shop} (${clip(location.href, 180)}). Nothing was imported.`);
       snap = collect();
       stable = snap.productUrls.length === before ? stable + 1 : 0;
     }
     const queued = snap.productUrls.slice(0, limit);
-    const partial = stable < 3;
-    const evidence = `Tab ${snap.href}. readyState ${snap.readyState}. Title "${snap.title || '(none)'}". Document body ${snap.hasBody ? 'present' : 'missing'}. Product anchors ${snap.productAnchors}. Exact label "item listed by ${shop}": ${snap.exact}. Unique product links: ${snap.productUrls.length}. Other "item listed by" anchors: ${snap.otherListed}. Open shadow roots walked: ${snap.shadows}. Sample product aria-labels: ${snap.samples.length ? snap.samples.join(' | ') : '(none)'}. Closed shadow roots were not opened.`;
+    const settled = snap.sold || (snap.productUrls.length > 0 && stable >= settle);
+    const partial = !settled;
+    const evidence = `Tab ${snap.href}. readyState ${snap.readyState}. Title "${snap.title || '(none)'}". Document body ${snap.hasBody ? 'present' : 'missing'}. Product anchors ${snap.productAnchors}. Exact label "item listed by ${shop}": ${snap.exact}. Unique selling links: ${snap.productUrls.length}. Sold-section links skipped: ${snap.soldLinks}. Other "item listed by" anchors: ${snap.otherListed}. Open shadow roots walked: ${snap.shadows}. Sample product aria-labels: ${snap.samples.length ? snap.samples.join(' | ') : '(none)'}. Closed shadow roots were not opened.`;
     if (!queued.length)
       return fail(`Depop shop ${shop} was not imported. No candidate anchors were available before the time limit, so this is an incomplete or unrecognized page, not a finished import. ${evidence} Nothing was imported. Sync will not remove listings.`);
+    const how = snap.sold
+      ? ' Stopped at the Sold items section. Sold listings were not queued.'
+      : partial
+        ? ' Scroll stopped before the grid settled, so this may not be the whole shop.'
+        : ' The visible shop grid stopped growing.';
     return {
       ok: true, complete: false, partial, value: [], productUrls: queued,
-      reason: `Depop shop ${shop}: ${queued.length} candidate links queued in page order for a western-boot check (scan cap ${limit}).${partial ? ' Scroll stopped before the grid settled, so this may not be the whole shop.' : ' The visible grid stopped growing.'} ${evidence} Sync will not remove listings.`,
+      reason: `Depop shop ${shop}: ${queued.length} candidate links queued in page order for a western-boot check (scan cap ${limit}).${how} ${evidence} Sync will not remove listings.`,
     };
   } catch (e) {
     return fail(e?.message || 'Depop shop read failed. Nothing was imported.');
