@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  acceptScan, collectIds, depopSellerHandle, explainPageFailure, pageScriptEmpty, readDepopProduct, readDepopShop, NO_FACEBOOK_LISTINGS,
+  acceptScan, collectIds, depopSellerHandle, explainPageFailure, pageScriptEmpty, readDepopProduct, readDepopShop, rejectEmptyDepopShop, NO_FACEBOOK_LISTINGS,
 } from '../extension/import-page.mjs';
 import { actorForJob, allowedBootlisterOrigin, cookieReadUrl, createImportLock, gateWrite, navListenerArmedBeforeTabCreate, planSync, sessionFromCookie, SIGNED_OUT, smokeCap, validateItemEnvelope, withDeadline } from '../extension/import-job.mjs';
 import { itemsApi } from '../lib/items-api.js';
@@ -115,7 +115,7 @@ test('the observed Depop page supplies the listing and the slug is not the accou
   globalThis.fetch = () => { fetched = true; };
   const listed = (href, shop) => ({ href, getAttribute: n => n === 'aria-label' ? `item listed by ${shop}` : '' });
   globalThis.location = { hostname: 'www.depop.com', pathname: `/${SHOP}/`, href: `https://www.depop.com/${SHOP}/` };
-  globalThis.document = { querySelectorAll: () => [
+  globalThis.document = { readyState: 'complete', title: 'nuclear_nostalgia - Depop', body: {}, querySelectorAll: () => [
     { href: 'https://www.depop.com/products/related-card-p10/', getAttribute: () => '' },
     listed(LIVE_PRODUCT, SHOP),
     listed(LIVE_PRODUCT, SHOP),
@@ -128,8 +128,14 @@ test('the observed Depop page supplies the listing and the slug is not the accou
   ] };
   const shop = await readDepopShop(SHOP, Date.now() + 1000, 9);
   assert.equal(fetched, false);
+  assert.equal(shop.ok, true);
   assert.equal(shop.complete, false);
   assert.deepEqual(shop.productUrls, [LIVE_PRODUCT, 'https://www.depop.com/products/benny-caiman-western/']);
+  assert.match(shop.reason, /opening 2 of 6 candidate links \(cap 2\)/);
+  assert.match(shop.reason, /Exact label "item listed by nuclear_nostalgia": 7/);
+  assert.match(shop.reason, /not the whole shop/);
+  assert.deepEqual(JSON.parse(JSON.stringify(shop)), shop);
+  assert.deepEqual(rejectEmptyDepopShop(shop, SHOP), shop.productUrls);
 
   const json = {
     name: 'Y2K brown leather western boots \nWomen’s size 8...',
@@ -185,6 +191,66 @@ test('the observed Depop page supplies the listing and the slug is not the accou
   assert.match(off.error, /not the requested Depop shop/);
   assert.equal(fetched, false);
   assert.equal(planSync(true, true, [LIVE_SLUG], true).sync, false);
+});
+
+test('a Depop shop with no candidate anchors fails instead of importing nothing', async () => {
+  const listed = (href, shop) => ({ href, getAttribute: n => n === 'aria-label' ? `item listed by ${shop}` : '' });
+  globalThis.location = { hostname: 'www.depop.com', pathname: `/${SHOP}/`, href: `https://www.depop.com/${SHOP}/` };
+  globalThis.document = {
+    readyState: 'complete', title: 'nuclear_nostalgia - Depop', body: {},
+    querySelectorAll() { return []; },
+  };
+  const empty = await readDepopShop(SHOP, Date.now() + 500, 2);
+  assert.equal(empty.ok, false);
+  assert.equal(empty.complete, false);
+  assert.match(empty.error, /incomplete or unrecognized page, not a finished import/);
+  assert.match(empty.error, /Product anchors 0/);
+  assert.match(empty.error, /Exact label "item listed by nuclear_nostalgia": 0/);
+  assert.match(empty.error, /readyState complete/);
+  assert.match(empty.error, /Sample product aria-labels: \(none\)/);
+  assert.match(empty.error, /Nothing was imported/);
+  assert.equal(JSON.stringify(empty).includes('0 new'), false);
+  assert.throws(() => acceptScan(empty, 'Depop'), e => { assert.match(e.message, /Product anchors 0/); return true; });
+  assert.throws(() => rejectEmptyDepopShop({ productUrls: [], reason: empty.error }, SHOP), /Nothing was imported/);
+
+  globalThis.document = {
+    readyState: 'interactive', title: 'Just a moment', body: {},
+    querySelectorAll(sel) {
+      if (sel !== 'a[href*="/products/"]') return [];
+      return [{ href: 'https://www.depop.com/products/other-item/', getAttribute: () => 'item listed by someone_else' }];
+    },
+  };
+  const wrong = await readDepopShop(SHOP, Date.now() + 300, 2);
+  assert.equal(wrong.ok, false);
+  assert.match(wrong.error, /Product anchors 1/);
+  assert.match(wrong.error, /Exact label "item listed by nuclear_nostalgia": 0/);
+  assert.match(wrong.error, /item listed by someone_else/);
+  assert.equal(wrong.productUrls, undefined);
+
+  const anchor = listed(LIVE_PRODUCT, SHOP);
+  const shadow = { querySelectorAll(sel) { return sel === 'a[href*="/products/"]' ? [anchor] : []; } };
+  globalThis.document = {
+    readyState: 'complete', title: 'nuclear_nostalgia - Depop', body: {},
+    querySelectorAll(sel) { return sel === '*' ? [{ shadowRoot: shadow }] : []; },
+  };
+  const hidden = await readDepopShop(SHOP, Date.now(), 2);
+  assert.deepEqual(hidden.productUrls, [LIVE_PRODUCT]);
+  assert.match(hidden.reason, /Open shadow roots walked: 1/);
+
+  let passes = 0;
+  globalThis.document = {
+    readyState: 'loading', title: 'nuclear_nostalgia - Depop', body: {},
+    querySelectorAll(sel) {
+      if (sel !== 'a[href*="/products/"]') return [];
+      passes += 1;
+      if (passes < 2) return [];
+      return [listed(LIVE_PRODUCT, SHOP), listed('https://www.depop.com/products/benny-caiman-western/', SHOP)];
+    },
+  };
+  const late = await readDepopShop(SHOP, Date.now() + 2000, 2);
+  assert.ok(passes >= 2);
+  assert.deepEqual(late.productUrls, [LIVE_PRODUCT, 'https://www.depop.com/products/benny-caiman-western/']);
+  assert.equal(late.complete, false);
 });
 
 test('a truncated description line is not replaced with the generated heading', async () => {
@@ -385,13 +451,18 @@ test('the committed extension zip matches source and its service worker parses',
   const depop = bg.slice(bg.indexOf('async function importDepop'), bg.indexOf('function importLink'));
   assert.match(depop, /validateItemEnvelope/);
   assert.match(depop, /complete: false/);
+  assert.match(depop, /readDepopShop, 'ISOLATED'/);
+  assert.match(depop, /readDepopProduct, 'ISOLATED'/);
+  assert.equal(depop.includes("'MAIN'"), false);
+  assert.match(depop, /rejectEmptyDepopShop/);
+  assert.match(bg, /info\?\.status === 'complete'/);
   assert.match(bg, /AbortSignal\.timeout\(API_TIMEOUT_MS\)/);
   assert.match(bg, /expectedId: expected/);
   assert.match(read('app/screen.js').toString(), /n\.skipped/);
   assert.match(read('extension/popup.js').toString(), /r\.skipped/);
   const manifest = JSON.parse(read('extension/manifest.json').toString());
-  assert.equal(manifest.version, '0.9');
-  const zip = readZip(read('public/bootlister-extension-0.9.zip'));
+  assert.equal(manifest.version, '0.10');
+  const zip = readZip(read('public/bootlister-extension-0.10.zip'));
   const loop = bg.slice(bg.indexOf('async function importAll'), bg.indexOf('async function importFacebook'));
   assert.equal(loop.includes('retry(() => importOne'), false);
   assert.match(bg, /x-import-job/);

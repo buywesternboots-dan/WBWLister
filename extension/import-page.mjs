@@ -23,6 +23,14 @@ export function acceptScan(raw, site) {
   return { items: data.value, productUrls, complete: data.complete === true, reason: typeof data.reason === 'string' ? data.reason : '' };
 }
 
+// An accepted scan with no product links is not a finished import. Callers must not report "0 new".
+export function rejectEmptyDepopShop(scan, shop) {
+  const urls = (scan?.productUrls || []).filter(u => typeof u === 'string' && /^https:\/\/www\.depop\.com\/products\/[^/]+\/$/.test(u)).slice(0, 2);
+  if (urls.length) return urls;
+  const why = typeof scan?.reason === 'string' && scan.reason ? scan.reason : `Depop shop ${shop} produced no candidate listings.`;
+  throw new Error(/Nothing was imported/.test(why) ? why : `${why} Nothing was imported.`);
+}
+
 export function validateFacebookListing(item) {
   if (!item || typeof item !== 'object') return null;
   if (!/^\d{5,20}$/.test(String(item.source_id || ''))) return null;
@@ -72,37 +80,77 @@ export function depopSellerHandle(href) {
   return parts[0];
 }
 
-// Runs in the Depop shop page. Product links are collected only. The slug is not the account,
-// and this does not call Depop's product feed.
+// Runs in the Depop shop tab. Listing anchors are counted in the light DOM and in open shadow
+// roots. A document load is not the product grid: this waits until the cap is filled or the
+// deadline passes. Zero candidates is an incomplete read, not an empty import. No Depop feed API.
 export async function readDepopShop(shop, deadlineMs, cap = 2) {
   const fail = error => ({ ok: false, complete: false, error });
   const limit = Number.isInteger(cap) && cap >= 1 ? Math.min(cap, 2) : 2;
+  const clip = (s, n) => String(s ?? '').replace(/\s+/g, ' ').trim().slice(0, n);
   try {
     if (!/^[\w.-]+$/.test(shop || '') || shop === 'products') return fail('That is not a Depop shop link. Nothing was imported.');
-    const host = String(location.hostname || '').replace(/^www\./, '');
-    const path = String(location.pathname || '');
-    if (host !== 'depop.com' || (path !== `/${shop}` && path !== `/${shop}/`))
-      return fail(`This tab is not the requested Depop shop ${shop}. Nothing was imported.`);
-    if (!(deadlineMs > Date.now())) return fail('Depop shop read timed out before the page was read. Nothing was imported.');
-    const productUrls = [];
-    const seen = new Set();
+    const onShop = () => {
+      const host = String(location.hostname || '').replace(/^www\./, '');
+      const path = String(location.pathname || '');
+      return host === 'depop.com' && (path === `/${shop}` || path === `/${shop}/`);
+    };
+    if (!onShop()) return fail(`This tab is not the requested Depop shop ${shop} (${clip(location.href, 180) || 'no url'}). Nothing was imported.`);
     const listedBy = `item listed by ${shop}`;
-    for (const a of document.querySelectorAll('a[href*="/products/"]')) {
-      if ((a.getAttribute?.('aria-label') || '') !== listedBy) continue;
-      let slug = '';
-      try {
-        const u = new URL(a.href, location.href);
-        if (u.hostname.replace(/^www\./, '') !== 'depop.com') continue;
-        slug = u.pathname.match(/^\/products\/([^/]+)\/?$/)?.[1] || '';
-      } catch { continue; }
-      if (!slug || seen.has(slug)) continue;
-      seen.add(slug);
-      productUrls.push(`https://www.depop.com/products/${slug}/`);
-      if (productUrls.length >= limit) break;
+    const collect = () => {
+      const bag = { anchors: [], shadows: 0 };
+      const walk = (root, depth) => {
+        if (!root || typeof root.querySelectorAll !== 'function' || depth > 4) return;
+        for (const a of root.querySelectorAll('a[href*="/products/"]')) bag.anchors.push(a);
+        for (const el of root.querySelectorAll('*')) {
+          if (!el || !el.shadowRoot) continue;
+          bag.shadows += 1;
+          walk(el.shadowRoot, depth + 1);
+        }
+      };
+      walk(document, 0);
+      const productUrls = [];
+      const seen = new Set();
+      const samples = [];
+      let exact = 0;
+      let otherListed = 0;
+      for (const a of bag.anchors) {
+        const label = String(a.getAttribute?.('aria-label') || '');
+        const shown = clip(label, 80);
+        if (shown && samples.length < 3 && !samples.includes(shown)) samples.push(shown);
+        if (label !== listedBy) {
+          if (label.startsWith('item listed by ')) otherListed += 1;
+          continue;
+        }
+        exact += 1;
+        let slug = '';
+        try {
+          const u = new URL(a.href, location.href);
+          if (u.hostname.replace(/^www\./, '') !== 'depop.com') continue;
+          slug = u.pathname.match(/^\/products\/([^/]+)\/?$/)?.[1] || '';
+        } catch { continue; }
+        if (!slug || seen.has(slug)) continue;
+        seen.add(slug);
+        productUrls.push(`https://www.depop.com/products/${slug}/`);
+      }
+      return {
+        productUrls, exact, otherListed, samples, shadows: bag.shadows, productAnchors: bag.anchors.length,
+        readyState: String(document.readyState || 'unknown'), title: clip(document.title, 120),
+        href: clip(location.href, 180), hasBody: !!document.body,
+      };
+    };
+    let snap = collect();
+    while (snap.productUrls.length < limit && deadlineMs > Date.now() + 200) {
+      await new Promise(r => setTimeout(r, 400));
+      if (!onShop()) return fail(`This tab left the requested Depop shop ${shop} (${clip(location.href, 180)}). Nothing was imported.`);
+      snap = collect();
     }
+    const opened = snap.productUrls.slice(0, limit);
+    const evidence = `Tab ${snap.href}. readyState ${snap.readyState}. Title "${snap.title || '(none)'}". Document body ${snap.hasBody ? 'present' : 'missing'}. Product anchors ${snap.productAnchors}. Exact label "item listed by ${shop}": ${snap.exact}. Unique product links: ${snap.productUrls.length}. Other "item listed by" anchors: ${snap.otherListed}. Open shadow roots walked: ${snap.shadows}. Sample product aria-labels: ${snap.samples.length ? snap.samples.join(' | ') : '(none)'}. Closed shadow roots were not opened.`;
+    if (!opened.length)
+      return fail(`Depop shop ${shop} was not imported. No candidate anchors were available before the time limit, so this is an incomplete or unrecognized page, not a finished import. ${evidence} Nothing was imported. Sync will not remove listings.`);
     return {
-      ok: true, complete: false, value: [], productUrls,
-      reason: `The shop page is ${shop}. Only anchors labeled "item listed by ${shop}" are candidates, in page order, and at most ${limit} are opened. A product slug is not the account. Sync will not remove listings.`,
+      ok: true, complete: false, value: [], productUrls: opened,
+      reason: `Depop shop ${shop}: opening ${opened.length} of ${snap.productUrls.length} candidate links (cap ${limit}). This is not the whole shop. ${evidence} Sync will not remove listings.`,
     };
   } catch (e) {
     return fail(e?.message || 'Depop shop read failed. Nothing was imported.');

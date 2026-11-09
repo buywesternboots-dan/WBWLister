@@ -1,4 +1,4 @@
-import { acceptScan, collectIds, explainPageFailure, readDepopProduct, readDepopShop, NO_FACEBOOK_LISTINGS } from './import-page.mjs';
+import { acceptScan, collectIds, explainPageFailure, readDepopProduct, readDepopShop, rejectEmptyDepopShop, NO_FACEBOOK_LISTINGS } from './import-page.mjs';
 import { API_TIMEOUT_MS, actorForJob, allowedBootlisterOrigin, BOOTLISTER_ORIGINS, cookieReadUrl, createImportLock, gateWrite, JOB_TIMEOUT_MS, planSync, sessionFromCookie, SIGNED_OUT, smokeCap, validateItemEnvelope, withDeadline } from './import-job.mjs';
 
 const ITEM = /facebook\.com\/marketplace\/item\/(\d+)/;
@@ -136,10 +136,12 @@ async function runCall(tabId, func, world, args, budgetMs, site) {
 }
 // Resolves when the tab finishes loading (or after 20 s, whichever is first).
 const loaded = tabId => new Promise(res => {
-  const done = () => { chrome.tabs.onUpdated.removeListener(l); clearTimeout(t); res(); };
+  let settled = false;
+  const done = () => { if (settled) return; settled = true; chrome.tabs.onUpdated.removeListener(l); clearTimeout(t); res(); };
   const l = (id, info) => id === tabId && info.status === 'complete' && done();
   const t = setTimeout(done, 20000);
   chrome.tabs.onUpdated.addListener(l);
+  chrome.tabs.get(tabId).then(info => { if (info?.status === 'complete') done(); }).catch(() => {});
 });
 // Opens url in a tab, waits for it to settle, runs fn(tabId, site). Leaves the tab open when the site didn't load.
 async function inTab(url, settle, fn, active = true) {
@@ -211,29 +213,35 @@ async function importFacebook(profileId, sync) {
     importOne: id => importListing(`https://www.facebook.com/marketplace/item/${id}/`), name: id => `Listing ${id}` });
 }
 
-// Depop: one visit to the shop reads every listing from Depop's own feed — no per-listing visits.
+// Depop: the shop tab's own document. Isolated world, so page scripts cannot replace querySelectorAll.
+// The result is a plain object. Zero candidates throw before any write and before "Done".
 async function importDepop(shop, sync) {
   const known = new Set(await api('GET', null, '?source=depop')); // first: fails if the seller isn't set up
   status('Reading the Depop shop…');
   const cap = lock.job?.limit;
-  const raw = await inTab(`https://www.depop.com/${shop}/`, 4000,
-    (id, site) => runCall(id, readDepopShop, 'MAIN', [shop, Date.now() + 15000, cap], 20000, site));
+  const raw = await inTab(`https://www.depop.com/${shop}/`, 250,
+    (id, site) => runCall(id, readDepopShop, 'ISOLATED', [shop, Date.now() + 15000, cap], 20000, site));
   const scan = acceptScan(raw, 'Depop');
+  const productUrls = rejectEmptyDepopShop(scan, shop);
   if (scan.reason) status(scan.reason);
   const todo = [];
   const notes = [scan.reason].filter(Boolean);
-  for (const productUrl of scan.productUrls.slice(0, cap)) {
+  for (const productUrl of productUrls) {
     const gate = gateWrite({ deadline: lock.job?.deadline, written: todo.length, cap });
     if (!gate.ok) { notes.push(gate.reason); break; }
     const slug = productUrl.match(/\/products\/([^/]+)\/?$/)?.[1] || '';
     try {
-      const page = await inTab(productUrl, 2500, (id, site) => runCall(id, readDepopProduct, 'MAIN', [shop, Date.now() + 15000], 20000, site));
+      const page = await inTab(productUrl, 2500, (id, site) => runCall(id, readDepopProduct, 'ISOLATED', [shop, Date.now() + 15000], 20000, site));
       const product = acceptScan(page, 'Depop');
       const item = validateItemEnvelope(product.items[0], { source: 'depop', expectedId: slug });
       if (!item) throw new Error(`Depop product ${slug} did not match the requested shop ${shop}. Nothing was written for it.`);
       if (product.reason) notes.push(product.reason);
       todo.push(item);
     } catch (e) { notes.push(`${slug || productUrl} skipped: ${e.message}`); }
+  }
+  if (!todo.length) {
+    const detail = notes.filter(Boolean).join(' ');
+    throw new Error(detail.includes('Nothing was imported') ? detail : `${detail} Nothing was imported.`.trim());
   }
   const result = await importAll({ source: 'depop', ids: todo.map(i => i.source_id), sync, complete: false, todo,
     importOne: send, name: i => `"${(i.title || '').slice(0, 40)}"` });
