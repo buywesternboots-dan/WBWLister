@@ -273,7 +273,7 @@ describe('List Perfectly privacy and sync', () => {
       row({ SKU: 'sold-already', Date: SOLD_ON, SOLD: 'SOLD', 'Sold Price': 'SOLDPRICE-SECRET' }),
     ]);
     const opened = await runLpImport(first, db);
-    assert.deepEqual({ ...opened, sourceIds: opened.sourceIds.length }, { new: 2, updated: 0, sold: 0, notCowboy: 0, skipped: 1, sourceIds: 3 });
+    assert.deepEqual({ ...opened, sourceIds: opened.sourceIds.length }, { new: 2, updated: 0, sold: 0, notCowboy: 0, skipped: 1, missingGroupPrice: 0, sourceIds: 3 });
     assert.equal(db.rows.length, 2);
     assert.equal(db.rows.every(r => r.photos[0].startsWith('https://media.listperfectly.com/')), true);
 

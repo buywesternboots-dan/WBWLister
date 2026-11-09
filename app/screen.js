@@ -37,7 +37,8 @@ const PRESETS = { brand: ['Unbranded', 'Custom'], size: ['Estimated'] }; // one-
 const FILTERS = { check: ['Needs a check', needsCheck], approved: ['Approved', i => !needsCheck(i)],
   ready: ['Ready', isReady], idinfo: ['Has ID info', i => i.id_photos?.length > 0], verify: ['To verify', i => unverified(i).length > 0],
   ...Object.fromEntries(REQUIRED.map(f => [f, [`Missing ${label(f)}`, i => !i[f]]])),
-  ...Object.fromEntries(ALERT.map(f => [f, [`No ${label(f).toLowerCase()}`, i => !i[f]]])) };
+  ...Object.fromEntries(ALERT.map(f => [f, [`No ${label(f).toLowerCase()}`, i => !i[f]]])),
+  nogroup: ['No group price', i => !!i.missing_group_price] };
 // Sorts: most likely a boot first, or newest import day first (same day: most likely boot first).
 const SORTS = {
   likely: (a, b) => (b.boot_score ?? 0) - (a.boot_score ?? 0) || b.created_at.localeCompare(a.created_at),
@@ -237,7 +238,7 @@ export default function Screen({ admin = false }) {
     try {
       const parts = packCsvChunks(await file.text());
       if (!parts.length) throw new Error('No listings found in that CSV.');
-      const totals = { new: 0, updated: 0, sold: 0, notCowboy: 0, skipped: 0 }, seen = [];
+      const totals = { new: 0, updated: 0, sold: 0, notCowboy: 0, skipped: 0, missingGroupPrice: 0 }, seen = [];
       const total = parts.reduce((n, p) => n + p.count, 0);
       setRun({ label: 'Importing List Perfectly CSV', done: 0, total });
       let doneRows = 0;
@@ -249,7 +250,8 @@ export default function Screen({ admin = false }) {
         setRun({ done: doneRows });
       }
       totals.sold += (await api('POST', { done: true, sourceIds: seen }, '', '/api/import/lp')).removed || 0;
-      setRunState({ label: `${totals.new} new, ${totals.updated} updated, ${totals.sold} sold or removed, ${totals.notCowboy} not cowboy boots, ${totals.skipped} skipped` });
+      const missingGroup = totals.missingGroupPrice ? `, ${totals.missingGroupPrice} missing a group price` : '';
+      setRunState({ label: `${totals.new} new, ${totals.updated} updated, ${totals.sold} sold or removed, ${totals.notCowboy} not cowboy boots, ${totals.skipped} skipped${missingGroup}` });
     } catch (e) { setRunState(null); setErr(e.message); }
     load(); loadSellers();
   };
@@ -355,7 +357,7 @@ export default function Screen({ admin = false }) {
         return <section key={k}>
           <h2>{l} ({list.length})
             {Object.entries(FILTERS).map(([fk, [fl, test]]) => { const c = list.filter(test).length;
-              return (c > 0 || fk === 'ready' || fk === 'check') && <button key={fk} className={`chip ${fk in LABELS ? 'miss' : ''} ${fk === 'check' ? 'miss' : ''} ${filter[k] === fk ? 'on' : ''}`}
+              return (c > 0 || fk === 'ready' || fk === 'check') && <button key={fk} className={`chip ${fk in LABELS || fk === 'nogroup' ? 'miss' : ''} ${fk === 'check' ? 'miss' : ''} ${filter[k] === fk ? 'on' : ''}`}
                 onClick={() => setFilter({ ...filter, [k]: filter[k] === fk ? null : fk })}>{fl} ({c})</button>; })}
           </h2>
           {visible.map(i => <div key={i.id} className="item">
@@ -371,6 +373,7 @@ export default function Screen({ admin = false }) {
                   {PRESETS[f]?.map(p => <button key={p} type="button" className="preset" onClick={() => setEdit({ ...edit, [f]: p })}>{p}</button>)}</span>
                 {f === 'description' ? <textarea rows="4" value={edit[f] ?? ''} onChange={setField(f)} />
                   : <input list={CHOICES[f] && `dl-${f}`} value={(f === 'width' ? displayWidth(edit[f]) : edit[f]) ?? ''} onChange={setField(f)} />}</label>)}
+              {i.missing_group_price && <small className="err">Missing group price — spreadsheet price kept</small>}
               {i.status === 'published' && <Share item={i} seller={current} reload={load} />}
               <span><button className="primary" onClick={save}>Save (marks all verified)</button>
                 {needsCheck(i) && <button type="button" className="primary" onClick={() => approve(i)}>{admin ? 'Approve for seller' : 'Approve / ready to go live'}</button>}
@@ -389,9 +392,12 @@ export default function Screen({ admin = false }) {
               {missing(i).length > 0 && <small className="err">Missing: {missing(i).map(label).join(', ')}</small>}
               {unverified(i).length > 0 && <small className="warn">Verify: {unverified(i).map(label).join(', ')}</small>}
               {needsCheck(i) ? <small className="err">{admin ? "Needs the seller's check" : 'Needs your check'}</small> : <small>Approved by {i.approved_by} on {String(i.approved_at).slice(0, 10)}</small>}
-              <dl>{FIELDS.filter(f => f !== 'title' && f !== 'description' && (i[f] || flagged(i).includes(f) || ['wbw_price', 'price', 'brand', 'sized_for', 'size', 'condition', 'material'].includes(f))).map(f =>
+              <dl>
+                {i.missing_group_price && <div className="err"><dt>Missing group price</dt><dd>Spreadsheet price kept</dd></div>}
+                {FIELDS.filter(f => f !== 'title' && f !== 'description' && (i[f] || flagged(i).includes(f) || ['wbw_price', 'price', 'brand', 'sized_for', 'size', 'condition', 'material'].includes(f))).map(f =>
                 <div key={f} className={flagged(i).includes(f) ? 'err' : unverified(i).includes(f) ? 'guess' : ''}>
-                <dt>{label(f)}</dt><dd>{f.includes('price') && i[f] ? `$${Number(i[f]).toFixed(2)}` : i[f] || '—'}</dd></div>)}</dl>
+                <dt>{label(f)}</dt><dd>{f.includes('price') && i[f] ? `$${Number(i[f]).toFixed(2)}` : i[f] || '—'}</dd></div>)}
+              </dl>
               {i.description && <p className="desc">{i.description}</p>}
               <small>Tap to edit</small>
               <span>
