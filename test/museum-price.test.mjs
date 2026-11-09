@@ -104,7 +104,13 @@ describe('group price in comments', () => {
       'group price ~$100',
       'group price $100.999',
       'group price $007',
+      'Group price: $\nMin Price $174',
+      'Group price: $\n174',
+      'Group price:\n$50',
     ]) assert.deepEqual(parseGroupPrice(text), { price: null, missing: true }, text);
+    assert.deepEqual(parseGroupPrice('Group Price: 50'), { price: '50', missing: false });
+    assert.deepEqual(parseGroupPrice('Group price: 975'), { price: '975', missing: false });
+    assert.deepEqual(parseGroupPrice('Group price: $265\nMin Price $\nCeiling: $\nF1 1st Floor: $ \nF2 2nd Floor: $'), { price: '265', missing: false });
   });
 
   it('uses 135 from the Seller Notes sample and ignores the other amounts and dates', () => {
@@ -175,6 +181,40 @@ describe('Dan Hoffenberg List Perfectly import', () => {
     const db3 = memory();
     await runLpImport(`Title,SKU,Price,seller notes\n"Lucchese cowboy boots","s3","288","${tight}"\n`, db3, { name: 'other', display_name: '@DanHoffenberg' });
     assert.equal(db3.rows[0].price, '135');
+  });
+
+  it('prices the trimmed List Perfectly export for @DanHoffenberg', async () => {
+    const text = read('test/fixtures/lp-museum-notes.csv');
+    const mapped = mapLpCsv(text, { museum: true });
+    const priced = mapped.filter(m => !m.missing_group_price);
+    const missing = mapped.filter(m => m.missing_group_price);
+    assert.equal(mapped.length, 58);
+    assert.equal(priced.length, 55);
+    assert.equal(missing.length, 3);
+    assert.equal(mapped[0].raw.price, '135');
+    const priceOf = start => mapped.find(m => m.raw.title.startsWith(start)).raw.price;
+    assert.equal(priceOf('Roper Sidewinder'), '50');
+    assert.equal(priceOf('Tony Lama Timber Rattlesnake'), '975');
+    assert.equal(priceOf('Vintage Anaconda'), '265');
+    assert.equal(priceOf('Longhorn Mens'), '178');
+    assert.equal(priceOf('New Cowboy Western Boots Mens Size 8.5D'), '115');
+    assert.equal(priceOf('Justin Cowboy Western Boots Mens 9D'), '78');
+    assert.deepEqual(missing.map(m => m.raw.price), ['178', '115', '78']);
+    const db = memory();
+    const opened = await runLpImport(text, db, '@DanHoffenberg');
+    // 52 cowboy boots are repriced. 3 cowboy boots have no group price and are flagged.
+    // 3 other shoes also have a group price, and the cowboy filter does not import them.
+    assert.equal(opened.missingGroupPrice, 3);
+    assert.equal(opened.notCowboy, 3);
+    assert.equal(opened.new, 55);
+    assert.equal(db.rows.filter(r => !r.missing_group_price).length, 52);
+    assert.equal(db.rows.filter(r => r.missing_group_price).length, 3);
+    const blob = JSON.stringify(db.rows);
+    assert.equal(blob.includes('PHOTOS BY'), false);
+    assert.equal(blob.includes('Min Price'), false);
+    assert.equal(db.rows.find(r => r.title.startsWith('Lucchese 1883')).price, '135');
+    assert.equal(db.rows.find(r => r.title.startsWith('Longhorn Mens')).missing_group_price, true);
+    assert.equal(db.rows.find(r => r.title.startsWith('Longhorn Mens')).price, '178');
   });
 
   it('uses the group price for the username @DanHoffenberg', async () => {
