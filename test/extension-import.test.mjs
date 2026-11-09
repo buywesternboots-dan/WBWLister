@@ -399,6 +399,15 @@ Made in USA
   }).eligible, true);
   assert.equal(westernBootDecision({ title: 'STAUD ida tote bag', description: 'cowboy boots in the photo\n#westernboots' }).kind, 'non-footwear');
   assert.equal(westernBootDecision({ title: 'Leather wallet', description: 'Tony Lama cowboy boots' }).eligible, false);
+  const buckle = westernBootDecision({ title: '1970s vintage cowboy boot belt buckle', description: '1970s vintage cowboy boot belt buckle\n$25', price: '25' });
+  assert.equal(buckle.eligible, false);
+  assert.equal(buckle.kind, 'non-footwear');
+  for (const title of ['boot charm', 'boot jack', 'boot bag', 'cowboy boot bolo']) {
+    assert.equal(westernBootDecision({ title, description: title }).eligible, false, title);
+  }
+  const summary = bootScanSummary({ scanned: 57, candidates: 72, eligible: 38, skipped: { 'non-footwear': 8, uncertain: 1, already: 15 }, writeCap: 100 });
+  assert.equal(summary.includes('already imported'), false);
+  assert.match(summary, /Skipped 8 non-footwear, 0 other footwear, 1 uncertain, 0 unread/);
 });
 
 test('the shop keeps scrolling past the first screen of links', async () => {
@@ -643,6 +652,7 @@ test('the committed extension zip matches source and its service worker parses',
   assert.match(depop, /CANDIDATE_CAP/);
   assert.match(depop, /westernBootDecision/);
   assert.match(depop, /bootScanSummary/);
+  assert.match(depop, /result\.duplicate = \(result\.duplicate \|\| 0\) \+ skipped\.already/);
   assert.match(depop, /extendDeadline/);
   assert.equal(CANDIDATE_CAP, 200);
   assert.match(bg, /info\?\.status === 'complete'/);
@@ -653,8 +663,8 @@ test('the committed extension zip matches source and its service worker parses',
   assert.match(read('app/screen.js').toString(), /Source condition/);
   assert.match(read('extension/popup.js').toString(), /r\.skipped/);
   const manifest = JSON.parse(read('extension/manifest.json').toString());
-  assert.equal(manifest.version, '0.13');
-  const zip = readZip(read('public/bootlister-extension-0.13.zip'));
+  assert.equal(manifest.version, '0.14');
+  const zip = readZip(read('public/bootlister-extension-0.14.zip'));
   const loop = bg.slice(bg.indexOf('async function importAll'), bg.indexOf('async function importFacebook'));
   assert.equal(loop.includes('retry(() => importOne'), false);
   assert.match(bg, /x-import-job/);

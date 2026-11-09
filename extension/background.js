@@ -266,6 +266,7 @@ async function importDepop(shop, sync) {
   const result = await importAll({ source: 'depop', ids: todo.map(i => i.source_id), sync, complete: false, todo,
     importOne: send, name: i => `"${(i.title || '').slice(0, 40)}"` });
   result.partial = partial || result.partial === true;
+  result.duplicate = (result.duplicate || 0) + skipped.already;
   result.skipped = [summary, result.skipped, ...notes].filter(Boolean).join(' ');
   return result;
 }
