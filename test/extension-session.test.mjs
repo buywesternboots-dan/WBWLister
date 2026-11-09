@@ -10,14 +10,14 @@ const SECRET = 'site-session-secret';
 
 function element(id) {
   return {
-    id, hidden: true, href: '', value: '', textContent: '', disabled: false, style: {}, children: [],
+    id, hidden: true, href: '', value: '', textContent: '', disabled: false, checked: false, style: {}, children: [],
     replaceChildren() { this.children = []; },
     append(child) { this.children.push(child); },
   };
 }
 
 function popupDocument() {
-  const ids = ['status', 'signin', 'seller', 'profileUrl', 'limit', 'log', 'bar', 'barLabel', 'profile', 'sync', 'listing', 'ver'];
+  const ids = ['status', 'signin', 'seller', 'profileUrl', 'limit', 'recheck', 'log', 'bar', 'barLabel', 'profile', 'sync', 'listing', 'ver'];
   const nodes = Object.fromEntries(ids.map(id => [id, element(id)]));
   return {
     getElementById: id => nodes[id],

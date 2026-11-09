@@ -48,14 +48,18 @@ export function westernBootDecision(item) {
   return { eligible: false, kind: 'uncertain', reason: 'The listing does not clearly say cowboy or western boot. Uncertain items are not imported. The product slug was not used.' };
 }
 
-export function bootScanSummary({ scanned = 0, candidates = 0, eligible = 0, unopened = 0, skipped = {}, writeCap = 100, partial = false } = {}) {
+export function bootScanSummary({ scanned = 0, candidates = 0, eligible = 0, unopened = 0, skipped = {}, writeCap = 100, partial = false, limitHit = false } = {}) {
   const bags = skipped['non-footwear'] || 0;
   const shoes = skipped['other-footwear'] || 0;
   const unsure = skipped.uncertain || 0;
   const unread = skipped.unread || 0;
+  const already = skipped.already || 0;
+  const known = already ? ` ${already} already imported (skipped, not reopened).` : '';
   const rest = unopened === 1 ? ' 1 candidate link was not opened.' : unopened ? ` ${unopened} candidate links were not opened.` : '';
-  const coverage = partial || unopened
-    ? 'Partial coverage. This scan is not the whole shop.'
-    : 'Every queued candidate was checked. The visible shop grid had stopped growing.';
-  return `Scanned ${scanned} of ${candidates} candidate pages. Skipped ${bags} non-footwear, ${shoes} other footwear, ${unsure} uncertain, ${unread} unread. Eligible western boots: ${eligible}.${rest} Import limit ${writeCap}. ${coverage} Sync will not remove listings.`;
+  const coverage = limitHit
+    ? 'Shop scroll hit its read limit before the grid settled. This may not be the whole shop.'
+    : partial || unopened
+      ? 'Partial coverage. This scan is not the whole shop.'
+      : 'Every queued candidate was checked. The visible shop grid had stopped growing.';
+  return `Scanned ${scanned} of ${candidates} candidate pages.${known} Skipped ${bags} non-footwear, ${shoes} other footwear, ${unsure} uncertain, ${unread} unread. Eligible western boots: ${eligible}.${rest} Import limit ${writeCap}. ${coverage} Sync will not remove listings.`;
 }
