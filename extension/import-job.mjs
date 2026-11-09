@@ -1,7 +1,10 @@
 // Import orchestration that does not touch Chrome. The service worker freezes one job at a time.
 
 // Smoke runs stay tiny. A higher number in the popup cannot raise this.
+// The shop may be scanned past this cap so later western boots are not hidden behind bags.
 export const SMOKE_CAP = 2;
+export const SHOP_SCAN_CAP = 24;
+export const SCAN_RESERVE_MS = 8000;
 export const API_TIMEOUT_MS = 20000;
 export const JOB_TIMEOUT_MS = 120000;
 
@@ -19,6 +22,11 @@ export function gateWrite({ deadline, written, cap }) {
   if ((written || 0) >= limit)
     return { ok: false, reason: `Smoke test limit is ${limit} listing${limit === 1 ? '' : 's'} per run. Sync will not remove listings.` };
   return { ok: true };
+}
+
+// A product-page read needs time to finish. Near the job deadline, do not open another one.
+export function scanWindowOpen(deadline, now = Date.now()) {
+  return typeof deadline === 'number' && deadline - now > SCAN_RESERVE_MS;
 }
 
 export const BOOTLISTER_ORIGINS = Object.freeze([

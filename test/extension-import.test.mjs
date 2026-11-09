@@ -8,7 +8,8 @@ import { fileURLToPath } from 'node:url';
 import {
   acceptScan, collectIds, depopSellerHandle, explainPageFailure, pageScriptEmpty, readDepopProduct, readDepopShop, rejectEmptyDepopShop, NO_FACEBOOK_LISTINGS,
 } from '../extension/import-page.mjs';
-import { actorForJob, allowedBootlisterOrigin, cookieReadUrl, createImportLock, gateWrite, navListenerArmedBeforeTabCreate, planSync, sessionFromCookie, SIGNED_OUT, smokeCap, validateItemEnvelope, withDeadline } from '../extension/import-job.mjs';
+import { westernBootDecision, bootScanSummary } from '../extension/boot-gate.mjs';
+import { actorForJob, allowedBootlisterOrigin, cookieReadUrl, createImportLock, gateWrite, navListenerArmedBeforeTabCreate, planSync, scanWindowOpen, sessionFromCookie, SHOP_SCAN_CAP, SIGNED_OUT, smokeCap, validateItemEnvelope, withDeadline } from '../extension/import-job.mjs';
 import { itemsApi } from '../lib/items-api.js';
 import { nextImportCount } from '../lib/import-cap.js';
 import { sessionToken } from '../lib/session.js';
@@ -126,12 +127,20 @@ test('the observed Depop page supplies the listing and the slug is not the accou
     listed('https://www.depop.com/products/old-west-suede/', SHOP),
     listed('https://www.depop.com/products/not-this-shop/', 'someone_else'),
   ] };
-  const shop = await readDepopShop(SHOP, Date.now() + 1000, 9);
+  const shop = await readDepopShop(SHOP, Date.now(), 9);
   assert.equal(fetched, false);
   assert.equal(shop.ok, true);
   assert.equal(shop.complete, false);
-  assert.deepEqual(shop.productUrls, [LIVE_PRODUCT, 'https://www.depop.com/products/benny-caiman-western/']);
-  assert.match(shop.reason, /opening 2 of 6 candidate links \(cap 2\)/);
+  assert.deepEqual(shop.productUrls, [
+    LIVE_PRODUCT,
+    'https://www.depop.com/products/benny-caiman-western/',
+    'https://www.depop.com/products/corral-flaming-skull/',
+    'https://www.depop.com/products/rivers-eel/',
+    'https://www.depop.com/products/nocona-boots/',
+    'https://www.depop.com/products/old-west-suede/',
+  ]);
+  assert.match(shop.reason, /6 candidate links queued in page order for a western-boot check \(scan cap 9\)/);
+  assert.match(shop.reason, /At most 2 will be written/);
   assert.match(shop.reason, /Exact label "item listed by nuclear_nostalgia": 7/);
   assert.match(shop.reason, /not the whole shop/);
   assert.deepEqual(JSON.parse(JSON.stringify(shop)), shop);
@@ -316,7 +325,7 @@ test('one import job can create two listings and not a third', async () => {
       if (key === 'authorization') return 'Bearer import-test';
       return '';
     } },
-    json: async () => ({ source, source_id: id, title: 'Boots', description: 'd', price: '50.00', photos: ['https://example.test/a.jpg'] }),
+    json: async () => ({ source, source_id: id, title: 'Lucchese cowboy boots', description: 'Lucchese cowboy boots\nSize 10', price: '50.00', photos: ['https://example.test/a.jpg'] }),
   }, db, env);
   assert.equal((await call(jobA, 'one')).item.id, 'one');
   assert.equal((await call(jobA, 'two')).item.id, 'two');
@@ -324,6 +333,81 @@ test('one import job can create two listings and not a third', async () => {
   assert.equal((await call(jobB, 'three')).item.id, 'three');
   await assert.rejects(() => call('1', 'four'), /missing its job/);
   assert.equal(read('lib/items-api.js').toString().includes('new Map'), false);
+});
+
+test('only cowboy or western boots are eligible, and bags ahead of boots are skipped', async () => {
+  const briefcase = { title: 'COACH Hamilton sport calf leather briefcase', description: 'COACH Hamilton sport calf leather briefcase', source_id: 'western-cowboy-boots-slug' };
+  const tote = { title: 'STAUD ida tote bag', description: 'STAUD ida tote bag\n$150', source_id: 'boots' };
+  const sneaker = { title: 'Black leather sneakers', description: 'Black leather sneakers\nSize 8' };
+  const heels = { title: 'Leather high heels', description: 'Leather high heels\nSize 8' };
+  const hiking = { title: 'Hiking boots', description: 'Hiking boots\nSize 10' };
+  const jeans = { title: 'Bootcut jeans', description: 'Bootcut jeans' };
+  const boot = { title: 'Y2K brown leather western boots', description: LIVE_DESC, source_id: 'not-a-boot-slug' };
+  const second = { title: 'Lucchese cowboy boots', description: 'Lucchese cowboy boots\nMen shoe size 10', source_id: 'tote-bag' };
+  const third = { title: 'Roper boots', description: 'Vintage roper boots\nSize 9' };
+  for (const bag of [briefcase, tote]) {
+    const decision = westernBootDecision(bag);
+    assert.equal(decision.eligible, false);
+    assert.equal(decision.kind, 'non-footwear');
+    assert.match(decision.reason, /slug was not used/);
+  }
+  assert.equal(westernBootDecision(sneaker).kind, 'other-footwear');
+  assert.equal(westernBootDecision(heels).kind, 'other-footwear');
+  assert.equal(westernBootDecision(hiking).kind, 'uncertain');
+  assert.equal(westernBootDecision(jeans).eligible, false);
+  assert.equal(westernBootDecision({ title: 'Listing', description: 'Nice leather', source_id: 'y2k-western-cowboy-boots' }).eligible, false);
+  assert.equal(westernBootDecision(boot).eligible, true);
+  assert.equal(westernBootDecision(second).eligible, true);
+  const secret = 'signing-secret';
+  const token = await sessionToken('admin', secret);
+  const env = { NODE_ENV: 'production', ADMIN_PASSWORD: 'staff-secret', APP_PASSWORD: secret };
+  const calls = { claim: 0, create: 0 };
+  const db = {
+    async claimImportWrite() { calls.claim += 1; },
+    async createItem(_seller, raw) { calls.create += 1; raw.sized_for = 'Men'; raw.material_cut = 'Shoulder'; return { id: 'should-not' }; },
+  };
+  const post = body => itemsApi({
+    method: 'POST', url: 'http://localhost/api/items',
+    headers: { get(name) {
+      const key = String(name).toLowerCase();
+      if (key === 'x-auth') return token;
+      if (key === 'x-import-job') return crypto.randomUUID();
+      if (key === 'authorization') return 'Bearer import-test';
+      return '';
+    } },
+    json: async () => body,
+  }, db, env);
+  await assert.rejects(() => post({ ...briefcase, source: 'depop', price: '100', photos: ['https://example.test/a.jpg'] }), /non-footwear/);
+  assert.equal(calls.claim, 0);
+  assert.equal(calls.create, 0);
+  const saved = await post({ ...boot, source: 'depop', price: '50.00', photos: ['https://example.test/a.jpg'] });
+  assert.equal(saved.item.id, 'should-not');
+  assert.equal(calls.claim, 1);
+  assert.equal(calls.create, 1);
+
+  const order = [briefcase, tote, sneaker, boot, second, third];
+  const skipped = { 'non-footwear': 0, 'other-footwear': 0, uncertain: 0, unread: 0 };
+  const eligible = [];
+  let scanned = 0;
+  for (const item of order) {
+    if (eligible.length >= 2) break;
+    if (!scanWindowOpen(Date.now() + 120000)) break;
+    scanned += 1;
+    const decision = westernBootDecision(item);
+    if (!decision.eligible) { skipped[decision.kind] += 1; continue; }
+    eligible.push(item);
+  }
+  assert.deepEqual(eligible.map(i => i.title), ['Y2K brown leather western boots', 'Lucchese cowboy boots']);
+  assert.equal(scanned, 5);
+  assert.equal(order.length - scanned, 1);
+  assert.deepEqual(skipped, { 'non-footwear': 2, 'other-footwear': 1, uncertain: 0, unread: 0 });
+  const summary = bootScanSummary({ scanned, candidates: order.length, eligible: eligible.length, unopened: order.length - scanned, skipped });
+  assert.match(summary, /Scanned 5 of 6/);
+  assert.match(summary, /Skipped 2 non-footwear, 1 other footwear, 0 uncertain/);
+  assert.match(summary, /Eligible western boots: 2/);
+  assert.match(summary, /1 candidate link was not opened/);
+  assert.match(summary, /At most 2 are written/);
+  assert.equal(scanWindowOpen(Date.now() + 1000), false);
 });
 
 test('the extension uses the site session and refuses a hostile origin', () => {
@@ -455,18 +539,22 @@ test('the committed extension zip matches source and its service worker parses',
   assert.match(depop, /readDepopProduct, 'ISOLATED'/);
   assert.equal(depop.includes("'MAIN'"), false);
   assert.match(depop, /rejectEmptyDepopShop/);
+  assert.match(depop, /SHOP_SCAN_CAP/);
+  assert.match(depop, /westernBootDecision/);
+  assert.match(depop, /bootScanSummary/);
+  assert.equal(SHOP_SCAN_CAP, 24);
   assert.match(bg, /info\?\.status === 'complete'/);
   assert.match(bg, /AbortSignal\.timeout\(API_TIMEOUT_MS\)/);
   assert.match(bg, /expectedId: expected/);
   assert.match(read('app/screen.js').toString(), /n\.skipped/);
   assert.match(read('extension/popup.js').toString(), /r\.skipped/);
   const manifest = JSON.parse(read('extension/manifest.json').toString());
-  assert.equal(manifest.version, '0.10');
-  const zip = readZip(read('public/bootlister-extension-0.10.zip'));
+  assert.equal(manifest.version, '0.11');
+  const zip = readZip(read('public/bootlister-extension-0.11.zip'));
   const loop = bg.slice(bg.indexOf('async function importAll'), bg.indexOf('async function importFacebook'));
   assert.equal(loop.includes('retry(() => importOne'), false);
   assert.match(bg, /x-import-job/);
-  const names = ['background.js', 'bridge.js', 'import-page.mjs', 'import-job.mjs', 'manifest.json', 'popup.html', 'popup.js'];
+  const names = ['background.js', 'boot-gate.mjs', 'bridge.js', 'import-page.mjs', 'import-job.mjs', 'manifest.json', 'popup.html', 'popup.js'];
   assert.deepEqual([...zip.keys()].sort(), names.map(n => `wbw-importer/${n}`).sort());
   for (const name of names) assert.deepEqual(zip.get(`wbw-importer/${name}`), read(`extension/${name}`));
   const dir = mkdtempSync(join(tmpdir(), 'bootlister-ext-'));

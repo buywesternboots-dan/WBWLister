@@ -1,5 +1,6 @@
 import { acceptScan, collectIds, explainPageFailure, readDepopProduct, readDepopShop, rejectEmptyDepopShop, NO_FACEBOOK_LISTINGS } from './import-page.mjs';
-import { API_TIMEOUT_MS, actorForJob, allowedBootlisterOrigin, BOOTLISTER_ORIGINS, cookieReadUrl, createImportLock, gateWrite, JOB_TIMEOUT_MS, planSync, sessionFromCookie, SIGNED_OUT, smokeCap, validateItemEnvelope, withDeadline } from './import-job.mjs';
+import { bootScanSummary, westernBootDecision } from './boot-gate.mjs';
+import { API_TIMEOUT_MS, actorForJob, allowedBootlisterOrigin, BOOTLISTER_ORIGINS, cookieReadUrl, createImportLock, gateWrite, JOB_TIMEOUT_MS, planSync, scanWindowOpen, sessionFromCookie, SHOP_SCAN_CAP, SIGNED_OUT, smokeCap, validateItemEnvelope, withDeadline } from './import-job.mjs';
 
 const ITEM = /facebook\.com\/marketplace\/item\/(\d+)/;
 const siteOf = url => /facebook\.com/i.test(url || '') ? 'Facebook' : /depop\.com/i.test(url || '') ? 'Depop' : 'The page';
@@ -115,7 +116,11 @@ async function api(method, body, q = '') {
   if (!r.ok) throw new Error(j.error);
   return j;
 }
-const send = item => api('POST', item);
+const send = item => {
+  const decision = westernBootDecision(item);
+  if (!decision.eligible) throw new Error(`Not a cowboy or western boot (${decision.kind}). ${decision.reason} Nothing was posted.`);
+  return api('POST', item);
+};
 
 // ---- tabs ----
 // Listener goes on before the tab exists so a redirect during creation is still recorded.
@@ -220,32 +225,34 @@ async function importDepop(shop, sync) {
   status('Reading the Depop shop…');
   const cap = lock.job?.limit;
   const raw = await inTab(`https://www.depop.com/${shop}/`, 250,
-    (id, site) => runCall(id, readDepopShop, 'ISOLATED', [shop, Date.now() + 15000, cap], 20000, site));
+    (id, site) => runCall(id, readDepopShop, 'ISOLATED', [shop, Date.now() + 15000, SHOP_SCAN_CAP], 20000, site));
   const scan = acceptScan(raw, 'Depop');
   const productUrls = rejectEmptyDepopShop(scan, shop);
   if (scan.reason) status(scan.reason);
   const todo = [];
+  const skipped = { 'non-footwear': 0, 'other-footwear': 0, uncertain: 0, unread: 0 };
   const notes = [scan.reason].filter(Boolean);
+  let scanned = 0;
   for (const productUrl of productUrls) {
-    const gate = gateWrite({ deadline: lock.job?.deadline, written: todo.length, cap });
-    if (!gate.ok) { notes.push(gate.reason); break; }
+    if (todo.length >= smokeCap(cap)) break;
+    if (!scanWindowOpen(lock.job?.deadline)) { notes.push('Import stopped before another product page: the time limit was too close. Nothing further was read.'); break; }
+    scanned += 1;
     const slug = productUrl.match(/\/products\/([^/]+)\/?$/)?.[1] || '';
     try {
       const page = await inTab(productUrl, 2500, (id, site) => runCall(id, readDepopProduct, 'ISOLATED', [shop, Date.now() + 15000], 20000, site));
       const product = acceptScan(page, 'Depop');
       const item = validateItemEnvelope(product.items[0], { source: 'depop', expectedId: slug });
       if (!item) throw new Error(`Depop product ${slug} did not match the requested shop ${shop}. Nothing was written for it.`);
-      if (product.reason) notes.push(product.reason);
+      const decision = westernBootDecision(item);
+      if (!decision.eligible) { skipped[decision.kind] = (skipped[decision.kind] || 0) + 1; notes.push(`${slug}: ${decision.reason}`); continue; }
       todo.push(item);
-    } catch (e) { notes.push(`${slug || productUrl} skipped: ${e.message}`); }
+    } catch (e) { skipped.unread += 1; notes.push(`${slug || productUrl} not read: ${e.message}`); }
   }
-  if (!todo.length) {
-    const detail = notes.filter(Boolean).join(' ');
-    throw new Error(detail.includes('Nothing was imported') ? detail : `${detail} Nothing was imported.`.trim());
-  }
+  const summary = bootScanSummary({ scanned, candidates: productUrls.length, eligible: todo.length, unopened: productUrls.length - scanned, skipped });
+  if (!todo.length) throw new Error(`${summary} ${notes.filter(Boolean).join(' ')} Nothing was imported.`.trim());
   const result = await importAll({ source: 'depop', ids: todo.map(i => i.source_id), sync, complete: false, todo,
     importOne: send, name: i => `"${(i.title || '').slice(0, 40)}"` });
-  result.skipped = [result.skipped, ...notes].filter(Boolean).join(' ');
+  result.skipped = [summary, result.skipped, ...notes].filter(Boolean).join(' ');
   return result;
 }
 
