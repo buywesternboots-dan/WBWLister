@@ -33,12 +33,9 @@ test('exact brand, style, and material are filled and the title is not rewritten
   assert.equal(displayWidth('N'), 'N');
   assert.equal(Object.values(CSV).includes('Export readiness'), false);
   const ready = exportReadiness(fields);
-  assert.equal(ready.missing.includes('no brand match'), false);
-  assert.equal(ready.missing.includes('blank style number'), false);
-  assert.equal(ready.missing.includes('missing size'), false);
-  assert.equal(ready.missing.includes('missing width'), false);
-  assert.ok(ready.missing.includes('title rewrite pending Apply'));
-  assert.equal(ready.ready, false);
+  assert.equal(ready.ready, true);
+  assert.deepEqual(ready.missing, []);
+  assert.notEqual(fields.opt_proposal.title, fields.title);
 });
 
 test('catalog material is used only when the card text is that material', () => {
@@ -51,7 +48,7 @@ test('catalog material is used only when the card text is that material', () => 
   assert.equal(fields.material, 'Caiman');
   assert.equal(fields.description.includes('Caiman'), false);
   assert.equal(fields.id_text, '1047 12928507');
-  assert.equal(exportReadiness(fields).missing.includes('material needs a human'), false);
+  assert.equal(exportReadiness(fields).ready, true);
 
   const conflict = {
     title: 'Tony Lama boots', description: 'Worn.', brand: 'Tony Lama', size: '10', width: 'D',
@@ -60,7 +57,8 @@ test('catalog material is used only when the card text is that material', () => 
   };
   applyAutoOptimization(conflict, { ...conflict, source_id: 'tl-2' }, { directory: dir, styleSample: sample });
   assert.equal(conflict.material, 'Leather');
-  assert.ok(exportReadiness(conflict).missing.includes('material needs a human'));
+  assert.equal(exportReadiness(conflict).ready, true);
+  assert.equal(exportReadiness(conflict).missing.includes('material needs a human'), false);
 });
 
 test('readiness names the gaps and does not invent a style', () => {
@@ -73,9 +71,15 @@ test('readiness names the gaps and does not invent a style', () => {
   assert.equal(fields.id_text, null);
   assert.equal(fields.title, 'Mystery boots');
   const missing = exportReadiness(fields).missing;
-  for (const gap of ['no brand match', 'blank style number', 'missing size', 'missing width', 'title rewrite pending Apply'])
-    assert.ok(missing.includes(gap), gap);
+  for (const gap of ['no style number', 'missing size', 'missing width']) assert.ok(missing.includes(gap), gap);
+  assert.equal(missing.includes('no brand'), false);
+  assert.equal(missing.includes('title rewrite pending Apply'), false);
+  assert.equal(missing.includes('description rewrite pending Apply'), false);
+  const offered = exportReadiness({
+    ...fields, opt_proposal: { title: 'A different title', description: 'A different description' },
+  });
+  assert.equal(offered.missing.includes('title rewrite pending Apply'), false);
   const bare = exportReadiness({ title: 'Boots', description: 'Worn.', photos: [] });
-  assert.ok(bare.missing.includes('no photos'));
-  assert.ok(bare.missing.includes('blank style number'));
+  for (const gap of ['no brand', 'no style number', 'missing size', 'missing width', 'no price', 'too few photos'])
+    assert.ok(bare.missing.includes(gap), gap);
 });
