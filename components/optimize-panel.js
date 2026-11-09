@@ -8,7 +8,7 @@ const obj = v => {
 };
 
 // Original against the draft. Apply is the only write of title and description.
-export default function OptimizePanel({ item, proposal, title, description, busy, onPrepare, onSave, onApply, onAdd, onKeepStyle }) {
+export default function OptimizePanel({ item, proposal, title, description, busy, onPrepare, onSave, onApply, onAdd, onKeepStyle, onMakerNote }) {
   const p = obj(proposal) ?? {};
   const original = obj(item.opt_original) ?? { title: item.title ?? '', description: item.description ?? '' };
   const first = obj(original.first);
@@ -37,6 +37,11 @@ export default function OptimizePanel({ item, proposal, title, description, busy
         <textarea rows="8" data-proposed-description value={draftDescription} onChange={e => setDraftDescription(e.target.value)} /></label>
     </div>
     {p.directory?.suggestion && <small data-maker-directory>Directory lists the name {p.directory.suggestion.name}. That is not where this pair was made. Model lookup is not in this snapshot.</small>}
+    {p.maker_note && item.description === `${original.description ?? ''}${original.description ? '\n\n' : ''}${p.maker_note}` && <div data-maker-note>
+      <small>A maker note was added after the imported description. The imported text is unchanged above it.</small>
+      <button type="button" disabled={busy} onClick={() => onMakerNote?.('remove')}>Remove maker note</button>
+      <button type="button" disabled={busy} onClick={() => onMakerNote?.('regenerate')}>Regenerate maker note</button>
+    </div>}
     {p.style_sample && <div data-style-sample>
       <small>{p.style_sample.note}</small>
       <small>Style sample: {p.style_sample.sample_records} of {p.style_sample.displayed_records} displayed cards.</small>

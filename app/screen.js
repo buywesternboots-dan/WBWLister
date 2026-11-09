@@ -398,6 +398,7 @@ export default function Screen({ admin = false }) {
             </div>}
             {i.opt_proposal && <OptimizePanel item={items.find(x => x.id === i.id) ?? i} proposal={i.opt_proposal} busy={optBusy}
               onPrepare={() => prepareOpt(i)} onSave={(title, description) => saveOpt(i, title, description)} onApply={(title, description) => applyOpt(i, title, description)}
+              onMakerNote={mode => api('PATCH', { ids: [i.id], action: 'maker-note', mode }).then(r => { if (r.item) setItems(list => list.map(x => x.id === r.item.id ? { ...x, ...r.item } : x)); }).catch(e => setErr(e.message))}
               onKeepStyle={url => api('PATCH', { ids: [i.id], action: 'style-candidate', record_url: url }).then(r => { if (r.item) setItems(list => list.map(x => x.id === r.item.id ? { ...x, ...r.item } : x)); }).catch(e => setErr(e.message))}
               onAdd={body => api('POST', body, '', '/api/references').then(() => prepareOpt(i)).catch(e => setErr(e.message))} />}
           </div>)}

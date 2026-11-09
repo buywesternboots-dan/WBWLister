@@ -391,13 +391,13 @@ describe('List Perfectly source refresh', () => {
     const created = mergeLp({}, base);
     assert.equal(created.opt_original.description, 'old heel');
     assert.equal(created.title, 'Boots');
-    assert.equal(created.description, 'old heel');
+    assert.equal(created.description.slice(0, 'old heel'.length), 'old heel');
     assert.equal(typeof created.opt_proposal, 'object');
     assert.equal(created.opt_applied.scope, 'images-seo');
     const changed = mergeLp({ src_hash: 'h1', opt_original: created.opt_original, opt_proposal: { facts_fp: 'x' }, opt_applied: { facts_fp: 'x' }, verified: [] }, { ...base, hash: 'h2', raw: { ...base.raw, description: 'Heel < 1.5 now' }, item: { ...base.item, description: 'Heel < 1.5 now' } });
     assert.equal(changed.opt_original.description, 'Heel < 1.5 now');
     assert.equal(changed.opt_original.first.description, 'old heel');
-    assert.equal(changed.description, 'Heel < 1.5 now');
+    assert.equal(changed.description.slice(0, 'Heel < 1.5 now'.length), 'Heel < 1.5 now');
     assert.equal(typeof changed.opt_proposal, 'object');
     assert.match(changed.opt_proposal.seller_notes, /1\.5/);
     assert.equal(changed.opt_applied.scope, 'images-seo');

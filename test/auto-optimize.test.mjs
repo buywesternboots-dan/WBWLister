@@ -42,10 +42,11 @@ test('import optimization proposes copy and keeps the imported fields', () => {
 test('the same source hash does not rewrite and a changed source regenerates', () => {
   const base = { hash: 'h1', photos: [photo], markets: '', raw: { title: 'Boots', description: 'old heel', brand: 'Lucchese' }, item: { ...item, title: 'Boots', description: 'old heel' } };
   const created = mergeLp({}, base);
-  assert.equal(created.description, 'old heel');
+  assert.equal(created.description.slice(0, 'old heel'.length), 'old heel');
+  assert.equal(created.opt_original.description, 'old heel');
   assert.ok(created.opt_proposal);
   const changed = mergeLp({ src_hash: 'h1', opt_original: created.opt_original, verified: [] }, { ...base, hash: 'h2', raw: { ...base.raw, description: 'Heel < 1.5 now' }, item: { ...base.item, description: 'Heel < 1.5 now' } });
-  assert.equal(changed.description, 'Heel < 1.5 now');
+  assert.equal(changed.description.slice(0, 'Heel < 1.5 now'.length), 'Heel < 1.5 now');
   assert.match(changed.opt_proposal.seller_notes, /1\.5/);
   assert.equal(changed.opt_proposal.seller_notes.includes('old heel'), false);
   const same = mergeLp({ src_hash: 'h2', opt_original: changed.opt_original, opt_proposal: { facts_fp: 'keep' }, verified: [] }, { ...base, hash: 'h2' });
@@ -115,7 +116,7 @@ test('a source change that fails optimization clears the proposal and Apply refu
   const refreshed = mergeLp({ src_hash: 'h1', title: 'Lucchese cowboy boots', description: 'old heel', opt_original: inserted.opt_original, opt_proposal: { title: 'STALE TITLE', description: 'STALE' }, opt_applied: { title: 'STALE APPLIED', facts_fp: 'x' }, verified: [] }, {
     ...lp, hash: 'h2', refs: [bad], raw: { ...lp.raw, description: 'Heel < 1.5 now' }, item: { ...lp.item, description: 'Heel < 1.5 now' },
   });
-  assert.equal(refreshed.description, 'Heel < 1.5 now');
+  assert.equal(refreshed.description.slice(0, 'Heel < 1.5 now'.length), 'Heel < 1.5 now');
   assert.equal(refreshed.title, 'Lucchese cowboy boots');
   assert.equal(refreshed.opt_proposal, null);
   assert.equal(refreshed.opt_applied, null);
