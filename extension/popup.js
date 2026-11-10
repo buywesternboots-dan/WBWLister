@@ -60,7 +60,8 @@ async function start(message) {
   const already = r?.recheck ? `${r?.duplicate || 0} already imported` : `${r?.duplicate || 0} already imported (skipped)`;
   const prior = r?.recheck ? '' : `, ${r?.prior || 0} previously not boots (skipped)`;
   const mode = r?.modeNote ? `${r.modeNote} ` : '';
-  say(error || (message.type === 'link' ? `${mode}${word}: ${r.added} new, ${r.updated} changed, ${already}${prior}, ${r.removed} gone (now Pending sold), ${r.failed} failed.${r.scanLimit ? ` ${r.scanLimit}` : ''}${r.skipped ? ` ${r.skipped}` : ''}` : r.duplicate ? 'Already imported.' : 'Added.'));
+  const counts = `${mode}${word}: ${r.added} new, ${already}${prior}, ${r.opened || 0} opened, ${r.removed} gone (now Pending sold), ${r.failed} failed.${r.scanLimit ? ` ${r.scanLimit}` : ''}${r.skipped ? ` ${r.skipped}` : ''}`;
+  say(error || (message.type === 'link' ? (r.summary || counts) : r.duplicate ? 'Already imported.' : 'Added.'));
 }
 const importLink = sync => {
   const link = $('profileUrl').value.trim();
