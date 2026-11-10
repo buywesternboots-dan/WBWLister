@@ -154,7 +154,8 @@ describe('Dan Hoffenberg List Perfectly import', () => {
     assert.equal(blob.includes(SECRET), false);
     assert.equal(blob.includes('bin A'), false);
     assert.equal(blob.includes('call the shop'), false);
-    assert.equal(byDate('2024-02-01 00:00:02').description, 'group price $1');
+    assert.equal(byDate('2024-02-01 00:00:02').description.startsWith('group price $1'), true);
+    assert.equal(byDate('2024-02-01 00:00:02').opt_original.description, 'group price $1');
     const mapped = JSON.stringify(mapLpCsv(text, { museum: true }));
     assert.equal(mapped.includes(SECRET), false);
   });

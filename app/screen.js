@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { CHOICES, displayWidth, searchMatch } from '../lib/vocab';
 import { needsCheck, REQUIRED } from '../lib/publish';
+import { exportReadiness } from '../lib/readiness';
 import OptimizePanel from '../components/optimize-panel';
 import { packCsvChunks } from '../lib/csv';
 import { toCsv } from '../lib/export';
@@ -349,7 +350,9 @@ export default function Screen({ admin = false }) {
               return (c > 0 || fk === 'ready' || fk === 'check') && <button key={fk} className={`chip ${fk in LABELS || fk === 'nogroup' ? 'miss' : ''} ${fk === 'check' ? 'miss' : ''} ${filter[k] === fk ? 'on' : ''}`}
                 onClick={() => setFilter({ ...filter, [k]: filter[k] === fk ? null : fk })}>{fl} ({c})</button>; })}
           </h2>
-          {visible.map(i => <div key={i.id} className="item">
+          {visible.map(i => {
+            const ready = exportReadiness(i);
+            return <div key={i.id} className="item">
             <input type="checkbox" checked={sel.has(i.id)} onChange={() => toggle(i.id)} />
             <div className="pics">
               {i.photos?.[0] ? <img src={i.photos[0]} alt="" loading="lazy" /> : <div className="noimg" />}
@@ -376,6 +379,7 @@ export default function Screen({ admin = false }) {
                 View on {{ facebook: 'Facebook', depop: 'Depop', poshmark: 'Poshmark', ebay: 'eBay' }[i.source] ?? i.source}</a>}
               {i.source === 'listperfectly' && <small>List Perfectly{i.markets ? ` · listed on ${i.markets}` : ''}</small>}
               {i.changed_at && <small className="warn">Changed at source — review before it goes back to WBW</small>}
+              <small className={ready.ready ? '' : 'warn'} data-export-ready>{ready.ready ? 'Ready for export' : `Export: ${ready.missing.join('; ')}`}</small>
               {i.opt_error && <small className="err">Optimization failed: {i.opt_error}</small>}
               {i.status === 'pending' && <small className="warn">Gone from the source — confirm sold, or it's marked sold in {daysLeft(i)} days</small>}
               {i.source_condition && <small>Source condition: {i.source_condition}</small>}
@@ -398,9 +402,11 @@ export default function Screen({ admin = false }) {
             </div>}
             {i.opt_proposal && <OptimizePanel item={items.find(x => x.id === i.id) ?? i} proposal={i.opt_proposal} busy={optBusy}
               onPrepare={() => prepareOpt(i)} onSave={(title, description) => saveOpt(i, title, description)} onApply={(title, description) => applyOpt(i, title, description)}
+              onMakerNote={mode => api('PATCH', { ids: [i.id], action: 'maker-note', mode }).then(r => { if (r.item) setItems(list => list.map(x => x.id === r.item.id ? { ...x, ...r.item } : x)); }).catch(e => setErr(e.message))}
               onKeepStyle={url => api('PATCH', { ids: [i.id], action: 'style-candidate', record_url: url }).then(r => { if (r.item) setItems(list => list.map(x => x.id === r.item.id ? { ...x, ...r.item } : x)); }).catch(e => setErr(e.message))}
               onAdd={body => api('POST', body, '', '/api/references').then(() => prepareOpt(i)).catch(e => setErr(e.message))} />}
-          </div>)}
+          </div>;
+          })}
         </section>;
       })}
     </main>
