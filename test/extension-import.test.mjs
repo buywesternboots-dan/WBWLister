@@ -441,7 +441,18 @@ test('a settled shop stops after five quiet scrolls and does not use the whole r
 
 test('a displayed result count is the target for a filtered grid', async () => {
   assert.equal(parseDepopResultCount('49 results'), 49);
+  assert.equal(parseDepopResultCount('Results: 49'), 49);
+  assert.equal(parseDepopResultCount('1,234 results'), 1234);
+  assert.equal(parseDepopResultCount('1.234 results'), 1234);
+  assert.equal(parseDepopResultCount('1 234 results'), 1234);
+  assert.equal(parseDepopResultCount('Results: 1,234'), 1234);
+  assert.equal(parseDepopResultCount(''), 0);
+  assert.equal(parseDepopResultCount('boots'), 0);
+  assert.equal(parseDepopResultCount('0 results'), 0);
   assert.equal(parseDepopResultCount('Results: 43'), 43);
+  const countCopies = [...read('extension/import-page.mjs').toString().matchAll(/const t = String\(text \?\? ''\)[\s\S]*?return n > 0 && n <= 10000 \? n : 0;/g)].map(m => m[0].split('\n').map(l => l.trim()).filter(Boolean).join('\n'));
+  assert.equal(countCopies.length, 2);
+  assert.equal(countCopies[0], countCopies[1]);
   assert.equal(parseDepopResultCount('43 items'), 43);
   assert.equal(parseDepopResultCount('Showing 12'), 12);
   assert.equal(parseDepopResultCount('$49.00'), 0);

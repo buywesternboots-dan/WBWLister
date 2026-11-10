@@ -35,11 +35,12 @@ export function acceptScan(raw, site) {
 export function parseDepopResultCount(text) {
   const t = String(text ?? '').replace(/\s+/g, ' ').trim();
   if (!t || t.length > 80 || /\$\s*\d/.test(t) || /\bsold\b/i.test(t) || /\bfollowers?\b/i.test(t)) return 0;
-  const m = t.match(/\b(\d{1,5})\s+results?\b/i)
-    || t.match(/\bresults?\s*[:\-]?\s*(\d{1,5})\b/i)
-    || t.match(/\b(\d{1,5})\s+items?\b/i)
-    || t.match(/\bshowing\s+(\d{1,5})\b/i);
-  const n = m ? Number(m[1]) : 0;
+  const num = '(\\d{1,3}(?:[,. ]\\d{3})+|\\d{1,5})';
+  const m = t.match(new RegExp('\\b' + num + '\\s+results?\\b', 'i'))
+    || t.match(new RegExp('\\bresults?\\s*[:\\-]?\\s*' + num + '\\b', 'i'))
+    || t.match(new RegExp('\\b' + num + '\\s+items?\\b', 'i'))
+    || t.match(new RegExp('\\bshowing\\s+' + num + '\\b', 'i'));
+  const n = m ? Number(String(m[1]).replace(/[,. ]/g, '')) : 0;
   return n > 0 && n <= 10000 ? n : 0;
 }
 
@@ -232,10 +233,14 @@ export async function readDepopShop(shop, deadlineMs, cap = 400, pace) {
     const needQuiet = n => settle + (n > 0 && n % 24 === 0 ? 2 : 0);
     const shownCount = () => {
       const read = text => {
-        const t = clip(text, 80);
-        if (!t || /\$\s*\d/.test(t) || /\bsold\b/i.test(t) || /\bfollowers?\b/i.test(t)) return 0;
-        const m = t.match(/\b(\d{1,5})\s+results?\b/i) || t.match(/\bresults?\s*[:\-]?\s*(\d{1,5})\b/i) || t.match(/\b(\d{1,5})\s+items?\b/i) || t.match(/\bshowing\s+(\d{1,5})\b/i);
-        const n = m ? Number(m[1]) : 0;
+        const t = String(text ?? '').replace(/\s+/g, ' ').trim();
+        if (!t || t.length > 80 || /\$\s*\d/.test(t) || /\bsold\b/i.test(t) || /\bfollowers?\b/i.test(t)) return 0;
+        const num = '(\\d{1,3}(?:[,. ]\\d{3})+|\\d{1,5})';
+        const m = t.match(new RegExp('\\b' + num + '\\s+results?\\b', 'i'))
+          || t.match(new RegExp('\\bresults?\\s*[:\\-]?\\s*' + num + '\\b', 'i'))
+          || t.match(new RegExp('\\b' + num + '\\s+items?\\b', 'i'))
+          || t.match(new RegExp('\\bshowing\\s+' + num + '\\b', 'i'));
+        const n = m ? Number(String(m[1]).replace(/[,. ]/g, '')) : 0;
         return n > 0 && n <= 10000 ? n : 0;
       };
       let nodes = [];
