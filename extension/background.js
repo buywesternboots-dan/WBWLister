@@ -267,6 +267,9 @@ async function importDepop(shop, sync, recheck, shopMode) {
           cardTexts: data?.cardTexts || [],
           href: data?.pageUrl || '',
           partial: data?.partial === true,
+          limitHit: data?.limitHit === true,
+          capHit: data?.capHit === true,
+          resultCount: Number(data?.resultCount) || 0,
         });
       } catch (e) {
         const step = shopAfterFilterError(e);

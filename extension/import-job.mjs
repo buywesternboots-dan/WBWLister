@@ -65,7 +65,11 @@ export function planFilteredShop(reports) {
       continue;
     }
     // The live filter URL is enough. Missing chips only fail a gender grid when the params were dropped.
-    if (paramsStuck(report, report.href)) { keep.push(report); continue; }
+    if (paramsStuck(report, report.href)) {
+      if (report.limitHit || report.capHit) notes.push(`${label} stopped early (${(report.urls || []).length} links)`);
+      keep.push(report);
+      continue;
+    }
     if (!report.gender) { notes.push(`${label} skipped (no filter)`); continue; }
     const why = report.href ? 'filter params were dropped' : 'no chip';
     return { ok: false, fallback: true, reason: `${label}: ${why}` };
@@ -82,7 +86,13 @@ export function planFilteredShop(reports) {
     seen.add(url);
     urls.push(url);
   }
-  const counts = keep.map(r => `${r.label} ${(r.urls || []).length}`).join(', ');
+  const counts = keep.map(r => {
+    const got = (r.urls || []).length;
+    const target = Number(r.resultCount) || 0;
+    if (target > 0 && got < target) return `${r.label} ${got}/${target} short`;
+    if (target > 0) return `${r.label} ${got}/${target}`;
+    return `${r.label} ${got}`;
+  }).join(', ');
   const extra = notes.length ? ` ${notes.join('. ')}.` : '';
   return { ok: true, urls, note: `${SHOP_MODE_BOOTS}. ${counts}.${extra}` };
 }

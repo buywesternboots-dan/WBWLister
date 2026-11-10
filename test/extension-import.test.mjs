@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  acceptScan, collectIds, depopSellerHandle, explainPageFailure, pageScriptEmpty, readDepopProduct, readDepopShop, rejectEmptyDepopShop, NO_FACEBOOK_LISTINGS,
+  acceptScan, collectIds, depopSellerHandle, explainPageFailure, pageScriptEmpty, parseDepopResultCount, quietScrollsNeeded, readDepopProduct, readDepopShop, rejectEmptyDepopShop, NO_FACEBOOK_LISTINGS,
 } from '../extension/import-page.mjs';
 import { westernBootDecision, bootScanSummary, GATE_VERSION, rejectToStore } from '../extension/boot-gate.mjs';
 import { absentIds, actorForJob, allowedBootlisterOrigin, CANDIDATE_CAP, cardIsNonFootwear, cookieReadUrl, createImportLock, depopBootFilters, gateWrite, importLimit, injectionLost, JOB_DEADLINE_MAX_MS, jobSummary, navListenerArmedBeforeTabCreate, planFilteredShop, planKnownSkips, planSync, presenceIds, REJECT_BATCH, retryInjection, scanWindowOpen, scriptArgs, sessionFromCookie, shopAfterFilterError, shopReadArgs, SHOP_READ_MS, SIGNED_OUT, validateItemEnvelope, WRITE_CAP, withDeadline } from '../extension/import-job.mjs';
@@ -432,9 +432,65 @@ test('a settled shop stops after five quiet scrolls and does not use the whole r
   assert.equal(shop.partial, false);
   assert.equal(shop.limitHit, false);
   assert.equal(shop.productUrls.length, 24);
-  assert.equal(scrolls, 5);
+  assert.equal(quietScrollsNeeded(24, 5), 7);
+  assert.equal(quietScrollsNeeded(49, 5), 5);
+  assert.equal(scrolls, 7);
   assert.match(shop.reason, /visible shop grid stopped growing/);
   assert.ok(Date.now() - started < 1000);
+});
+
+test('a displayed result count is the target for a filtered grid', async () => {
+  assert.equal(parseDepopResultCount('49 results'), 49);
+  assert.equal(parseDepopResultCount('Results: 43'), 43);
+  assert.equal(parseDepopResultCount('43 items'), 43);
+  assert.equal(parseDepopResultCount('Showing 12'), 12);
+  assert.equal(parseDepopResultCount('$49.00'), 0);
+  assert.equal(parseDepopResultCount('4042 sold'), 0);
+  assert.equal(parseDepopResultCount('16.4K Followers'), 0);
+  let scrolls = 0;
+  const link = href => ({ href, getAttribute: () => `item listed by ${SHOP}`, scrollIntoView() {} });
+  const page = n => Array.from({ length: n }, (_, i) => link(`https://www.depop.com/products/boot-${i}/`));
+  const countNode = { textContent: '49 results', children: [] };
+  globalThis.window = { scrollTo() { scrolls += 1; }, scrollBy() {} };
+  globalThis.location = { hostname: 'www.depop.com', pathname: `/${SHOP}/`, href: `https://www.depop.com/${SHOP}/?groups=footwear&gender=female&productTypes=boots` };
+  globalThis.document = {
+    readyState: 'complete', title: 'shop', body: { scrollHeight: 9000 },
+    querySelectorAll(sel) {
+      if (sel === 'a[href*="/products/"]') return scrolls < 3 ? page(24) : page(49);
+      if (String(sel).includes('span')) return [countNode];
+      return [];
+    },
+  };
+  const shop = await readDepopShop(SHOP, Date.now() + 5000, 400, { pauseMs: 5, settle: 5 });
+  delete globalThis.window;
+  assert.equal(shop.resultCount, 49);
+  assert.equal(shop.productUrls.length, 49);
+  assert.equal(shop.short, false);
+  assert.equal(shop.limitHit, false);
+  assert.ok(scrolls < 8);
+  assert.match(shop.reason, /49\/49/);
+});
+
+test('a filtered grid grows from one page of 24 to the rest of the boots', async () => {
+  let scrolls = 0;
+  globalThis.window = { scrollTo() { scrolls += 1; }, scrollBy() {} };
+  const link = href => ({ href, getAttribute: () => `item listed by ${SHOP}`, scrollIntoView() {} });
+  const page = n => Array.from({ length: n }, (_, i) => link(`https://www.depop.com/products/boot-${i}/`));
+  globalThis.location = { hostname: 'www.depop.com', pathname: `/${SHOP}/`, href: `https://www.depop.com/${SHOP}/?groups=footwear&gender=female&productTypes=boots` };
+  globalThis.document = {
+    readyState: 'complete', title: 'shop', body: { scrollHeight: 9000 },
+    querySelectorAll(sel) {
+      if (sel !== 'a[href*="/products/"]') return [];
+      return scrolls < 6 ? page(24) : page(49);
+    },
+  };
+  const shop = await readDepopShop(SHOP, Date.now() + 5000, 400, { pauseMs: 5, settle: 5 });
+  delete globalThis.window;
+  assert.equal(shop.productUrls.length, 49);
+  assert.equal(shop.partial, false);
+  assert.equal(shop.limitHit, false);
+  assert.ok(scrolls >= 6);
+  assert.match(shop.reason, /visible shop grid stopped growing/);
 });
 
 test('the shop keeps scrolling past the first screen of links', async () => {
@@ -896,6 +952,18 @@ test('depop boot filters dedupe links and fall back when the filter does not sti
   assert.deepEqual(plan.urls, [women, shared, men]);
   assert.match(plan.note, /Boots only \(fast\)/);
   assert.match(plan.note, /Women 2, Men 2/);
+  const early = planFilteredShop([
+    { ...filters[0], chips: [], cardTexts: ['lace-up moto boots'], href: filters[0].url, urls: Array.from({ length: 24 }, (_, i) => `https://www.depop.com/products/w-${i}/`), capHit: true },
+  ]);
+  assert.equal(early.ok, true);
+  assert.match(early.note, /Women stopped early \(24 links\)/);
+  const targeted = planFilteredShop([
+    { ...filters[0], chips: [], cardTexts: ['lace-up moto boots'], href: filters[0].url, urls: Array.from({ length: 49 }, (_, i) => `https://www.depop.com/products/w-${i}/`), resultCount: 49 },
+    { ...filters[1], chips: [], cardTexts: ['lace-up moto boots'], href: filters[1].url, urls: Array.from({ length: 43 }, (_, i) => `https://www.depop.com/products/m-${i}/`), resultCount: 43 },
+    { ...filters[2], chips: [], cardTexts: ['lace-up moto boots'], href: filters[2].url, urls: Array.from({ length: 24 }, (_, i) => `https://www.depop.com/products/a-${i}/`), resultCount: 80 },
+  ]);
+  assert.equal(targeted.ok, true);
+  assert.match(targeted.note, /Women 49\/49, Men 43\/43, All boots 24\/80 short/);
   assert.match(plan.note, /All boots skipped \(no filter\)/);
   assert.equal(cardIsNonFootwear('lace-up moto boots'), false);
   assert.equal(cardIsNonFootwear('leather tote bag'), true);
@@ -1026,8 +1094,8 @@ test('the committed extension zip matches source and its service worker parses',
   assert.match(read('app/screen.js').toString(), /Source condition/);
   assert.match(read('extension/popup.js').toString(), /r\.skipped/);
   const manifest = JSON.parse(read('extension/manifest.json').toString());
-  assert.equal(manifest.version, '0.18');
-  const zip = readZip(read('public/bootlister-extension-0.18.zip'));
+  assert.equal(manifest.version, '0.19');
+  const zip = readZip(read('public/bootlister-extension-0.19.zip'));
   const loop = bg.slice(bg.indexOf('async function importAll'), bg.indexOf('async function importFacebook'));
   assert.equal(loop.includes('retry(() => importOne'), false);
   assert.match(bg, /x-import-job/);
