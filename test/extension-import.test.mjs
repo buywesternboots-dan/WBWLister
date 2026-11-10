@@ -9,7 +9,7 @@ import {
   acceptScan, collectIds, depopSellerHandle, explainPageFailure, pageScriptEmpty, readDepopProduct, readDepopShop, rejectEmptyDepopShop, NO_FACEBOOK_LISTINGS,
 } from '../extension/import-page.mjs';
 import { westernBootDecision, bootScanSummary, GATE_VERSION, rejectToStore } from '../extension/boot-gate.mjs';
-import { absentIds, actorForJob, allowedBootlisterOrigin, CANDIDATE_CAP, cardIsNonFootwear, cookieReadUrl, createImportLock, depopBootFilters, gateWrite, importLimit, injectionLost, JOB_DEADLINE_MAX_MS, jobSummary, navListenerArmedBeforeTabCreate, planFilteredShop, planKnownSkips, planSync, presenceIds, REJECT_BATCH, retryInjection, scanWindowOpen, sessionFromCookie, shopAfterFilterError, SHOP_READ_MS, SIGNED_OUT, validateItemEnvelope, WRITE_CAP, withDeadline } from '../extension/import-job.mjs';
+import { absentIds, actorForJob, allowedBootlisterOrigin, CANDIDATE_CAP, cardIsNonFootwear, cookieReadUrl, createImportLock, depopBootFilters, gateWrite, importLimit, injectionLost, JOB_DEADLINE_MAX_MS, jobSummary, navListenerArmedBeforeTabCreate, planFilteredShop, planKnownSkips, planSync, presenceIds, REJECT_BATCH, retryInjection, scanWindowOpen, scriptArgs, sessionFromCookie, shopAfterFilterError, shopReadArgs, SHOP_READ_MS, SIGNED_OUT, validateItemEnvelope, WRITE_CAP, withDeadline } from '../extension/import-job.mjs';
 import { knownApi, rejectApi } from '../lib/known-api.js';
 import { acceptRejectRows, matchKnown, REJECT_WRITE_CAP, visibleRejects } from '../lib/known.js';
 import { IMPORT_WRITE_CAP } from '../lib/import-cap.js';
@@ -910,11 +910,19 @@ test('depop boot filters dedupe links and fall back when the filter does not sti
   ]);
   assert.equal(same.fallback, true);
   assert.match(same.reason, /same count/);
-  const nochip = planFilteredShop([
+  const kept = planFilteredShop([
     { ...filters[0], chips: [], cardTexts: ['lace-up moto boots'], href: filters[0].url, urls: [women] },
+    { ...filters[1], chips: [], cardTexts: ['lace-up moto boots'], href: filters[1].url, urls: [men] },
   ]);
-  assert.equal(nochip.fallback, true);
-  assert.match(nochip.reason, /no chip/);
+  assert.equal(kept.ok, true);
+  assert.equal(kept.fallback, undefined);
+  assert.deepEqual(kept.urls, [women, men]);
+  assert.match(kept.note, /Boots only \(fast\)/);
+  const dropped = planFilteredShop([
+    { ...filters[0], chips: [], cardTexts: ['lace-up moto boots'], href: 'https://www.depop.com/nuclear_nostalgia/', urls: [women] },
+  ]);
+  assert.equal(dropped.fallback, true);
+  assert.match(dropped.reason, /filter params were dropped/);
   const popup = read('extension/popup.html').toString();
   assert.match(popup, /Boots only \(fast\)/);
   assert.match(popup, /Full shop \(slower, catches mis-categorized boots\)/);
@@ -968,6 +976,23 @@ test('a removed frame is retried once, then the shop falls back, and the summary
   assert.match(counted, /2 new, 3 already imported \(skipped\), 4 previously not boots \(skipped\), 5 opened, 1 failed/);
 });
 
+test('shop script args stay JSON-serializable when allowEmpty is false', () => {
+  for (const allowEmpty of [false, true]) {
+    const args = shopReadArgs('nuclear_nostalgia', 1_700_000_000_000, CANDIDATE_CAP, allowEmpty);
+    assert.deepEqual(args[3], { allowEmpty });
+    assert.equal(args.includes(undefined), false);
+    assert.deepEqual(JSON.parse(JSON.stringify(args)), args);
+  }
+  assert.throws(() => scriptArgs(['nuclear_nostalgia', 1, 400, undefined]), /args\[3\] is undefined/);
+  assert.throws(() => scriptArgs([() => {}]), /function/);
+  assert.throws(() => scriptArgs([new Map()]), /Map/);
+  const bg = read('extension/background.js').toString();
+  const grid = bg.slice(bg.indexOf('async function readShopGrid'), bg.indexOf('async function importDepop'));
+  assert.match(grid, /shopReadArgs\(/);
+  assert.equal(grid.includes('undefined'), false);
+  assert.match(bg, /scriptArgs\(args\)/);
+});
+
 test('the committed extension zip matches source and its service worker parses', () => {
   const bg = read('extension/background.js').toString();
   assert.equal(navListenerArmedBeforeTabCreate(bg), true);
@@ -1001,8 +1026,8 @@ test('the committed extension zip matches source and its service worker parses',
   assert.match(read('app/screen.js').toString(), /Source condition/);
   assert.match(read('extension/popup.js').toString(), /r\.skipped/);
   const manifest = JSON.parse(read('extension/manifest.json').toString());
-  assert.equal(manifest.version, '0.17');
-  const zip = readZip(read('public/bootlister-extension-0.17.zip'));
+  assert.equal(manifest.version, '0.18');
+  const zip = readZip(read('public/bootlister-extension-0.18.zip'));
   const loop = bg.slice(bg.indexOf('async function importAll'), bg.indexOf('async function importFacebook'));
   assert.equal(loop.includes('retry(() => importOne'), false);
   assert.match(bg, /x-import-job/);

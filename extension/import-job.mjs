@@ -64,13 +64,11 @@ export function planFilteredShop(reports) {
       notes.push(`${label} skipped (non-footwear)`);
       continue;
     }
-    const stuck = paramsStuck(report, report.href) && chipsShowBoots(report.chips, report.gender);
-    if (!stuck) {
-      if (!report.gender) { notes.push(`${label} skipped (no filter)`); continue; }
-      const why = chipsShowBoots(report.chips, report.gender) ? 'filter params were dropped' : 'no chip';
-      return { ok: false, fallback: true, reason: `${label}: ${why}` };
-    }
-    keep.push(report);
+    // The live filter URL is enough. Missing chips only fail a gender grid when the params were dropped.
+    if (paramsStuck(report, report.href)) { keep.push(report); continue; }
+    if (!report.gender) { notes.push(`${label} skipped (no filter)`); continue; }
+    const why = report.href ? 'filter params were dropped' : 'no chip';
+    return { ok: false, fallback: true, reason: `${label}: ${why}` };
   }
   const women = keep.find(r => r.gender === 'female');
   const men = keep.find(r => r.gender === 'male');
@@ -206,6 +204,42 @@ export function jobSummary(n = {}) {
   if (n.skipped) line += ` ${n.skipped}`;
   if (n.error) line += ` ${n.error}`;
   return line;
+}
+
+// Chrome JSON-clones executeScript args and rejects undefined.
+export function scriptArgs(values) {
+  const args = Array.isArray(values) ? values : [];
+  const why = walk(args, 'args');
+  if (why) throw new Error(`executeScript args are not serializable: ${why}`);
+  return JSON.parse(JSON.stringify(args));
+}
+function walk(value, path) {
+  if (value === undefined) return `${path} is undefined`;
+  if (typeof value === 'function') return `${path} is a function`;
+  if (typeof value === 'symbol') return `${path} is a symbol`;
+  if (typeof value === 'bigint') return `${path} is a bigint`;
+  if (value === null || typeof value !== 'object') return '';
+  if (typeof Map !== 'undefined' && value instanceof Map) return `${path} is a Map`;
+  if (typeof Set !== 'undefined' && value instanceof Set) return `${path} is a Set`;
+  if (typeof Node !== 'undefined' && value instanceof Node) return `${path} is a DOM node`;
+  if (Array.isArray(value)) {
+    for (let i = 0; i < value.length; i++) {
+      const found = walk(value[i], `${path}[${i}]`);
+      if (found) return found;
+    }
+    return '';
+  }
+  const proto = Object.getPrototypeOf(value);
+  if (proto !== Object.prototype && proto !== null) return `${path} is not a plain object`;
+  for (const key of Object.keys(value)) {
+    const found = walk(value[key], `${path}.${key}`);
+    if (found) return found;
+  }
+  return '';
+}
+
+export function shopReadArgs(shop, deadline, cap, allowEmpty) {
+  return scriptArgs([String(shop || ''), Number(deadline) || 0, Number(cap) || 0, { allowEmpty: !!allowEmpty }]);
 }
 
 export function withDeadline(promise, ms, message) {

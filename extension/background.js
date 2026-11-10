@@ -1,6 +1,6 @@
 import { acceptScan, collectIds, explainPageFailure, readDepopProduct, readDepopShop, rejectEmptyDepopShop, NO_FACEBOOK_LISTINGS } from './import-page.mjs';
 import { bootScanSummary, rejectToStore, westernBootDecision } from './boot-gate.mjs';
-import { API_TIMEOUT_MS, actorForJob, allowedBootlisterOrigin, BOOTLISTER_ORIGINS, CANDIDATE_CAP, cookieReadUrl, createImportLock, depopBootFilters, gateWrite, importLimit, jobSummary, planFilteredShop, planKnownSkips, planSync, presenceIds, REJECT_BATCH, retryInjection, scanWindowOpen, sessionFromCookie, shopAfterFilterError, SHOP_MODE_FULL, SHOP_READ_MS, SIGNED_OUT, validateItemEnvelope, withDeadline } from './import-job.mjs';
+import { API_TIMEOUT_MS, actorForJob, allowedBootlisterOrigin, BOOTLISTER_ORIGINS, CANDIDATE_CAP, cookieReadUrl, createImportLock, depopBootFilters, gateWrite, importLimit, jobSummary, planFilteredShop, planKnownSkips, planSync, presenceIds, REJECT_BATCH, retryInjection, scanWindowOpen, scriptArgs, sessionFromCookie, shopAfterFilterError, shopReadArgs, SHOP_MODE_FULL, SHOP_READ_MS, SIGNED_OUT, validateItemEnvelope, withDeadline } from './import-job.mjs';
 
 const ITEM = /facebook\.com\/marketplace\/item\/(\d+)/;
 const siteOf = url => /facebook\.com/i.test(url || '') ? 'Facebook' : /depop\.com/i.test(url || '') ? 'Depop' : 'The page';
@@ -145,7 +145,7 @@ async function runCall(tabId, func, world, args, budgetMs, site) {
   const once = async (attempt) => {
     if (attempt > 1) await wait(400);
     await loaded(tabId);
-    const pending = chrome.scripting.executeScript({ target: { tabId }, world, func, args });
+    const pending = chrome.scripting.executeScript({ target: { tabId }, world, func, args: scriptArgs(args) });
     const frames = await withDeadline(pending, budgetMs, `${site} didn't finish reading the page before the time limit. Nothing was imported.`);
     return frames?.[0]?.result;
   };
@@ -236,9 +236,9 @@ async function importFacebook(profileId, sync) {
 // Depop: the shop tab's own document. Isolated world, so page scripts cannot replace querySelectorAll.
 // The result is a plain object. Zero candidates throw before any write and before "Done".
 async function readShopGrid(shop, url, deadline, allowEmpty) {
-  const pace = allowEmpty ? { allowEmpty: true } : undefined;
+  const args = shopReadArgs(shop, deadline, CANDIDATE_CAP, allowEmpty);
   // Background tab so a filter navigation does not replace the shop the seller is looking at.
-  return inTab(url, 250, (id, site) => runCall(id, readDepopShop, 'ISOLATED', [shop, deadline, CANDIDATE_CAP, pace], SHOP_READ_MS + 5000, site), false);
+  return inTab(url, 250, (id, site) => runCall(id, readDepopShop, 'ISOLATED', args, SHOP_READ_MS + 5000, site), false);
 }
 async function importDepop(shop, sync, recheck, shopMode) {
   const cap = lock.job?.limit;
