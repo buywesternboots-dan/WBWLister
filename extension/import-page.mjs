@@ -25,8 +25,30 @@ export function acceptScan(raw, site) {
     items: data.value, productUrls, complete: data.complete === true, partial: data.partial === true,
     reason: typeof data.reason === 'string' ? data.reason : '',
     chips: strings('chips'), cardTexts: strings('cardTexts'), pageUrl: typeof data.pageUrl === 'string' ? data.pageUrl : '',
-    limitHit: data.limitHit === true,
+    limitHit: data.limitHit === true, capHit: data.capHit === true,
+    resultCount: Number(data.resultCount) > 0 ? Number(data.resultCount) : 0,
+    short: data.short === true,
   };
+}
+
+// The number Depop shows for a filtered grid, such as "49 results". Prices, followers, and sold counts are not it.
+export function parseDepopResultCount(text) {
+  const t = String(text ?? '').replace(/\s+/g, ' ').trim();
+  if (!t || t.length > 80 || /\$\s*\d/.test(t) || /\bsold\b/i.test(t) || /\bfollowers?\b/i.test(t)) return 0;
+  const num = '(\\d{1,3}(?:[,. ]\\d{3})+|\\d{1,5})';
+  const m = t.match(new RegExp('\\b' + num + '\\s+results?\\b', 'i'))
+    || t.match(new RegExp('\\bresults?\\s*[:\\-]?\\s*' + num + '\\b', 'i'))
+    || t.match(new RegExp('\\b' + num + '\\s+items?\\b', 'i'))
+    || t.match(new RegExp('\\bshowing\\s+' + num + '\\b', 'i'));
+  const n = m ? Number(String(m[1]).replace(/[,. ]/g, '')) : 0;
+  return n > 0 && n <= 10000 ? n : 0;
+}
+
+// Depop shop grids arrive 24 at a time. An exact page is not proof the grid is finished.
+export function quietScrollsNeeded(count, settle = 5) {
+  const base = Number.isInteger(settle) && settle >= 1 ? settle : 5;
+  const n = Number(count) || 0;
+  return n > 0 && n % 24 === 0 ? base + 2 : base;
 }
 
 // An accepted scan with no product links is not a finished import. Callers must not report "0 new".
@@ -191,14 +213,54 @@ export async function readDepopShop(shop, deadlineMs, cap = 400, pace) {
         if (win && typeof win.scrollTo === 'function') win.scrollTo(0, height);
       }
     };
+    const clickMore = () => {
+      let nodes = [];
+      try { nodes = document.querySelectorAll?.('button, a, [role="button"]') || []; }
+      catch { nodes = []; }
+      for (const n of nodes) {
+        const t = clip(n?.textContent, 40);
+        if (!/^load more|^show more|^see more/i.test(t)) continue;
+        if (typeof n.click === 'function') n.click();
+        return;
+      }
+    };
     let snap = collect();
     let stable = 0;
     let stop = 'time';
-    // Depop adds shop cards slowly. Each scroll waits, and only five unchanged waits count as settled.
+    // Depop adds shop cards slowly. Five unchanged waits usually mean the grid is done.
+    // An exact page of 24 (or 48, …) is suspicious, so those grids get two more scroll-and-wait tries.
     // The Sold items block is the end of the selling grid; those links are not queued.
+    const needQuiet = n => settle + (n > 0 && n % 24 === 0 ? 2 : 0);
+    const shownCount = () => {
+      const read = text => {
+        const t = String(text ?? '').replace(/\s+/g, ' ').trim();
+        if (!t || t.length > 80 || /\$\s*\d/.test(t) || /\bsold\b/i.test(t) || /\bfollowers?\b/i.test(t)) return 0;
+        const num = '(\\d{1,3}(?:[,. ]\\d{3})+|\\d{1,5})';
+        const m = t.match(new RegExp('\\b' + num + '\\s+results?\\b', 'i'))
+          || t.match(new RegExp('\\bresults?\\s*[:\\-]?\\s*' + num + '\\b', 'i'))
+          || t.match(new RegExp('\\b' + num + '\\s+items?\\b', 'i'))
+          || t.match(new RegExp('\\bshowing\\s+' + num + '\\b', 'i'));
+        const n = m ? Number(String(m[1]).replace(/[,. ]/g, '')) : 0;
+        return n > 0 && n <= 10000 ? n : 0;
+      };
+      let nodes = [];
+      try { nodes = document.querySelectorAll?.('p, span, h1, h2, h3, [role="status"]') || []; }
+      catch { return 0; }
+      for (const n of nodes) {
+        if (n?.children && n.children.length > 2) continue;
+        const found = read(n?.textContent);
+        if (found) return found;
+      }
+      return 0;
+    };
     while (snap.productUrls.length < limit && !snap.sold && deadlineMs > Date.now() + pauseMs) {
-      if (snap.readyState === 'complete' && stable >= settle && (snap.productUrls.length > 0 || pace?.allowEmpty)) { stop = 'settled'; break; }
+      const target = shownCount();
+      const have = snap.productUrls.length;
+      if (target && have >= target) { stop = 'target'; break; }
+      const need = needQuiet(have);
+      if (!target && snap.readyState === 'complete' && stable >= need && (have > 0 || pace?.allowEmpty)) { stop = 'settled'; break; }
       const before = snap.productUrls.length;
+      clickMore();
       scrollGrid(snap);
       await new Promise(r => setTimeout(r, pauseMs));
       if (!onShop()) return fail(`This tab left the requested Depop shop ${shop} (${clip(location.href, 180)}). Nothing was imported.`);
@@ -214,11 +276,17 @@ export async function readDepopShop(shop, deadlineMs, cap = 400, pace) {
     const capHit = stop === 'cap';
     const chips = chipTexts();
     const pageUrl = String(location.href || '');
+    const resultCount = shownCount();
+    const short = resultCount > 0 && queued.length < resultCount;
     const evidence = `Tab ${snap.href}. readyState ${snap.readyState}. Title "${snap.title || '(none)'}". Document body ${snap.hasBody ? 'present' : 'missing'}. Product anchors ${snap.productAnchors}. Exact label "item listed by ${shop}": ${snap.exact}. Unique selling links: ${snap.productUrls.length}. Sold-section links skipped: ${snap.soldLinks}. Other "item listed by" anchors: ${snap.otherListed}. Open shadow roots walked: ${snap.shadows}. Sample product aria-labels: ${snap.samples.length ? snap.samples.join(' | ') : '(none)'}. Filter chips: ${chips.length ? chips.join(' | ') : '(none)'}. Closed shadow roots were not opened.`;
     if (!queued.length && !pace?.allowEmpty)
       return fail(`Depop shop ${shop} was not imported. No candidate anchors were available before the time limit, so this is an incomplete or unrecognized page, not a finished import. ${evidence} Nothing was imported. Sync will not remove listings.`);
     const how = stop === 'sold'
       ? ' Stopped at the Sold items section. Sold listings were not queued.'
+      : stop === 'target'
+        ? ` Reached the displayed count (${queued.length}/${resultCount}).`
+      : short
+        ? ` Stopped at ${queued.length} of ${resultCount} shown results.`
       : limitHit
         ? ` Shop scroll hit its read limit before the grid settled (${queued.length} links queued). This may not be the whole shop.`
         : capHit
@@ -226,7 +294,7 @@ export async function readDepopShop(shop, deadlineMs, cap = 400, pace) {
           : ' The visible shop grid stopped growing.';
     return {
       ok: true, complete: false, partial, limitHit, capHit, value: [], productUrls: queued,
-      chips, cardTexts: snap.cardTexts || [], pageUrl,
+      chips, cardTexts: snap.cardTexts || [], pageUrl, resultCount, short,
       reason: `Depop shop ${shop}: ${queued.length} candidate links queued in page order for a western-boot check (scan cap ${limit}).${how} ${evidence} Sync will not remove listings.`,
     };
   } catch (e) {
