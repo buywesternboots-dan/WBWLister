@@ -10,6 +10,7 @@ import { CHANNELS, post } from '../lib/crosspost';
 import { isExtensionShop, sellerFormState, sellerSavePayload } from '../lib/seller-links';
 import { intakeLabel } from '../lib/intake';
 import IntakeForm from '../components/intake-form';
+import IntakeSubmissions from '../components/intake-submissions';
 
 // Selected seller comes from ?seller= (the extension's seller dropdown uses the same names).
 const seller = () => new URLSearchParams(location.search).get('seller') || '';
@@ -100,10 +101,12 @@ export default function Screen({ admin = false }) {
   const [optBusy, setOptBusy] = useState(false);
   const [intakeOpen, setIntakeOpen] = useState(false);
   const [intakeBusy, setIntakeBusy] = useState(false);
+  const [packets, setPackets] = useState([]);
 
   const current = sellers.find(s => s.seller === who), hasDetails = !!current?.name;
   const setRun = patch => setRunState(r => ({ ...r, ...patch }));
   const loadSellers = () => api('GET', null, '', '/api/sellers').then(setSellers).catch(e => setErr(e.message));
+  const loadPackets = () => admin ? api('GET', null, '', '/api/intake-submissions').then(setPackets).catch(e => setErr(e.message)) : Promise.resolve();
   // A seller's login is always their own items (the server enforces it); an admin picks a seller via ?seller=.
   const load = () => (seller() || me?.seller ? api('GET', null, `?status=${tab}`).then(setItems).catch(e => setErr(e.message)) : setItems([]));
   const loadRef = useRef(load); loadRef.current = load;
@@ -112,6 +115,7 @@ export default function Screen({ admin = false }) {
     api('GET', null, '', '/api/me').then(m => { setMe(m); if (m.seller) setWho(m.seller); }).catch(() => {});
     if (admin) setWho(seller()); // a seller screen ignores ?seller=; the session names them
     loadSellers();
+    loadPackets();
   }, []);
   useEffect(() => { setSel(new Set()); setEdit(null); setFilter({}); load(); }, [tab, me?.seller]);
   useEffect(() => { setLink(current?.website || current?.fb_profile || ''); }, [current?.website, current?.fb_profile]);
@@ -282,6 +286,7 @@ export default function Screen({ admin = false }) {
       {admin && who && <p className="help">When a seller approves a listing, it is published here right away. You can still see and edit every listing. Export CSV is the file for WBW. Nothing is sent to the live site yet.</p>}
       {admin && current?.intake && <p className={current.intake.done ? 'help' : 'warn'}>{intakeLabel(current.intake)}</p>}
       {admin && !who && !sellerForm && sellers.some(s => s.name) && <ul className="intake-list">{sellers.filter(s => s.name).map(s => <li key={s.seller}>{s.display_name ?? s.seller} — {intakeLabel(s.intake)}</li>)}</ul>}
+      {admin && <IntakeSubmissions rows={packets} onChange={() => { loadPackets(); loadSellers(); }} busy={intakeBusy} setBusy={setIntakeBusy} setErr={setErr} />}
       {intakeOpen && current?.name && <IntakeForm seller={current} admin={admin} busy={intakeBusy} error={err} onSave={saveIntake} onClose={() => setIntakeOpen(false)} />}
       {!ext && isExtensionShop(link) && <p className="help">Facebook and Depop import through the BootLister Chrome extension, which uses the sign-in already in this browser:
         1) download it with the <a href="/bootlister-extension-0.19.zip" download>Chrome extension 0.19</a> link and unzip it; 2) open chrome://extensions and turn on
@@ -472,6 +477,9 @@ dl{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:4p
 .preset{margin-left:6px;padding:0 6px;font-size:12px}
 .help{font-size:13px;color:#6b5a4a;background:#fff;border:1px solid #e6dfd6;border-radius:8px;padding:10px}
 .intake-list{margin:0 0 12px;padding:10px 12px 10px 28px;background:#fff;border:1px solid #e6dfd6;border-radius:8px;font-size:14px}
+.packet{display:flex;gap:10px;align-items:flex-start;padding:8px 0;border-top:1px solid #e6dfd6}
+.packet img{width:48px;height:48px;object-fit:cover;border-radius:6px;background:#eee;flex-shrink:0}
+.packet > div{flex:1;display:flex;flex-direction:column;gap:4px;min-width:0}
 .check{flex-direction:row;align-items:flex-start;gap:8px;font-size:15px;color:#2b2118}
 .check input{width:20px;height:20px;flex-shrink:0;margin-top:2px}
 @media(max-width:640px){.who,.site,.tools{align-items:stretch}.who select,.who button,.site input,.site button{width:100%}}
