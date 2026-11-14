@@ -1,4 +1,4 @@
-import { getIntakePhoto } from '../../../../../lib/public-intake-store';
+import { getIntakePhoto } from '../../../../lib/public-intake-store';
 
 export const dynamic = 'force-dynamic';
 
