@@ -6,8 +6,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  acceptScan, collectIds, depopSellerHandle, explainPageFailure, pageScriptEmpty, parseDepopResultCount, quietScrollsNeeded, readDepopProduct, readDepopShop, rejectEmptyDepopShop, NO_FACEBOOK_LISTINGS,
+  acceptScan, collectIds, depopFetchJson, depopSellerHandle, explainPageFailure, pageScriptEmpty, parseDepopResultCount, quietScrollsNeeded, readDepopProduct, readDepopShop, readShopId, rejectEmptyDepopShop, NO_FACEBOOK_LISTINGS,
 } from '../extension/import-page.mjs';
+import { aggregateTotal, collectDepopPages, depopAggregatesUrl, depopProductsUrl, DEPOP_PAGE_PAUSE_MS } from '../extension/depop-feed.mjs';
 import { westernBootDecision, bootScanSummary, GATE_VERSION, rejectToStore } from '../extension/boot-gate.mjs';
 import { absentIds, actorForJob, allowedBootlisterOrigin, CANDIDATE_CAP, cardIsNonFootwear, cookieReadUrl, createImportLock, depopBootFilters, gateWrite, importLimit, injectionLost, JOB_DEADLINE_MAX_MS, jobSummary, navListenerArmedBeforeTabCreate, planFilteredShop, planKnownSkips, planSync, presenceIds, REJECT_BATCH, retryInjection, scanWindowOpen, scriptArgs, sessionFromCookie, shopAfterFilterError, shopReadArgs, SHOP_READ_MS, SIGNED_OUT, validateItemEnvelope, WRITE_CAP, withDeadline } from '../extension/import-job.mjs';
 import { knownApi, rejectApi } from '../lib/known-api.js';
@@ -1047,12 +1048,128 @@ test('a removed frame is retried once, then the shop falls back, and the summary
   const bg = read('extension/background.js').toString();
   assert.match(bg, /retryInjection\(once\)/);
   assert.match(bg, /shopAfterFilterError/);
-  const grid = bg.slice(bg.indexOf('async function readShopGrid'), bg.indexOf('async function importDepop'));
+  const grid = bg.slice(bg.indexOf('async function readShopGrid'), bg.indexOf('async function readFilteredReports'));
   assert.match(grid, /readDepopShop, 'ISOLATED'/);
-  assert.match(grid, /, false\)/);
+  assert.match(grid, /visible === true/);
+  assert.match(bg, /readFilteredReports\(shop, deadline, true\)/);
   const counted = jobSummary({ added: 2, duplicate: 3, prior: 4, opened: 5, failed: 1, modeNote: 'Boots only (fast).' });
   assert.match(counted, /Boots only \(fast\)\./);
   assert.match(counted, /2 new, 3 already imported \(skipped\), 4 previously not boots \(skipped\), 5 opened, 1 failed/);
+});
+
+test('Depop boots paging follows the product-list cursor and never calls the sold list', async () => {
+  const cursor = 'MnwyNHwxNzk0NjI2Mjcw';
+  const next = 'M3w0OHwxNzk0NjI2Mjcw';
+  assert.equal(depopProductsUrl('6702411', { gender: 'female' }), 'https://webapi.depop.com/presentation/api/v1/shops/6702411/products/?limit=24&groups=footwear&product_types=boots&gender=female');
+  assert.equal(depopProductsUrl('6702411', { gender: 'female', after: cursor }), `https://webapi.depop.com/presentation/api/v1/shops/6702411/products/?limit=24&groups=footwear&product_types=boots&gender=female&after=${cursor}`);
+  assert.equal(depopProductsUrl('6702411'), 'https://webapi.depop.com/presentation/api/v1/shops/6702411/products/?limit=24&groups=footwear&product_types=boots');
+  assert.equal(/gender=/.test(depopProductsUrl('6702411')), false);
+  assert.equal(/by-status\/sold/.test(depopProductsUrl('6702411', { gender: 'male' })), false);
+  assert.equal(/by-status\/sold/.test(depopAggregatesUrl('6702411', 'female')), false);
+  assert.equal(aggregateTotal({ meta: { total_count: 49 } }), 49);
+  assert.equal(aggregateTotal({ meta: { totalCount: '43' } }), 43);
+  assert.equal(aggregateTotal({}), 0);
+  assert.equal(DEPOP_PAGE_PAUSE_MS, 400);
+  const page = (start, count, meta) => ({
+    status: 200,
+    body: { products: Array.from({ length: count }, (_, i) => ({ id: start + i, slug: `boot-${start + i}` })), meta },
+  });
+  let pauses = 0;
+  const fortyNine = await collectDepopPages({
+    shopId: '6702411',
+    gender: 'female',
+    pause: async () => { pauses += 1; },
+    fetchJson: async (url) => {
+      if (!url.includes('after=')) return page(1, 24, { cursor, has_more: true });
+      if (url.includes(cursor)) return page(25, 24, { cursor: next, has_more: true });
+      return page(49, 1, { has_more: false, end: true });
+    },
+  });
+  assert.equal(fortyNine.ok, true);
+  assert.equal(fortyNine.urls.length, 49);
+  assert.equal(fortyNine.pages, 3);
+  assert.equal(pauses, 2);
+  assert.equal(fortyNine.requested.some(url => /by-status\/sold/.test(url)), false);
+  const overlap = await collectDepopPages({
+    shopId: '6702411',
+    gender: 'male',
+    fetchJson: async (url) => {
+      if (!url.includes('after=')) return page(1, 24, { cursor, has_more: true });
+      const products = [
+        ...Array.from({ length: 4 }, (_, i) => ({ id: 21 + i, slug: `boot-${21 + i}` })),
+        { id: 999, slug: 'boot-1' },
+        ...Array.from({ length: 19 }, (_, i) => ({ id: 100 + i, slug: `boot-${100 + i}` })),
+      ];
+      return { status: 200, body: { products, meta: { has_more: false } } };
+    },
+  });
+  assert.equal(overlap.ok, true);
+  assert.equal(overlap.urls.length, 43);
+  assert.equal(overlap.urls.filter(url => url.endsWith('/boot-1/')).length, 1);
+  const empty = await collectDepopPages({
+    shopId: '6702411',
+    fetchJson: async (url) => url.includes('after=')
+      ? { status: 200, body: { products: [], meta: { cursor: next, has_more: true } } }
+      : page(1, 24, { cursor, has_more: true }),
+  });
+  assert.equal(empty.ok, true);
+  assert.equal(empty.stop, 'empty');
+  assert.equal(empty.pages, 2);
+  assert.equal(empty.urls.length, 24);
+  let calls = 0;
+  const limited = await collectDepopPages({
+    shopId: '6702411',
+    gender: 'female',
+    fetchJson: async (url) => {
+      calls += 1;
+      assert.equal(/by-status\/sold/.test(url), false);
+      if (calls === 1) return page(1, 24, { cursor, has_more: true });
+      return { status: 429, body: null };
+    },
+  });
+  assert.equal(limited.ok, false);
+  assert.equal(limited.status, 429);
+  assert.equal(limited.urls.length, 0);
+  assert.equal(calls, 2);
+  const blocked = await collectDepopPages({
+    shopId: '6702411',
+    fetchJson: async () => ({ status: 403, body: null }),
+  });
+  assert.equal(blocked.ok, false);
+  assert.equal(blocked.status, 403);
+  const missingCursor = await collectDepopPages({
+    shopId: '6702411',
+    fetchJson: async () => page(1, 24, {}),
+  });
+  assert.equal(missingCursor.ok, false);
+  assert.equal(missingCursor.stop, 'cursor');
+  const prev = globalThis.fetch;
+  let fetched = 0;
+  globalThis.fetch = async () => { fetched += 1; return { status: 200, json: async () => ({}) }; };
+  try {
+    assert.deepEqual(await depopFetchJson('https://webapi.depop.com/presentation/api/v1/shops/6702411/products/by-status/sold/'), { status: 0, body: null });
+    assert.equal(fetched, 0);
+  } finally { globalThis.fetch = prev; }
+  const feedUrl = depopProductsUrl('6702411', { gender: 'female', after: cursor });
+  assert.deepEqual(scriptArgs([feedUrl]), [feedUrl]);
+  assert.equal(JSON.stringify(scriptArgs([feedUrl])).includes('undefined'), false);
+  const shop = { props: { pageProps: { other: { username: 'someone', id: 111 }, shop: { username: 'nuclear_nostalgia', id: 6702411 } } } };
+  const priorWindow = globalThis.window;
+  const priorDocument = globalThis.document;
+  globalThis.window = {};
+  globalThis.document = { getElementById: id => id === '__NEXT_DATA__' ? { textContent: JSON.stringify(shop) } : null };
+  try { assert.equal(readShopId('nuclear_nostalgia'), '6702411'); assert.equal(readShopId('absent'), ''); }
+  finally { globalThis.window = priorWindow; globalThis.document = priorDocument; }
+  const filters = depopBootFilters('nuclear_nostalgia');
+  const plan = planFilteredShop([
+    { ...filters[0], urls: Array.from({ length: 49 }, (_, i) => `https://www.depop.com/products/w-${i}/`), chips: [], cardTexts: [], href: filters[0].url, resultCount: 49, pages: 3 },
+    { ...filters[1], urls: Array.from({ length: 43 }, (_, i) => `https://www.depop.com/products/m-${i}/`), chips: [], cardTexts: [], href: filters[1].url, resultCount: 43, pages: 2 },
+  ]);
+  assert.equal(plan.ok, true);
+  assert.match(plan.note, /Women 49\/49 \(3 pages\), Men 43\/43 \(2 pages\)/);
+  const ext = ['background.js', 'depop-feed.mjs', 'import-page.mjs', 'import-job.mjs'].map(name => read(`extension/${name}`).toString()).join('\n');
+  assert.equal(ext.includes('6702411'), false);
+  assert.match(read('extension/import-page.mjs').toString(), /credentials:\s*'include'/);
 });
 
 test('shop script args stay JSON-serializable when allowEmpty is false', () => {
@@ -1087,7 +1204,9 @@ test('the committed extension zip matches source and its service worker parses',
   assert.match(depop, /complete: false/);
   assert.match(depop, /readDepopShop, 'ISOLATED'/);
   assert.match(depop, /readDepopProduct, 'ISOLATED'/);
-  assert.equal(depop.includes("'MAIN'"), false);
+  assert.match(depop, /readShopId, 'MAIN'/);
+  assert.match(depop, /depopFetchJson, 'MAIN'/);
+  assert.match(depop, /Scrolling the filtered grids in a visible tab/);
   assert.match(depop, /rejectEmptyDepopShop/);
   assert.match(depop, /CANDIDATE_CAP/);
   assert.match(depop, /westernBootDecision/);
@@ -1105,12 +1224,12 @@ test('the committed extension zip matches source and its service worker parses',
   assert.match(read('app/screen.js').toString(), /Source condition/);
   assert.match(read('extension/popup.js').toString(), /r\.skipped/);
   const manifest = JSON.parse(read('extension/manifest.json').toString());
-  assert.equal(manifest.version, '0.19');
-  const zip = readZip(read('public/bootlister-extension-0.19.zip'));
+  assert.equal(manifest.version, '0.20');
+  const zip = readZip(read('public/bootlister-extension-0.20.zip'));
   const loop = bg.slice(bg.indexOf('async function importAll'), bg.indexOf('async function importFacebook'));
   assert.equal(loop.includes('retry(() => importOne'), false);
   assert.match(bg, /x-import-job/);
-  const names = ['background.js', 'boot-gate.mjs', 'bridge.js', 'import-page.mjs', 'import-job.mjs', 'manifest.json', 'popup.html', 'popup.js'];
+  const names = ['background.js', 'boot-gate.mjs', 'bridge.js', 'depop-feed.mjs', 'import-page.mjs', 'import-job.mjs', 'manifest.json', 'popup.html', 'popup.js'];
   assert.deepEqual([...zip.keys()].sort(), names.map(n => `wbw-importer/${n}`).sort());
   for (const name of names) assert.deepEqual(zip.get(`wbw-importer/${name}`), read(`extension/${name}`));
   const dir = mkdtempSync(join(tmpdir(), 'bootlister-ext-'));

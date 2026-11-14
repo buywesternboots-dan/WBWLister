@@ -1,5 +1,6 @@
-import { acceptScan, collectIds, explainPageFailure, readDepopProduct, readDepopShop, rejectEmptyDepopShop, NO_FACEBOOK_LISTINGS } from './import-page.mjs';
+import { acceptScan, collectIds, depopFetchJson, explainPageFailure, readDepopProduct, readDepopShop, readShopId, rejectEmptyDepopShop, NO_FACEBOOK_LISTINGS } from './import-page.mjs';
 import { bootScanSummary, rejectToStore, westernBootDecision } from './boot-gate.mjs';
+import { aggregateTotal, collectDepopPages, depopAggregatesUrl, DEPOP_PAGE_PAUSE_MS } from './depop-feed.mjs';
 import { API_TIMEOUT_MS, actorForJob, allowedBootlisterOrigin, BOOTLISTER_ORIGINS, CANDIDATE_CAP, cookieReadUrl, createImportLock, depopBootFilters, gateWrite, importLimit, jobSummary, planFilteredShop, planKnownSkips, planSync, presenceIds, REJECT_BATCH, retryInjection, scanWindowOpen, scriptArgs, sessionFromCookie, shopAfterFilterError, shopReadArgs, SHOP_MODE_FULL, SHOP_READ_MS, SIGNED_OUT, validateItemEnvelope, withDeadline } from './import-job.mjs';
 
 const ITEM = /facebook\.com\/marketplace\/item\/(\d+)/;
@@ -235,10 +236,77 @@ async function importFacebook(profileId, sync) {
 
 // Depop: the shop tab's own document. Isolated world, so page scripts cannot replace querySelectorAll.
 // The result is a plain object. Zero candidates throw before any write and before "Done".
-async function readShopGrid(shop, url, deadline, allowEmpty) {
+async function readShopGrid(shop, url, deadline, allowEmpty, visible) {
   const args = shopReadArgs(shop, deadline, CANDIDATE_CAP, allowEmpty);
-  // Background tab so a filter navigation does not replace the shop the seller is looking at.
-  return inTab(url, 250, (id, site) => runCall(id, readDepopShop, 'ISOLATED', args, SHOP_READ_MS + 5000, site), false);
+  // A background tab never loads more than the first grid page. Visible is only the API fallback.
+  return inTab(url, 250, (id, site) => runCall(id, readDepopShop, 'ISOLATED', args, SHOP_READ_MS + 5000, site), visible === true);
+}
+async function readFilteredReports(shop, deadline, visible) {
+  const reports = [];
+  let variantError = '';
+  for (const variant of depopBootFilters(shop)) {
+    if (deadline - Date.now() < 8000) break;
+    try {
+      const raw = await readShopGrid(shop, variant.url, deadline, true, visible);
+      const data = raw?.ok === true ? acceptScan(raw, 'Depop') : null;
+      reports.push({
+        ...variant,
+        urls: data?.productUrls || [],
+        chips: data?.chips || [],
+        cardTexts: data?.cardTexts || [],
+        href: data?.pageUrl || '',
+        partial: data?.partial === true,
+        limitHit: data?.limitHit === true,
+        capHit: data?.capHit === true,
+        resultCount: Number(data?.resultCount) || 0,
+      });
+    } catch (e) {
+      const step = shopAfterFilterError(e);
+      variantError = step.reason;
+      reports.push({ ...variant, urls: [], chips: [], cardTexts: [], href: '', readError: step.reason });
+      if (variant.gender) break;
+    }
+  }
+  return { reports, variantError };
+}
+// Product list in the shop tab's own session. One URL string per request, so the arguments stay serializable.
+async function readDepopProductList(shop) {
+  return inTab(`https://www.depop.com/${shop}/`, 250, async (tabId, site) => {
+    const shopId = await runCall(tabId, readShopId, 'MAIN', [shop], 15000, site);
+    if (!/^\d+$/.test(String(shopId || ''))) return { ok: false, reason: 'shop id was not on the page' };
+    const reports = [];
+    for (const variant of depopBootFilters(shop)) {
+      const agg = await runCall(tabId, depopFetchJson, 'MAIN', [depopAggregatesUrl(shopId, variant.gender)], 20000, site);
+      if (agg?.status === 429 || agg?.status === 403) return { ok: false, reason: `HTTP ${agg.status}` };
+      const total = aggregateTotal(agg?.status === 200 ? agg.body : null);
+      const collected = await collectDepopPages({
+        shopId,
+        gender: variant.gender,
+        cap: CANDIDATE_CAP,
+        pause: () => wait(DEPOP_PAGE_PAUSE_MS),
+        fetchJson: url => runCall(tabId, depopFetchJson, 'MAIN', [url], 20000, site),
+      });
+      if (!collected.ok) {
+        const reason = collected.status === 429 || collected.status === 403 ? `HTTP ${collected.status}` : `product list stopped (${collected.stop})`;
+        return { ok: false, reason };
+      }
+      const finished = collected.stop === 'end' || collected.stop === 'empty';
+      const resultCount = total || (finished ? collected.urls.length : 0);
+      reports.push({
+        ...variant,
+        urls: collected.urls,
+        chips: [],
+        cardTexts: [],
+        href: variant.url,
+        partial: resultCount > 0 && collected.urls.length < resultCount,
+        limitHit: false,
+        capHit: collected.stop === 'cap',
+        resultCount,
+        pages: collected.pages,
+      });
+    }
+    return { ok: true, reports };
+  }, false);
 }
 async function importDepop(shop, sync, recheck, shopMode) {
   const cap = lock.job?.limit;
@@ -252,31 +320,21 @@ async function importDepop(shop, sync, recheck, shopMode) {
     productUrls = rejectEmptyDepopShop(scan, shop);
     modeNote = `${SHOP_MODE_FULL}.`;
   } else {
-    status('Reading Depop boots filters…');
-    const reports = [];
+    let reports = [];
     let variantError = '';
-    for (const variant of depopBootFilters(shop)) {
-      if (deadline - Date.now() < 8000) break;
-      try {
-        const raw = await readShopGrid(shop, variant.url, deadline, true);
-        const data = raw?.ok === true ? acceptScan(raw, 'Depop') : null;
-        reports.push({
-          ...variant,
-          urls: data?.productUrls || [],
-          chips: data?.chips || [],
-          cardTexts: data?.cardTexts || [],
-          href: data?.pageUrl || '',
-          partial: data?.partial === true,
-          limitHit: data?.limitHit === true,
-          capHit: data?.capHit === true,
-          resultCount: Number(data?.resultCount) || 0,
-        });
-      } catch (e) {
-        const step = shopAfterFilterError(e);
-        variantError = step.reason;
-        reports.push({ ...variant, urls: [], chips: [], cardTexts: [], href: '', readError: step.reason });
-        if (variant.gender) break;
-      }
+    let api = { ok: false, reason: 'product list was not read' };
+    try {
+      status('Reading Depop boots from the shop product list…');
+      api = await readDepopProductList(shop);
+    } catch (e) {
+      api = { ok: false, reason: e?.message || 'product list failed' };
+    }
+    if (api?.ok && api.reports?.length) reports = api.reports;
+    else {
+      status(`Depop product list failed (${api?.reason || 'no list'}). Scrolling the filtered grids in a visible tab.`);
+      const dom = await readFilteredReports(shop, deadline, true);
+      reports = dom.reports;
+      variantError = dom.variantError;
     }
     const plan = planFilteredShop(reports);
     if (variantError || !plan.ok) {

@@ -89,9 +89,11 @@ export function planFilteredShop(reports) {
   const counts = keep.map(r => {
     const got = (r.urls || []).length;
     const target = Number(r.resultCount) || 0;
-    if (target > 0 && got < target) return `${r.label} ${got}/${target} short`;
-    if (target > 0) return `${r.label} ${got}/${target}`;
-    return `${r.label} ${got}`;
+    const pages = Number(r.pages) || 0;
+    const pageNote = pages ? ` (${pages} ${pages === 1 ? 'page' : 'pages'})` : '';
+    if (target > 0 && got < target) return `${r.label} ${got}/${target} short${pageNote}`;
+    if (target > 0) return `${r.label} ${got}/${target}${pageNote}`;
+    return `${r.label} ${got}${pageNote}`;
   }).join(', ');
   const extra = notes.length ? ` ${notes.join('. ')}.` : '';
   return { ok: true, urls, note: `${SHOP_MODE_BOOTS}. ${counts}.${extra}` };

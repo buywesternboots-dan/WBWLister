@@ -415,3 +415,36 @@ export async function collectIds(profileId, deadlineMs, stepMs = 1500, cap = 2) 
   const value = ids().slice(0, limit);
   return { ok: true, value, complete: false, reason: unproven };
 }
+
+// Shop id from the shop page's own data. Injected into the page, so it does not call other modules.
+export function readShopId(shop) {
+  const want = String(shop || '').toLowerCase();
+  let data = null;
+  try { data = window.__NEXT_DATA__ || null; } catch { data = null; }
+  if (!data) {
+    let raw = '';
+    try { raw = document.getElementById('__NEXT_DATA__')?.textContent || ''; } catch { raw = ''; }
+    try { data = raw ? JSON.parse(raw) : null; } catch { data = null; }
+  }
+  const stack = [data];
+  while (stack.length) {
+    const node = stack.pop();
+    if (!node || typeof node !== 'object') continue;
+    if (Array.isArray(node)) { for (const item of node) stack.push(item); continue; }
+    const username = String(node.username || node.slug || '').toLowerCase();
+    const id = node.id ?? node.userId ?? node.user_id;
+    if (username === want && /^\d{3,}$/.test(String(id))) return String(id);
+    for (const value of Object.values(node)) if (value && typeof value === 'object') stack.push(value);
+  }
+  return '';
+}
+
+// One product-list request, in the page's own session. The sold list is never requested.
+export async function depopFetchJson(url) {
+  if (typeof url !== 'string' || /by-status\/sold/i.test(url)) return { status: 0, body: null };
+  const response = await fetch(url, { credentials: 'include' });
+  if (response.status === 429 || response.status === 403) return { status: response.status, body: null };
+  let body = null;
+  try { body = await response.json(); } catch { body = null; }
+  return { status: response.status, body };
+}

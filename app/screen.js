@@ -265,14 +265,14 @@ export default function Screen({ admin = false }) {
         {who && <button onClick={() => setSellerForm(hasDetails ? current : { name: who, sync: 'off' })}>{hasDetails ? 'Seller settings' : 'Set up seller'}</button>}
         <button className="primary" onClick={() => setSellerForm({ sync: 'off' })}>+ Add seller</button></>}
         {admin && who && <button type="button" onClick={() => act({ action: 'optimize-backfill' })}>Optimize existing</button>}
-        {admin && <a className="src" href="/bootlister-extension-0.19.zip" download title="Needed for Facebook and Depop imports">Chrome extension 0.19{ext ? ' ✓' : ''}</a>}
+        {admin && <a className="src" href="/bootlister-extension-0.20.zip" download title="Needed for Facebook and Depop imports">Chrome extension 0.20{ext ? ' ✓' : ''}</a>}
         {admin && <a className="src" href="/admin/bugs">Bug reports</a>}
         <a className="src" href="/login" onClick={e => { e.preventDefault(); fetch('/api/login', { method: 'DELETE' }).then(() => location.assign('/login')); }}>Log out</a>
       </div>
       {!admin && <p className="help">Your job is to double-check each listing before it goes live, including anything shown in yellow. When you approve it, it is published right away. It is marked exported here — WBW is not connected yet, so nothing is sent to the live site.</p>}
       {admin && who && <p className="help">When a seller approves a listing, it is published here right away. You can still see and edit every listing. Export CSV is the file for WBW. Nothing is sent to the live site yet.</p>}
       {!ext && EXTENSION_LINK.test(link) && <p className="help">Facebook and Depop import through the BootLister Chrome extension, which uses the sign-in already in this browser:
-        1) download it with the <a href="/bootlister-extension-0.19.zip" download>Chrome extension 0.19</a> link and unzip it; 2) open chrome://extensions and turn on
+        1) download it with the <a href="/bootlister-extension-0.20.zip" download>Chrome extension 0.20</a> link and unzip it; 2) open chrome://extensions and turn on
         Developer mode; 3) click Load unpacked and pick the unzipped wbw-importer folder; 4) reload this page.</p>}
 
       {admin && sellerForm && <div className="panel">
