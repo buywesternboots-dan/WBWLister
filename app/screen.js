@@ -11,6 +11,7 @@ import { isExtensionShop, sellerFormState, sellerSavePayload } from '../lib/sell
 import { intakeLabel } from '../lib/intake';
 import IntakeForm from '../components/intake-form';
 import IntakeSubmissions from '../components/intake-submissions';
+import ListingVideo from '../components/listing-video';
 
 // Selected seller comes from ?seller= (the extension's seller dropdown uses the same names).
 const seller = () => new URLSearchParams(location.search).get('seller') || '';
@@ -385,6 +386,7 @@ export default function Screen({ admin = false }) {
               <small className="photocount">{i.photos?.length || 0} stored photo{(i.photos?.length || 0) === 1 ? '' : 's'}</small>
               {(i.photos || []).slice(1, 8).map((src, n) => <img key={n} src={src} alt="" loading="lazy" />)}
             </div>
+            <ListingVideo item={i} />
             {edit?.id === i.id ? <div className="form">
               {FIELDS.map(f => <label key={f} className={unverified(i).includes(f) ? 'guess' : flagged(i).includes(f) ? 'miss' : ''}>
                 <span>{LABELS[f]}{unverified(i).includes(f) && ' — auto-filled, verify'}
@@ -468,6 +470,10 @@ h2{font-size:15px;margin:20px 0 8px;color:#6b5a4a;display:flex;flex-wrap:wrap;ga
 @media(max-width:640px){.compare{grid-template-columns:1fr}}
 .item img,.noimg{width:72px;height:72px;object-fit:cover;border-radius:6px;background:#eee;flex-shrink:0}
 .pics{display:flex;flex-wrap:wrap;gap:4px;width:148px;align-items:center}.pics img,.pics .noimg{width:48px;height:48px}.photocount{flex:1 0 100%;font-size:12px;color:#6b5a4a}
+.listing-video{flex:1 0 100%;display:flex;flex-wrap:wrap;gap:8px;align-items:center;border-top:1px solid #e6dfd6;padding-top:8px}
+.listing-video canvas,.listing-video video{width:240px;max-width:100%;height:auto;border-radius:6px;background:#111;aspect-ratio:1}
+.listing-video canvas.off{position:absolute;width:240px;height:240px;opacity:0;pointer-events:none}
+.listing-video button{font-size:13px;padding:6px 10px}
 .info{display:flex;flex-direction:column;cursor:pointer;flex:1;min-width:0}.info small{color:#8a7a6a}
 .form{display:flex;flex-direction:column;gap:6px;flex:1}.form label>span{display:flex;align-items:center}
 dl{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:4px 12px;margin:6px 0;font-size:13px}dt{color:#8a7a6a;font-size:11px}dd{margin:0}
