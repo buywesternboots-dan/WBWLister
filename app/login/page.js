@@ -36,6 +36,7 @@ export default function Login() {
     <button style={{ ...field, background: '#1f6f6b', color: '#fff', borderColor: '#1f6f6b' }}>{mode === 'reg' ? 'Create account' : mode === 'invite' ? 'Set password' : 'Log in'}</button>
     <button type="button" onClick={() => { setMode(mode === 'reg' ? 'in' : 'reg'); setErr(''); }} style={{ ...field, background: '#fff' }}>{mode === 'reg' ? 'Have an account? Log in' : 'New seller? Create an account'}</button>
     <button type="button" onClick={() => { setMode(mode === 'invite' ? 'in' : 'invite'); setErr(''); }} style={{ ...field, background: '#fff' }}>{mode === 'invite' ? 'Back to log in' : 'Have an invite code?'}</button>
+    <a href="/intake" style={{ ...field, textAlign: 'center', textDecoration: 'none' }}>Joining as a seller? Start with this short form</a>
     <small style={{ color: '#6b5a4a' }}>
       Sellers register with an email or a phone number and a password, then only see their own items. An existing seller is not claimed by registering again — an admin sets the password or gives you an invite code. Approving a listing marks it exported here — nothing is sent to the live site yet. Staff sign in with the username admin and the admin password. In production the site stays closed until that password is set (ADMIN_PASSWORD, or APP_PASSWORD if that is the one configured).
     </small>

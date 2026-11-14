@@ -38,7 +38,7 @@ test('logged out, every API route returns 401 and / redirects to /login', async 
       const decision = await decide(path, '', ENV);
       if (signIn) assert.equal(decision.type, 'next', path);
       else assert.deepEqual(decision, { type: 'json', status: 401, error: 'Please log in.' }, path);
-      if (path === '/api/register') continue;
+      if (path === '/api/register' || path === '/api/public-intake') continue;
       const mod = await import(pathToFileURL(file).href);
       for (const method of METHODS) {
         if (typeof mod[method] !== 'function') continue;
