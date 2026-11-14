@@ -416,33 +416,58 @@ export async function collectIds(profileId, deadlineMs, stepMs = 1500, cap = 2) 
   return { ok: true, value, complete: false, reason: unproven };
 }
 
-// Shop id from the shop page's own data. Injected into the page, so it does not call other modules.
-export function readShopId(shop) {
-  const want = String(shop || '').toLowerCase();
-  let data = null;
-  try { data = window.__NEXT_DATA__ || null; } catch { data = null; }
-  if (!data) {
-    let raw = '';
-    try { raw = document.getElementById('__NEXT_DATA__')?.textContent || ''; } catch { raw = ''; }
-    try { data = raw ? JSON.parse(raw) : null; } catch { data = null; }
+// Shop id sources from the shop tab (MAIN world). Injected, so it does not call other modules; the background
+// picks the id with pickShopId. Waits up to waitMs for the page's own /shops/{id}/ requests, which fire after hydration.
+export async function readDepopSources(shop, waitMs = 5000) {
+  const SHOP = /webapi\.depop\.com\/presentation\/api\/v1\/shops\/\d{3,}\/(products|aggregates)\//;
+  const SOLD = /by-status\/sold/i;
+  const until = Date.now() + (Number(waitMs) > 0 ? Math.min(Number(waitMs), 15000) : 0);
+  const grab = () => {
+    let resourceUrls = [];
+    try { resourceUrls = performance.getEntriesByType('resource').map(e => String(e.name || '')).filter(u => SHOP.test(u) && !SOLD.test(u)); }
+    catch { resourceUrls = []; }
+    const hook = window.__bootlisterDepop || null;
+    const hookUrls = (hook?.urls || []).filter(u => !SOLD.test(u));
+    return { resourceUrls: resourceUrls.slice(0, 60), hookUrls: hookUrls.slice(0, 60), hookHeaders: hook?.headers || {}, hooked: !!hook };
+  };
+  let got = grab();
+  while (!got.resourceUrls.length && !got.hookUrls.length && Date.now() < until) {
+    await new Promise(r => setTimeout(r, 250));
+    got = grab();
   }
-  const stack = [data];
-  while (stack.length) {
-    const node = stack.pop();
-    if (!node || typeof node !== 'object') continue;
-    if (Array.isArray(node)) { for (const item of node) stack.push(item); continue; }
-    const username = String(node.username || node.slug || '').toLowerCase();
-    const id = node.id ?? node.userId ?? node.user_id;
-    if (username === want && /^\d{3,}$/.test(String(id))) return String(id);
-    for (const value of Object.values(node)) if (value && typeof value === 'object') stack.push(value);
+  let nextF = '';
+  try {
+    const chunks = Array.isArray(self.__next_f) ? self.__next_f : [];
+    nextF = chunks.map(c => (Array.isArray(c) ? c.filter(x => typeof x === 'string').join('') : '')).join('');
+  } catch { nextF = ''; }
+  if (nextF.length > 2_000_000) {
+    const at = nextF.toLowerCase().indexOf(`"username":"${String(shop || '').toLowerCase()}"`);
+    nextF = at >= 0 ? nextF.slice(Math.max(0, at - 4000), at + 4000) : nextF.slice(0, 2_000_000);
   }
-  return '';
+  let nextData = '';
+  try { nextData = document.getElementById('__NEXT_DATA__')?.textContent || ''; } catch { nextData = ''; }
+  if (nextData.length > 2_000_000) nextData = '';
+  return { ...got, nextF, nextData, href: String(location.href || '') };
 }
 
-// One product-list request, in the page's own session. The sold list is never requested.
-export async function depopFetchJson(url) {
+// Responses the page fetched itself, captured by depop-hook.js. Injected (MAIN world).
+export function readDepopHook() {
+  const hook = window.__bootlisterDepop || null;
+  if (!hook) return { hooked: false, urls: [], pages: [] };
+  return { hooked: true, urls: (hook.urls || []).slice(0, 200), pages: (hook.pages || []).slice(0, 100) };
+}
+
+// One product-list request, in the page's own session, with the headers Depop's own request used.
+// The sold list is never requested. A network/CORS failure returns status 0 with the error, not a throw.
+export async function depopFetchJson(url, headers) {
   if (typeof url !== 'string' || /by-status\/sold/i.test(url)) return { status: 0, body: null };
-  const response = await fetch(url, { credentials: 'include' });
+  const h = {};
+  if (headers && typeof headers === 'object') for (const [k, v] of Object.entries(headers)) {
+    if (/^[a-z0-9-]+$/i.test(k) && !/^(cookie|authorization|content-length|host|origin|referer)$/i.test(k)) h[k] = String(v);
+  }
+  let response;
+  try { response = await fetch(url, { credentials: 'include', headers: h }); }
+  catch (e) { return { status: 0, body: null, error: String(e?.message || e || 'fetch failed').slice(0, 200) }; }
   if (response.status === 429 || response.status === 403) return { status: response.status, body: null };
   let body = null;
   try { body = await response.json(); } catch { body = null; }

@@ -1,6 +1,6 @@
-import { acceptScan, collectIds, depopFetchJson, explainPageFailure, readDepopProduct, readDepopShop, readShopId, rejectEmptyDepopShop, NO_FACEBOOK_LISTINGS } from './import-page.mjs';
+import { acceptScan, collectIds, depopFetchJson, explainPageFailure, readDepopHook, readDepopProduct, readDepopShop, readDepopSources, rejectEmptyDepopShop, NO_FACEBOOK_LISTINGS } from './import-page.mjs';
 import { bootScanSummary, rejectToStore, westernBootDecision } from './boot-gate.mjs';
-import { aggregateTotal, collectDepopPages, depopAggregatesUrl, DEPOP_PAGE_PAUSE_MS } from './depop-feed.mjs';
+import { aggregateTotal, collectDepopPages, debugDump, depopAggregatesUrl, DEPOP_PAGE_PAUSE_MS, hookPageUrls, judgeDomRead, pickShopId } from './depop-feed.mjs';
 import { API_TIMEOUT_MS, actorForJob, allowedBootlisterOrigin, BOOTLISTER_ORIGINS, CANDIDATE_CAP, cookieReadUrl, createImportLock, depopBootFilters, gateWrite, importLimit, jobSummary, planFilteredShop, planKnownSkips, planSync, presenceIds, REJECT_BATCH, retryInjection, scanWindowOpen, scriptArgs, sessionFromCookie, shopAfterFilterError, shopReadArgs, SHOP_MODE_FULL, SHOP_READ_MS, SIGNED_OUT, validateItemEnvelope, withDeadline } from './import-job.mjs';
 
 const ITEM = /facebook\.com\/marketplace\/item\/(\d+)/;
@@ -236,29 +236,53 @@ async function importFacebook(profileId, sync) {
 
 // Depop: the shop tab's own document. Isolated world, so page scripts cannot replace querySelectorAll.
 // The result is a plain object. Zero candidates throw before any write and before "Done".
-async function readShopGrid(shop, url, deadline, allowEmpty, visible) {
-  const args = shopReadArgs(shop, deadline, CANDIDATE_CAP, allowEmpty);
+// withHook also returns what depop-hook.js saw the page fetch itself while the grid scrolled.
+async function readShopGrid(shop, url, deadline, allowEmpty, visible, cap = CANDIDATE_CAP, withHook = false) {
+  const args = shopReadArgs(shop, deadline, cap, allowEmpty);
   // A background tab never loads more than the first grid page. Visible is only the API fallback.
-  return inTab(url, 250, (id, site) => runCall(id, readDepopShop, 'ISOLATED', args, SHOP_READ_MS + 5000, site), visible === true);
+  return inTab(url, 250, async (id, site) => {
+    const grid = await runCall(id, readDepopShop, 'ISOLATED', args, SHOP_READ_MS + 5000, site);
+    if (!withHook) return grid;
+    let hook = null;
+    try { hook = await runCall(id, readDepopHook, 'MAIN', [], 10000, site); } catch { hook = null; }
+    return grid && typeof grid === 'object' ? { ...grid, hook } : grid;
+  }, visible === true);
 }
-async function readFilteredReports(shop, deadline, visible) {
+// Visible-tab fallback. Expected counts come from the product-list attempt when it got them.
+// Depop's own JSON pages (captured by depop-hook.js) win over DOM links; the DOM read is capped at twice the
+// expected count, and a cap hit, overshoot, or short read is a failed read, not a partial import.
+async function readFilteredReports(shop, deadline, visible, expectedBy = {}) {
   const reports = [];
+  const fallback = [];
   let variantError = '';
   for (const variant of depopBootFilters(shop)) {
     if (deadline - Date.now() < 8000) break;
+    const expected = Number(expectedBy[variant.id]) || 0;
+    const cap = expected ? Math.min(CANDIDATE_CAP, expected * 2) : CANDIDATE_CAP;
     try {
-      const raw = await readShopGrid(shop, variant.url, deadline, true, visible);
+      const raw = await readShopGrid(shop, variant.url, deadline, true, visible, cap, true);
       const data = raw?.ok === true ? acceptScan(raw, 'Depop') : null;
+      const fromHook = hookPageUrls(raw?.hook?.pages, variant.gender);
+      const domUrls = data?.productUrls || [];
+      const useHook = fromHook.length > 0 && (fromHook.length >= domUrls.length || (expected && fromHook.length === expected));
+      const urls = useHook ? fromHook : domUrls;
+      const judged = judgeDomRead({ urls, expected, capHit: !useHook && data?.capHit === true });
+      fallback.push({ label: variant.label, expected, dom: domUrls.length, hook: fromHook.length, used: useHook ? 'hook' : 'dom', ok: judged.ok, reason: judged.reason, hookPages: (raw?.hook?.pages || []).map(p => ({ url: p.url, status: p.status, count: (p.items || []).length })) });
+      if (expected && !judged.ok) {
+        reports.push({ ...variant, urls: [], chips: [], cardTexts: [], href: '', readError: `${variant.label} ${judged.reason}` });
+        variantError = `${variant.label} visible read ${judged.reason}`;
+        break;
+      }
       reports.push({
         ...variant,
-        urls: data?.productUrls || [],
+        urls,
         chips: data?.chips || [],
         cardTexts: data?.cardTexts || [],
         href: data?.pageUrl || '',
-        partial: data?.partial === true,
-        limitHit: data?.limitHit === true,
-        capHit: data?.capHit === true,
-        resultCount: Number(data?.resultCount) || 0,
+        partial: data?.partial === true && !useHook,
+        limitHit: data?.limitHit === true && !useHook,
+        capHit: data?.capHit === true && !useHook,
+        resultCount: expected || Number(data?.resultCount) || 0,
       });
     } catch (e) {
       const step = shopAfterFilterError(e);
@@ -267,45 +291,68 @@ async function readFilteredReports(shop, deadline, visible) {
       if (variant.gender) break;
     }
   }
-  return { reports, variantError };
+  return { reports, variantError, fallback };
+}
+// Debug dump for the popup's "Save Depop debug" button. Kept in local storage only.
+async function saveDepopDebug(dump) {
+  try { await chrome.storage.local.set({ depopDebug: { ...dump, version: chrome.runtime.getManifest().version, at: new Date().toISOString() } }); }
+  catch { /* storage full or unavailable; the import still reports in the popup */ }
 }
 // Product list in the shop tab's own session. One URL string per request, so the arguments stay serializable.
 async function readDepopProductList(shop) {
   return inTab(`https://www.depop.com/${shop}/`, 250, async (tabId, site) => {
-    const shopId = await runCall(tabId, readShopId, 'MAIN', [shop], 15000, site);
-    if (!/^\d+$/.test(String(shopId || ''))) return { ok: false, reason: 'shop id was not on the page' };
+    const cache = (await chrome.storage.local.get('depopShopIds').catch(() => ({})))?.depopShopIds || {};
+    const sources = await runCall(tabId, readDepopSources, 'MAIN', [shop, 5000], 20000, site);
+    const picked = pickShopId(sources || {}, shop, cache[shop]);
+    const dump = { shop, shopId: picked.id, source: picked.source, sources: sources || {}, variants: [] };
+    if (!picked.id) {
+      await saveDepopDebug(debugDump(dump));
+      return { ok: false, reason: 'shop id was not on the page', debug: dump };
+    }
+    if (cache[shop] !== picked.id) await chrome.storage.local.set({ depopShopIds: { ...cache, [shop]: picked.id } }).catch(() => {});
+    const headers = sources?.hookHeaders || {};
+    const fetchJson = url => runCall(tabId, depopFetchJson, 'MAIN', [url, headers], 20000, site);
     const reports = [];
+    const expectedBy = {};
+    let failure = '';
     for (const variant of depopBootFilters(shop)) {
-      const agg = await runCall(tabId, depopFetchJson, 'MAIN', [depopAggregatesUrl(shopId, variant.gender)], 20000, site);
-      if (agg?.status === 429 || agg?.status === 403) return { ok: false, reason: `HTTP ${agg.status}` };
-      const total = aggregateTotal(agg?.status === 200 ? agg.body : null);
+      const agg = await fetchJson(depopAggregatesUrl(picked.id, variant.gender));
+      if (agg?.status === 429 || agg?.status === 403) { failure = `HTTP ${agg.status}`; break; }
+      const expected = aggregateTotal(agg?.status === 200 ? agg.body : null);
+      if (expected) expectedBy[variant.id] = expected;
       const collected = await collectDepopPages({
-        shopId,
+        shopId: picked.id,
         gender: variant.gender,
         cap: CANDIDATE_CAP,
+        expected,
+        template: picked.template,
         pause: () => wait(DEPOP_PAGE_PAUSE_MS),
-        fetchJson: url => runCall(tabId, depopFetchJson, 'MAIN', [url], 20000, site),
+        fetchJson,
       });
+      dump.variants.push({ label: variant.label, gender: variant.gender, expected, ...collected, aggregatesStatus: agg?.status || 0, aggregatesError: agg?.error || '' });
       if (!collected.ok) {
-        const reason = collected.status === 429 || collected.status === 403 ? `HTTP ${collected.status}` : `product list stopped (${collected.stop})`;
-        return { ok: false, reason };
+        const err = collected.log?.at?.(-1)?.error;
+        failure = collected.status === 429 || collected.status === 403 ? `HTTP ${collected.status}` : `product list stopped (${collected.stop}${err ? `: ${err}` : ''})`;
+        break;
       }
-      const finished = collected.stop === 'end' || collected.stop === 'empty';
-      const resultCount = total || (finished ? collected.urls.length : 0);
+      if (expected && !collected.complete) { failure = `${variant.label} ${collected.ids.length}/${expected} ${collected.verdict}`; break; }
+      const resultCount = expected || collected.urls.length;
       reports.push({
         ...variant,
         urls: collected.urls,
         chips: [],
         cardTexts: [],
         href: variant.url,
-        partial: resultCount > 0 && collected.urls.length < resultCount,
+        partial: false,
         limitHit: false,
         capHit: collected.stop === 'cap',
         resultCount,
         pages: collected.pages,
       });
     }
-    return { ok: true, reports };
+    await saveDepopDebug(debugDump(dump));
+    if (failure) return { ok: false, reason: failure, expectedBy, debug: dump };
+    return { ok: true, reports, expectedBy, debug: dump };
   }, false);
 }
 async function importDepop(shop, sync, recheck, shopMode) {
@@ -332,11 +379,15 @@ async function importDepop(shop, sync, recheck, shopMode) {
     if (api?.ok && api.reports?.length) reports = api.reports;
     else {
       status(`Depop product list failed (${api?.reason || 'no list'}). Scrolling the filtered grids in a visible tab.`);
-      const dom = await readFilteredReports(shop, deadline, true);
+      const dom = await readFilteredReports(shop, deadline, true, api?.expectedBy || {});
       reports = dom.reports;
       variantError = dom.variantError;
+      if (api?.debug) await saveDepopDebug(debugDump({ ...api.debug, fallback: dom.fallback }));
+      if (variantError && Object.keys(api?.expectedBy || {}).length)
+        throw new Error(`Depop boots list read was incomplete (${api?.reason || 'product list'}; ${variantError}). Nothing was imported. Use "Save Depop debug" in the popup and send the file.`);
     }
     const plan = planFilteredShop(reports);
+    if (plan.short) throw new Error(`Depop boots list read was short (${plan.reason}). Nothing was imported. Use "Save Depop debug" in the popup and send the file.`);
     if (variantError || !plan.ok) {
       const reason = variantError || plan.reason;
       status(`Depop filter failed (${reason}). Reading the full shop.`);

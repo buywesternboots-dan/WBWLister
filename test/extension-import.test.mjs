@@ -6,9 +6,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  acceptScan, collectIds, depopFetchJson, depopSellerHandle, explainPageFailure, pageScriptEmpty, parseDepopResultCount, quietScrollsNeeded, readDepopProduct, readDepopShop, readShopId, rejectEmptyDepopShop, NO_FACEBOOK_LISTINGS,
+  acceptScan, collectIds, depopFetchJson, depopSellerHandle, explainPageFailure, pageScriptEmpty, parseDepopResultCount, quietScrollsNeeded, readDepopHook, readDepopProduct, readDepopShop, readDepopSources, rejectEmptyDepopShop, NO_FACEBOOK_LISTINGS,
 } from '../extension/import-page.mjs';
-import { aggregateTotal, collectDepopPages, depopAggregatesUrl, depopProductsUrl, DEPOP_PAGE_PAUSE_MS } from '../extension/depop-feed.mjs';
+import { aggregateTotal, collectDepopPages, debugDump, depopAggregatesUrl, depopProductsUrl, DEPOP_PAGE_PAUSE_MS, DEPOP_PASS_LIMITS, hookPageUrls, judgeCount, judgeDomRead, parseProductsPage, pickShopId, shopIdFromNextData, shopIdFromText, shopIdFromUrls, templateParams } from '../extension/depop-feed.mjs';
 import { westernBootDecision, bootScanSummary, GATE_VERSION, rejectToStore } from '../extension/boot-gate.mjs';
 import { absentIds, actorForJob, allowedBootlisterOrigin, CANDIDATE_CAP, cardIsNonFootwear, cookieReadUrl, createImportLock, depopBootFilters, gateWrite, importLimit, injectionLost, JOB_DEADLINE_MAX_MS, jobSummary, navListenerArmedBeforeTabCreate, planFilteredShop, planKnownSkips, planSync, presenceIds, REJECT_BATCH, retryInjection, scanWindowOpen, scriptArgs, sessionFromCookie, shopAfterFilterError, shopReadArgs, SHOP_READ_MS, SIGNED_OUT, validateItemEnvelope, WRITE_CAP, withDeadline } from '../extension/import-job.mjs';
 import { knownApi, rejectApi } from '../lib/known-api.js';
@@ -974,8 +974,20 @@ test('depop boot filters dedupe links and fall back when the filter does not sti
     { ...filters[1], chips: [], cardTexts: ['lace-up moto boots'], href: filters[1].url, urls: Array.from({ length: 43 }, (_, i) => `https://www.depop.com/products/m-${i}/`), resultCount: 43 },
     { ...filters[2], chips: [], cardTexts: ['lace-up moto boots'], href: filters[2].url, urls: Array.from({ length: 24 }, (_, i) => `https://www.depop.com/products/a-${i}/`), resultCount: 80 },
   ]);
-  assert.equal(targeted.ok, true);
-  assert.match(targeted.note, /Women 49\/49, Men 43\/43, All boots 24\/80 short/);
+  assert.equal(targeted.ok, false);
+  assert.equal(targeted.short, true);
+  assert.match(targeted.reason, /All boots 24\/80 short/);
+  const exact = planFilteredShop([
+    { ...filters[0], chips: [], cardTexts: ['lace-up moto boots'], href: filters[0].url, urls: Array.from({ length: 49 }, (_, i) => `https://www.depop.com/products/w-${i}/`), resultCount: 49 },
+    { ...filters[1], chips: [], cardTexts: ['lace-up moto boots'], href: filters[1].url, urls: Array.from({ length: 43 }, (_, i) => `https://www.depop.com/products/m-${i}/`), resultCount: 43 },
+  ]);
+  assert.equal(exact.ok, true);
+  assert.match(exact.note, /Women 49\/49, Men 43\/43/);
+  const over = planFilteredShop([
+    { ...filters[0], chips: [], cardTexts: ['lace-up moto boots'], href: filters[0].url, urls: Array.from({ length: 400 }, (_, i) => `https://www.depop.com/products/w-${i}/`), resultCount: 49 },
+  ]);
+  assert.equal(over.ok, false);
+  assert.match(over.reason, /Women 400\/49 over/);
   assert.match(plan.note, /All boots skipped \(no filter\)/);
   assert.equal(cardIsNonFootwear('lace-up moto boots'), false);
   assert.equal(cardIsNonFootwear('leather tote bag'), true);
@@ -1051,7 +1063,7 @@ test('a removed frame is retried once, then the shop falls back, and the summary
   const grid = bg.slice(bg.indexOf('async function readShopGrid'), bg.indexOf('async function readFilteredReports'));
   assert.match(grid, /readDepopShop, 'ISOLATED'/);
   assert.match(grid, /visible === true/);
-  assert.match(bg, /readFilteredReports\(shop, deadline, true\)/);
+  assert.match(bg, /readFilteredReports\(shop, deadline, true, api\?\.expectedBy \|\| \{\}\)/);
   const counted = jobSummary({ added: 2, duplicate: 3, prior: 4, opened: 5, failed: 1, modeNote: 'Boots only (fast).' });
   assert.match(counted, /Boots only \(fast\)\./);
   assert.match(counted, /2 new, 3 already imported \(skipped\), 4 previously not boots \(skipped\), 5 opened, 1 failed/);
@@ -1067,6 +1079,7 @@ test('Depop boots paging follows the product-list cursor and never calls the sol
   assert.equal(/by-status\/sold/.test(depopProductsUrl('6702411', { gender: 'male' })), false);
   assert.equal(/by-status\/sold/.test(depopAggregatesUrl('6702411', 'female')), false);
   assert.equal(aggregateTotal({ meta: { total_count: 49 } }), 49);
+  assert.equal(aggregateTotal({ total: 50, categories: { menswear: { count: 72 } } }), 50);
   assert.equal(aggregateTotal({ meta: { totalCount: '43' } }), 43);
   assert.equal(aggregateTotal({}), 0);
   assert.equal(DEPOP_PAGE_PAUSE_MS, 400);
@@ -1154,12 +1167,9 @@ test('Depop boots paging follows the product-list cursor and never calls the sol
   assert.deepEqual(scriptArgs([feedUrl]), [feedUrl]);
   assert.equal(JSON.stringify(scriptArgs([feedUrl])).includes('undefined'), false);
   const shop = { props: { pageProps: { other: { username: 'someone', id: 111 }, shop: { username: 'nuclear_nostalgia', id: 6702411 } } } };
-  const priorWindow = globalThis.window;
-  const priorDocument = globalThis.document;
-  globalThis.window = {};
-  globalThis.document = { getElementById: id => id === '__NEXT_DATA__' ? { textContent: JSON.stringify(shop) } : null };
-  try { assert.equal(readShopId('nuclear_nostalgia'), '6702411'); assert.equal(readShopId('absent'), ''); }
-  finally { globalThis.window = priorWindow; globalThis.document = priorDocument; }
+  assert.equal(shopIdFromNextData(shop, 'nuclear_nostalgia'), '6702411');
+  assert.equal(shopIdFromNextData(shop, 'absent'), '');
+  assert.deepEqual(pickShopId({ nextData: JSON.stringify(shop) }, 'nuclear_nostalgia'), { id: '6702411', source: 'next-data', template: '' });
   const filters = depopBootFilters('nuclear_nostalgia');
   const plan = planFilteredShop([
     { ...filters[0], urls: Array.from({ length: 49 }, (_, i) => `https://www.depop.com/products/w-${i}/`), chips: [], cardTexts: [], href: filters[0].url, resultCount: 49, pages: 3 },
@@ -1170,6 +1180,224 @@ test('Depop boots paging follows the product-list cursor and never calls the sol
   const ext = ['background.js', 'depop-feed.mjs', 'import-page.mjs', 'import-job.mjs'].map(name => read(`extension/${name}`).toString()).join('\n');
   assert.equal(ext.includes('6702411'), false);
   assert.match(read('extension/import-page.mjs').toString(), /credentials:\s*'include'/);
+});
+
+// Fixtures are real shop responses captured 2026-11-13 (ids, slugs, status, page_info only; shop id replaced).
+const depopFixture = name => JSON.parse(read(`test/fixtures/depop/${name}.json`).toString());
+const DEPOP_FIX = {
+  female: ['female-0-first', 'female-1-MnwyNHwxNzk0NjMxMjI4', 'female-2-MnwyNHwxNzk0NjMxMjI4', 'female-3-M3w0OHwxNzk0NjMxMjI4', 'female-4-M3w0OHwxNzk0NjMxMjI4'].map(depopFixture),
+  male: ['male-0-first', 'male-1-MnwyNHwxNzk0NjMxMjQ4'].map(depopFixture),
+};
+
+test('0.21 reads the live Depop page shape: objects + page_info.last/has_more', () => {
+  const first = parseProductsPage(DEPOP_FIX.female[0].body);
+  assert.equal(first.products.length, 24);
+  assert.equal(first.cursor, 'MnwyNHwxNzk0NjMxMjI4');
+  assert.equal(first.hasMore, true);
+  assert.equal(first.ended, false);
+  const last = parseProductsPage(DEPOP_FIX.female[3].body);
+  assert.equal(last.products.length, 2);
+  assert.equal(last.ended, true);
+  assert.equal(last.cursor, '');
+  for (const p of first.products) { assert.match(String(p.id), /^\d+$/); assert.ok(p.slug); assert.equal(p.status, 'STATUS_ONSALE'); }
+  // Older guesses still parse.
+  assert.equal(parseProductsPage({ products: [{ id: 1, slug: 'a' }], meta: { cursor: 'c', has_more: true } }).cursor, 'c');
+  assert.equal(parseProductsPage({ products: [], meta: { last_offset_id: 'x' } }).cursor, 'x');
+  assert.equal(parseProductsPage({ objects: [], pageInfo: { endCursor: 'e', hasNextPage: true } }).cursor, 'e');
+  assert.equal(parseProductsPage({ objects: [{ id: 1, slug: 's', status: 'STATUS_SOLD' }, { id: 2, slug: 't' }] }).products.length, 1);
+  assert.deepEqual(parseProductsPage(null), { products: [], cursor: '', ended: false, hasMore: false, soldSkipped: 0 });
+  // Aggregates: top-level total is the filtered count; categories are the whole shop.
+  assert.equal(aggregateTotal(depopFixture('female-aggregates').body), 50);
+  assert.equal(aggregateTotal(depopFixture('male-aggregates').body), 43);
+});
+
+test('0.21 paging runs extra passes until the deduped count meets the aggregates total', async () => {
+  // Live pages shuffle: the female pages repeat a listing at the 24 boundary, so one pass alone is short.
+  const ids = new Set();
+  for (const f of DEPOP_FIX.female.slice(0, 2).concat(DEPOP_FIX.female[3])) for (const o of f.body.objects) ids.add(o.id);
+  assert.ok(ids.size < 50, 'one live pass is short');
+  const full = Array.from({ length: 50 }, (_, i) => ({ id: 1000 + i, slug: `boot-${i}`, status: 'STATUS_ONSALE' }));
+  const calls = [];
+  let pauses = 0;
+  const shuffled = await collectDepopPages({
+    shopId: '6702411', gender: 'female', expected: 50, pause: async () => { pauses += 1; },
+    fetchJson: async (url) => {
+      calls.push(url);
+      assert.equal(/by-status\/sold/.test(url), false);
+      const q = new URL(url).searchParams;
+      const limit = Number(q.get('limit'));
+      if (limit === 24) {
+        // Pass 1: 24, then 24 that repeat #23 and skip #24, then the last 2 (live has_more:false, no last).
+        if (!q.get('after')) return { status: 200, body: { objects: full.slice(0, 24), page_info: { has_more: true, last: 'MnwyNHwx' } } };
+        if (q.get('after') === 'MnwyNHwx') return { status: 200, body: { objects: [full[23], ...full.slice(25, 48)], page_info: { has_more: true, last: 'M3w0OHwx' } } };
+        return { status: 200, body: { objects: full.slice(48), page_info: { has_more: false } } };
+      }
+      // Pass 2 (limit 48) returns the boundary listing that pass 1 skipped.
+      if (!q.get('after')) return { status: 200, body: { objects: full.slice(0, 48), page_info: { has_more: true, last: 'big' } } };
+      return { status: 200, body: { objects: full.slice(48), page_info: { has_more: false } } };
+    },
+  });
+  assert.equal(shuffled.ok, true);
+  assert.equal(shuffled.ids.length, 50);
+  assert.equal(shuffled.complete, true);
+  assert.equal(shuffled.verdict, 'match');
+  assert.equal(new Set(shuffled.urls).size, 50);
+  assert.ok(calls.some(u => /limit=48/.test(u)));
+  assert.ok(pauses >= 3);
+  assert.equal(shuffled.log.length, calls.length);
+  assert.deepEqual(shuffled.log.map(l => l.pass), [1, 1, 1, 2, 2]);
+  // Same data that never fills the gap: ok but flagged short, after every pass.
+  const stuck = await collectDepopPages({
+    shopId: '6702411', gender: 'male', expected: 43,
+    fetchJson: async (url) => {
+      const after = new URL(url).searchParams.get('after');
+      const fix = after ? DEPOP_FIX.male[1] : DEPOP_FIX.male[0];
+      return { status: 200, body: fix.body };
+    },
+  });
+  assert.equal(stuck.ok, true);
+  assert.equal(stuck.complete, false);
+  assert.equal(stuck.verdict, 'short');
+  assert.equal(stuck.ids.length, 42);
+  assert.equal(new Set(stuck.log.map(l => l.pass)).size, DEPOP_PASS_LIMITS.length);
+  // No expected total: one pass only.
+  let n = 0;
+  const single = await collectDepopPages({ shopId: '6702411', gender: 'male', fetchJson: async (url) => { n += 1; return { status: 200, body: (new URL(url).searchParams.get('after') ? DEPOP_FIX.male[1] : DEPOP_FIX.male[0]).body }; } });
+  assert.equal(n, 2);
+  assert.equal(single.verdict, 'unchecked');
+  // 429 mid-pass stops at once; a fetch TypeError (status 0) is reported with its message.
+  const limited = await collectDepopPages({ shopId: '6702411', expected: 50, fetchJson: async (url) => (url.includes('after=') ? { status: 429, body: null } : { status: 200, body: DEPOP_FIX.female[0].body }) });
+  assert.equal(limited.ok, false);
+  assert.equal(limited.status, 429);
+  const failed = await collectDepopPages({ shopId: '6702411', fetchJson: async () => ({ status: 0, body: null, error: 'Failed to fetch' }) });
+  assert.equal(failed.ok, false);
+  assert.equal(failed.stop, 'fetch');
+  assert.equal(failed.log[0].error, 'Failed to fetch');
+  // A cursor that loops does not page forever.
+  let loops = 0;
+  const loop = await collectDepopPages({ shopId: '6702411', fetchJson: async () => { loops += 1; return { status: 200, body: { objects: Array.from({ length: 24 }, (_, i) => ({ id: loops * 100 + i, slug: `b-${loops}-${i}` })), page_info: { has_more: true, last: 'same' } } }; } });
+  assert.equal(loop.ok, false); // the first pass never reached an end
+  assert.equal(loop.stop, 'cursor');
+  assert.equal(loops, 2);
+  // Pages that add nothing new end the pass.
+  const dry = await collectDepopPages({ shopId: '6702411', maxPages: 10, fetchJson: async (url) => ({ status: 200, body: { objects: full.slice(0, 24), page_info: { has_more: true, last: `c${url.length}${Math.random()}` } } }) });
+  assert.equal(dry.stop, 'no-new');
+  assert.equal(dry.pages, 3);
+});
+
+test('0.21 count oracle: short, over, and runaway reads fail', () => {
+  assert.deepEqual(judgeCount(49, 49), { ok: true, verdict: 'match' });
+  assert.deepEqual(judgeCount(24, 49), { ok: false, verdict: 'short' });
+  assert.deepEqual(judgeCount(50, 49), { ok: false, verdict: 'over' });
+  assert.deepEqual(judgeCount(400, 49), { ok: false, verdict: 'runaway' });
+  assert.deepEqual(judgeCount(10, 0), { ok: true, verdict: 'unchecked' });
+  assert.deepEqual(judgeCount(0, 0), { ok: false, verdict: 'empty' });
+  const urls = n => Array.from({ length: n }, (_, i) => `https://www.depop.com/products/b-${i}/`);
+  assert.equal(judgeDomRead({ urls: urls(43), expected: 43 }).ok, true);
+  assert.match(judgeDomRead({ urls: urls(24), expected: 43 }).reason, /24\/43 short/);
+  assert.match(judgeDomRead({ urls: urls(400), expected: 49 }).reason, /400\/49 runaway/);
+  assert.match(judgeDomRead({ urls: urls(98), expected: 49, capHit: true }).reason, /scan cap/);
+});
+
+test('0.21 shop id comes from resource URLs, the fetch hook, RSC payload, __NEXT_DATA__, then cache', () => {
+  const api = 'https://webapi.depop.com/presentation/api/v1/shops/';
+  const resource = [`${api}6702411/products/by-status/sold/?lang=en&limit=24`, `${api}6702411/products/?limit=24`, `${api}6702411/aggregates/?what=&currency=USD`];
+  assert.equal(shopIdFromUrls(resource), '6702411');
+  assert.equal(shopIdFromUrls([`${api}999/products/by-status/sold/`]), '');
+  assert.deepEqual(pickShopId({ resourceUrls: resource }, 'nuclear_nostalgia'), { id: '6702411', source: 'resource', template: `${api}6702411/products/?limit=24` });
+  assert.deepEqual(pickShopId({ hookUrls: [`${api}6702411/products/?limit=24&lang=en`] }, 'nuclear_nostalgia'),
+    { id: '6702411', source: 'fetch-hook', template: `${api}6702411/products/?limit=24&lang=en` });
+  const rsc = '1:["$","div",null,{"seller":{"id":6702411,"username":"nuclear_nostalgia","first_name":"D"}}]';
+  assert.equal(shopIdFromText(rsc, 'nuclear_nostalgia'), '6702411');
+  const escaped = '{\\"username\\":\\"nuclear_nostalgia\\",\\"verified\\":true,\\"id\\":6702411}';
+  assert.equal(shopIdFromText(escaped, 'nuclear_nostalgia'), '6702411');
+  assert.equal(shopIdFromText(rsc, 'someone_else'), '');
+  assert.equal(pickShopId({ nextF: rsc }, 'nuclear_nostalgia').source, 'rsc');
+  assert.deepEqual(pickShopId({}, 'nuclear_nostalgia', '6702411'), { id: '6702411', source: 'cache', template: '' });
+  assert.deepEqual(pickShopId({}, 'nuclear_nostalgia'), { id: '', source: '', template: '' });
+  // Template: Depop's own extra params are kept, filters and paging are ours.
+  assert.deepEqual(templateParams(`${api}6702411/products/?limit=24&lang=en&after=x&gender=male`), { lang: 'en' });
+  assert.equal(depopProductsUrl('6702411', { gender: 'male', template: `${api}6702411/products/?limit=24&lang=en`, limit: 48 }),
+    `${api}6702411/products/?limit=48&lang=en&groups=footwear&product_types=boots&gender=male`);
+  assert.equal(depopAggregatesUrl('6702411', 'female'), `${api}6702411/aggregates/?what=&currency=USD&groups=footwear&product_types=boots&gender=female`);
+});
+
+test('0.21 page-side readers: sources wait for hydration, the hook is read, fetch failures do not throw', async () => {
+  const api = 'https://webapi.depop.com/presentation/api/v1/shops/6702411/';
+  const prior = { window: globalThis.window, document: globalThis.document, performance: globalThis.performance, self: globalThis.self, location: globalThis.location, fetch: globalThis.fetch };
+  let reads = 0;
+  try {
+    globalThis.window = {};
+    globalThis.self = { __next_f: [[1, 'abc'], [1, 'def']] };
+    globalThis.document = { getElementById: () => null };
+    Object.defineProperty(globalThis, 'performance', { value: { getEntriesByType: () => (++reads < 3 ? [] : [{ name: `${api}products/?limit=24` }, { name: `${api}products/by-status/sold/?limit=24` }]) }, configurable: true, writable: true });
+    Object.defineProperty(globalThis, 'location', { value: { href: 'https://www.depop.com/nuclear_nostalgia/' }, configurable: true, writable: true });
+    const got = await readDepopSources('nuclear_nostalgia', 3000);
+    assert.deepEqual(got.resourceUrls, [`${api}products/?limit=24`]);
+    assert.equal(got.nextF, 'abcdef');
+    assert.ok(reads >= 3);
+    assert.deepEqual(readDepopHook(), { hooked: false, urls: [], pages: [] });
+    globalThis.window = { __bootlisterDepop: { urls: [`${api}products/?limit=24`], pages: [{ url: `${api}products/?limit=24`, items: [] }], headers: {} } };
+    assert.equal(readDepopHook().hooked, true);
+    let sent;
+    globalThis.fetch = async (url, init) => { sent = init; throw new TypeError('Failed to fetch'); };
+    const res = await depopFetchJson(`${api}products/?limit=24`, { 'x-cached-sizes': 'true', cookie: 'no', 'bad header': 'x' });
+    assert.deepEqual(res, { status: 0, body: null, error: 'Failed to fetch' });
+    assert.equal(sent.credentials, 'include');
+    assert.deepEqual(sent.headers, { 'x-cached-sizes': 'true' });
+  } finally {
+    globalThis.window = prior.window; globalThis.document = prior.document; globalThis.self = prior.self; globalThis.fetch = prior.fetch;
+    Object.defineProperty(globalThis, 'performance', { value: prior.performance, configurable: true, writable: true });
+    Object.defineProperty(globalThis, 'location', { value: prior.location, configurable: true, writable: true });
+  }
+});
+
+test('0.21 fetch hook records only shop list requests and the page responses', async () => {
+  const src = read('extension/depop-hook.js').toString();
+  const api = 'https://webapi.depop.com/presentation/api/v1/shops/6702411/';
+  const win = {};
+  const seen = [];
+  win.fetch = async (url) => { seen.push(url); return { status: 200, clone: () => ({ json: async () => DEPOP_FIX.male[0].body }) }; };
+  win.XMLHttpRequest = function () {};
+  win.XMLHttpRequest.prototype.open = function () {};
+  new Function('window', src)(win);
+  await win.fetch(`${api}products/?limit=24&groups=footwear&product_types=boots&gender=male`, { headers: { 'X-Thing': '1', Cookie: 'c' } });
+  await win.fetch(`${api}products/by-status/sold/?limit=24`);
+  await win.fetch('https://webapi.depop.com/presentation/api/v1/events/');
+  await new Promise(r => setTimeout(r, 10));
+  const hook = win.__bootlisterDepop;
+  assert.deepEqual(hook.urls, [`${api}products/?limit=24&groups=footwear&product_types=boots&gender=male`]);
+  assert.deepEqual(hook.headers, { 'x-thing': '1' });
+  assert.equal(hook.pages.length, 1);
+  assert.equal(hook.pages[0].items.length, 24);
+  assert.equal(seen.length, 3);
+  assert.equal(hookPageUrls(hook.pages, 'male').length, 24);
+  assert.equal(hookPageUrls(hook.pages, 'female').length, 0);
+  // Pages of every live female response, deduped by id.
+  const pages = DEPOP_FIX.female.map(f => ({ url: f.url.replace('SHOPID', '6702411'), items: f.body.objects }));
+  const fem = hookPageUrls(pages, 'female');
+  assert.equal(fem.length, new Set(DEPOP_FIX.female.flatMap(f => f.body.objects.map(o => o.id))).size);
+});
+
+test('0.21 debug dump carries URLs, shop id source, per-page counts, and final ids', () => {
+  const dump = debugDump({
+    version: '0.21', shop: 'nuclear_nostalgia', shopId: '6702411', source: 'resource', at: '2026-11-14T04:00:00Z',
+    sources: { resourceUrls: ['u1'], hookUrls: ['u2'], nextF: 'abc', nextData: '' },
+    variants: [{ label: 'Women', gender: 'female', expected: 50, ids: ['1', '2'], urls: ['a', 'b'], verdict: 'short', stop: 'end', pages: 3,
+      log: [{ pass: 1, url: 'p1', status: 200, count: 24, added: 24 }] }],
+  });
+  assert.equal(dump.kind, 'bootlister-depop-debug');
+  assert.equal(dump.shopIdSource, 'resource');
+  assert.deepEqual(dump.capturedUrls, { resource: ['u1'], fetchHook: ['u2'], nextFLength: 3, nextData: false });
+  assert.equal(dump.variants[0].found, 2);
+  assert.deepEqual(dump.variants[0].perPage, [{ pass: 1, url: 'p1', status: 200, count: 24, added: 24, error: undefined }]);
+  assert.deepEqual(dump.variants[0].ids, ['1', '2']);
+  const popup = read('extension/popup.js').toString();
+  assert.match(popup, /depopDebug/);
+  assert.match(read('extension/popup.html').toString(), /Save Depop debug/);
+  const bg = read('extension/background.js').toString();
+  assert.match(bg, /depopShopIds/);
+  assert.match(bg, /Depop boots list read was short/);
 });
 
 test('shop script args stay JSON-serializable when allowEmpty is false', () => {
@@ -1204,7 +1432,10 @@ test('the committed extension zip matches source and its service worker parses',
   assert.match(depop, /complete: false/);
   assert.match(depop, /readDepopShop, 'ISOLATED'/);
   assert.match(depop, /readDepopProduct, 'ISOLATED'/);
-  assert.match(depop, /readShopId, 'MAIN'/);
+  assert.match(depop, /readDepopSources, 'MAIN'/);
+  assert.match(depop, /readDepopHook, 'MAIN'/);
+  assert.match(depop, /pickShopId\(/);
+  assert.match(depop, /saveDepopDebug/);
   assert.match(depop, /depopFetchJson, 'MAIN'/);
   assert.match(depop, /Scrolling the filtered grids in a visible tab/);
   assert.match(depop, /rejectEmptyDepopShop/);
@@ -1224,12 +1455,14 @@ test('the committed extension zip matches source and its service worker parses',
   assert.match(read('app/screen.js').toString(), /Source condition/);
   assert.match(read('extension/popup.js').toString(), /r\.skipped/);
   const manifest = JSON.parse(read('extension/manifest.json').toString());
-  assert.equal(manifest.version, '0.20');
-  const zip = readZip(read('public/bootlister-extension-0.20.zip'));
+  assert.equal(manifest.version, '0.21');
+  const hookScript = manifest.content_scripts.find(c => c.js.includes('depop-hook.js'));
+  assert.deepEqual(hookScript, { matches: ['https://www.depop.com/*'], js: ['depop-hook.js'], run_at: 'document_start', world: 'MAIN' });
+  const zip = readZip(read('public/bootlister-extension-0.21.zip'));
   const loop = bg.slice(bg.indexOf('async function importAll'), bg.indexOf('async function importFacebook'));
   assert.equal(loop.includes('retry(() => importOne'), false);
   assert.match(bg, /x-import-job/);
-  const names = ['background.js', 'boot-gate.mjs', 'bridge.js', 'depop-feed.mjs', 'import-page.mjs', 'import-job.mjs', 'manifest.json', 'popup.html', 'popup.js'];
+  const names = ['background.js', 'boot-gate.mjs', 'bridge.js', 'depop-feed.mjs', 'depop-hook.js', 'import-page.mjs', 'import-job.mjs', 'manifest.json', 'popup.html', 'popup.js'];
   assert.deepEqual([...zip.keys()].sort(), names.map(n => `wbw-importer/${n}`).sort());
   for (const name of names) assert.deepEqual(zip.get(`wbw-importer/${name}`), read(`extension/${name}`));
   const dir = mkdtempSync(join(tmpdir(), 'bootlister-ext-'));
