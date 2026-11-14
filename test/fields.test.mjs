@@ -188,3 +188,17 @@ Asking price: $400
     }
   });
 });
+
+describe('inventory type filter', () => {
+  it('replaces most-likely-boot sort with Boot and Belt filters, newest first', () => {
+    const src = readFileSync(new URL('../app/screen.js', import.meta.url), 'utf8');
+    assert.equal(src.includes('Most likely boot first'), false);
+    assert.equal(src.includes("useState('likely')"), false);
+    assert.equal(src.includes('SORTS'), false);
+    assert.match(src, /option value="boot">Boot</);
+    assert.match(src, /option value="belt">Belt</);
+    assert.match(src, /!type \|\| i\.boot === type/);
+    assert.match(src, /b\.created_at\.localeCompare\(a\.created_at\)/);
+    assert.match(src, /Nothing matches the search or filter/);
+  });
+});

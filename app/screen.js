@@ -40,11 +40,8 @@ const FILTERS = { check: ['Needs a check', needsCheck], approved: ['Approved', i
   ...Object.fromEntries(REQUIRED.map(f => [f, [`Missing ${label(f)}`, i => !i[f]]])),
   ...Object.fromEntries(ALERT.map(f => [f, [`No ${label(f).toLowerCase()}`, i => !i[f]]])),
   nogroup: ['No group price', i => !!i.missing_group_price] };
-// Sorts: most likely a boot first, or newest import day first (same day: most likely boot first).
-const SORTS = {
-  likely: (a, b) => (b.boot_score ?? 0) - (a.boot_score ?? 0) || b.created_at.localeCompare(a.created_at),
-  newest: (a, b) => b.created_at.slice(0, 10).localeCompare(a.created_at.slice(0, 10)) || (b.boot_score ?? 0) - (a.boot_score ?? 0),
-};
+// Inventory list: newest import first. Filter by item type (boot or belt) from items.boot.
+const byNewest = (a, b) => b.created_at.localeCompare(a.created_at);
 // Seller settings form: [field, label, kind] (kind: h = heading, area = multi-line, sync = sync choice, else one line).
 const SELLER_FORM = [
   ['h1', 'Details', 'h'], ['name', 'WBW seller name* (the WBW account these items attach to)'], ['display_name', 'Display name*'],
@@ -92,7 +89,7 @@ export default function Screen({ admin = false }) {
   const [edit, setEdit] = useState(null);
   const [adj, setAdj] = useState({ value: '', unit: '%' });
   const [q, setQ] = useState('');
-  const [sort, setSort] = useState('likely');
+  const [type, setType] = useState(''); // '' = all, else items.boot value (boot or belt)
   const [filter, setFilter] = useState({}); // group → FILTERS key
   const [link, setLink] = useState(''); // import source for the selected seller
   const [run, setRunState] = useState(null); // import progress: { label, done, total, busy }
@@ -246,7 +243,7 @@ export default function Screen({ admin = false }) {
   };
 
   const live = tab === 'review' || tab === 'published';
-  const shown = items.filter(i => searchMatch(i, q)).sort(SORTS[sort]);
+  const shown = items.filter(i => searchMatch(i, q) && (!type || i.boot === type)).sort(byNewest);
   const unchecked = shown.filter(needsCheck).length;
   const groups = tab === 'review' ? Object.entries(GROUPS).map(([k, l]) => [k, l, shown.filter(i => i.boot === k)]) : [[tab, TABS[tab], shown]];
   const setForm = f => e => setSellerForm({ ...sellerForm, [f]: e.target.value });
@@ -314,8 +311,10 @@ export default function Screen({ admin = false }) {
 
       <div className="tools">
         <input type="search" placeholder="Search (brand families & materials included, e.g. Rios, HBL)" value={q} onChange={e => setQ(e.target.value)} />
-        <select value={sort} onChange={e => setSort(e.target.value)}>
-          <option value="likely">Most likely boot first</option><option value="newest">Newest import first</option>
+        <select value={type} onChange={e => setType(e.target.value)} aria-label="Item type">
+          <option value="">All</option>
+          <option value="boot">Boot</option>
+          <option value="belt">Belt</option>
         </select>
       </div>
 
@@ -340,7 +339,7 @@ export default function Screen({ admin = false }) {
         </>}
       </div>}
 
-      {who && shown.length === 0 && <p className="empty">{q ? 'Nothing matches the search.' : tab === 'review' ? 'No new imports — use Import above.' : `Nothing ${TABS[tab].toLowerCase()} yet.`}</p>}
+      {who && shown.length === 0 && <p className="empty">{q || type ? 'Nothing matches the search or filter.' : tab === 'review' ? 'No new imports — use Import above.' : `Nothing ${TABS[tab].toLowerCase()} yet.`}</p>}
 
       {groups.filter(([, , list]) => list.length).map(([k, l, list]) => {
         const f = FILTERS[filter[k]], visible = f ? list.filter(f[1]) : list;
