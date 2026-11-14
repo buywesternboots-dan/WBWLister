@@ -7,6 +7,7 @@ import OptimizePanel from '../components/optimize-panel';
 import { packCsvChunks } from '../lib/csv';
 import { toCsv } from '../lib/export';
 import { CHANNELS, post } from '../lib/crosspost';
+import { isExtensionShop, sellerFormState, sellerSavePayload } from '../lib/seller-links';
 
 // Selected seller comes from ?seller= (the extension's seller dropdown uses the same names).
 const seller = () => new URLSearchParams(location.search).get('seller') || '';
@@ -42,21 +43,18 @@ const FILTERS = { check: ['Needs a check', needsCheck], approved: ['Approved', i
   nogroup: ['No group price', i => !!i.missing_group_price] };
 // Inventory list: newest import first. Filter by item type (boot or belt) from items.boot.
 const byNewest = (a, b) => b.created_at.localeCompare(a.created_at);
-// Seller settings form: [field, label, kind] (kind: h = heading, area = multi-line, sync = sync choice, else one line).
-const SELLER_FORM = [
-  ['h1', 'Details', 'h'], ['name', 'WBW seller name* (the WBW account these items attach to)'], ['display_name', 'Display name*'],
-  ['contact', 'Contact person'], ['email', 'Email'], ['phone', 'Phone'], ['location', 'Location (city, state)'],
-  ['h2', 'Import & sync', 'h'], ['website', 'Website, Poshmark or eBay link (store, collection, poshmark.com/closet/…, or ebay.com/usr/<username>)'],
-  ['fb_profile', 'Facebook Marketplace profile or Depop shop link (imported through the Chrome extension)'], ['sync', 'Automatic sync', 'sync'],
-  ['h4', 'Shipping & returns (Google feed; blank = marketplace default, no returns)', 'h'], ['ship_price', 'Shipping price (USD)'], ['handle_days', 'Handling time (business days)'],
-  ['return_days', 'Return window in days (blank = final sale)'],
-  ['brand_context', 'Brand context on WBW listings (from the WBW brand page)', 'toggle'],
-  ['h3', 'Listing style', 'h'], ['notes', 'Notes (how this seller writes listings)', 'area'],
+// Advanced seller fields, shown collapsed. Contact, notes, and automatic sync stay in the saved record but are not on the form.
+const SELLER_ADVANCED = [
+  ['location', 'Location (city, state)'],
+  ['shop_link_2', 'Second shop link (if this seller has both a website and a Facebook or Depop shop)'],
   ['terms', 'Custom terms, one per line: their shorthand = meaning (e.g. BJ = Black Jack, Sz = Size)', 'area'],
   ['defaults', 'Defaults, one per line: field = value, used when a listing doesn\'t say (e.g. sized_for = Women, made_in = USA)', 'area'],
+  ['h4', 'Google feed (blank = marketplace default, no returns)', 'h'],
+  ['ship_price', 'Shipping price (USD)'], ['handle_days', 'Handling time (business days)'],
+  ['return_days', 'Return window in days (blank = final sale)'],
+  ['brand_context', 'Brand context on WBW listings (from the WBW brand page)', 'toggle'],
 ];
 // Export: every field on the WBW "Sell a pair" form, then the extra columns this import still needs. Built in lib/export.js.
-const PRIVATE_SELLER = new Set(['contact', 'email', 'phone']);
 const download = (rows, brands = {}, s = {}) => {
   const csv = toCsv(rows, { origin: location.origin, brands, seller: s });
   Object.assign(document.createElement('a'), { href: URL.createObjectURL(new Blob([csv], { type: 'text/csv' })), download: `bootlister-export-${new Date().toISOString().slice(0, 10)}.csv` }).click();
@@ -73,7 +71,7 @@ function Share({ item, seller, reload }) {
   })}</div>;
 }
 const CONCURRENT = 4; // website products imported at once
-const EXTENSION_LINK = /facebook\.com|depop\.com/i; // these sites block servers, so the Chrome extension imports them
+// Facebook and Depop block servers, so the Chrome extension imports them (isExtensionShop).
 const done = n => `Done: ${n.added} new, ${n.updated} changed${n.sold != null ? `, ${n.sold} already sold (skipped)` : ''}, ${n.removed} gone (now Pending sold), ${n.failed} failed${n.skipped ? ` ${n.skipped}` : ''}`;
 const daysLeft = i => Math.max(0, 30 - Math.floor((Date.now() - new Date(i.status_at)) / 864e5));
 
@@ -170,13 +168,13 @@ export default function Screen({ admin = false }) {
       .catch(e => setErr(e.message))
       .finally(() => setOptBusy(false));
   };
-  const saveSeller = () => api('POST', { ...sellerForm, rename_from: sellerForm.created_at && current?.name }, '', '/api/sellers')
+  const saveSeller = () => api('POST', sellerSavePayload(sellerForm, { rename_from: sellerForm.created_at && current?.name }), '', '/api/sellers')
     .then(s => { setSellerForm(null); s.name === who ? loadSellers() : switchTo(s.name); }).catch(e => setErr(e.message));
   const deleteSeller = () => confirm(`Delete seller "${current.display_name}"?`) &&
     api('DELETE', null, `?name=${encodeURIComponent(current.name)}`, '/api/sellers').then(() => location.assign('/')).catch(e => setErr(e.message));
 
   // Import = new listings only. Sync = re-read all (refresh source-changed ones), then remove what's gone or sold.
-  const startImport = (sync, only) => (EXTENSION_LINK.test(link) ? importViaExtension(sync) : importSite(sync, only));
+  const startImport = (sync, only) => (isExtensionShop(link) ? importViaExtension(sync) : importSite(sync, only));
   const importViaExtension = sync => {
     setErr('');
     if (!ext) return setErr('Facebook and Depop imports run through the BootLister Chrome extension. Install it (or reload it at chrome://extensions), then reload this page.');
@@ -259,8 +257,8 @@ export default function Screen({ admin = false }) {
           {!current && <option value={who}>{who || 'Pick a seller…'}</option>}
           {sellers.map(s => <option key={s.seller} value={s.seller}>{s.display_name ?? s.seller} — {s.active} items{s.review ? `, ${s.review} new` : ''}</option>)}
         </select>
-        {who && <button onClick={() => setSellerForm(hasDetails ? current : { name: who, sync: 'off' })}>{hasDetails ? 'Seller settings' : 'Set up seller'}</button>}
-        <button className="primary" onClick={() => setSellerForm({ sync: 'off' })}>+ Add seller</button></>}
+        {who && <button onClick={() => setSellerForm(sellerFormState(hasDetails ? current : { name: who, sync: 'off' }))}>{hasDetails ? 'Seller settings' : 'Set up seller'}</button>}
+        <button className="primary" onClick={() => setSellerForm(sellerFormState({ sync: 'off' }))}>+ Add seller</button></>}
         {admin && who && <button type="button" onClick={() => act({ action: 'optimize-backfill' })}>Optimize existing</button>}
         {admin && <a className="src" href="/bootlister-extension-0.19.zip" download title="Needed for Facebook and Depop imports">Chrome extension 0.19{ext ? ' ✓' : ''}</a>}
         {admin && <a className="src" href="/admin/bugs">Bug reports</a>}
@@ -268,22 +266,29 @@ export default function Screen({ admin = false }) {
       </div>
       {!admin && <p className="help">Your job is to double-check each listing before it goes live, including anything shown in yellow. When you approve it, it is published right away. It is marked exported here — WBW is not connected yet, so nothing is sent to the live site.</p>}
       {admin && who && <p className="help">When a seller approves a listing, it is published here right away. You can still see and edit every listing. Export CSV is the file for WBW. Nothing is sent to the live site yet.</p>}
-      {!ext && EXTENSION_LINK.test(link) && <p className="help">Facebook and Depop import through the BootLister Chrome extension, which uses the sign-in already in this browser:
+      {!ext && isExtensionShop(link) && <p className="help">Facebook and Depop import through the BootLister Chrome extension, which uses the sign-in already in this browser:
         1) download it with the <a href="/bootlister-extension-0.19.zip" download>Chrome extension 0.19</a> link and unzip it; 2) open chrome://extensions and turn on
         Developer mode; 3) click Load unpacked and pick the unzipped wbw-importer folder; 4) reload this page.</p>}
 
       {admin && sellerForm && <div className="panel">
         <strong>{sellerForm.created_at ? 'Edit seller' : 'New seller'}</strong>
+        <label>WBW seller name* (the WBW account these items attach to)<input value={sellerForm.name ?? ''} onChange={setForm('name')} /></label>
+        <label>Display name*<input value={sellerForm.display_name ?? ''} onChange={setForm('display_name')} /></label>
+        <label>Shop link (website, Poshmark, eBay, Facebook, or Depop)<input value={sellerForm.shop_link ?? ''} onChange={setForm('shop_link')} /></label>
+        <h3>Seller login</h3>
         <small>{sellerForm.has_login ? 'This seller has a password. Setting a new one logs out their other sessions.' : 'This seller has no password yet. Set one here, or create an invite code they type on the sign-in page. Registration will not take over this seller.'}</small>
+        <label>Email<input data-private="" value={sellerForm.email ?? ''} onChange={setForm('email')} /></label>
+        <label>Phone<input data-private="" value={sellerForm.phone ?? ''} onChange={setForm('phone')} /></label>
         <label>Initial password<input data-private="" type="password" autoComplete="new-password" value={sellerForm.password ?? ''} onChange={setForm('password')} /></label>
-        <button type="button" onClick={() => api('POST', { ...sellerForm, password: sellerForm.password || undefined, issue_invite: true, rename_from: sellerForm.created_at && current?.name }, '', '/api/sellers').then(s => { setInviteCode(s.invite); setSellerForm({ ...s, password: '' }); }).catch(e => setErr(e.message))}>Create invite code</button>
+        <button type="button" onClick={() => api('POST', sellerSavePayload(sellerForm, { password: sellerForm.password || undefined, issue_invite: true, rename_from: sellerForm.created_at && current?.name }), '', '/api/sellers').then(s => { setInviteCode(s.invite); setSellerForm(sellerFormState({ ...s, password: '' })); }).catch(e => setErr(e.message))}>Create invite code</button>
         {inviteCode && <p data-private="" className="warn">Invite code, shown once: {inviteCode}. It expires in 7 days. They choose “Have an invite code?” on the sign-in page. Nothing is emailed.</p>}
-        {SELLER_FORM.map(([f, l, kind]) => kind === 'h' ? <h3 key={f}>{l}</h3> :
-          <label key={f}>{l}{kind === 'area' ? <textarea rows="3" value={sellerForm[f] ?? ''} onChange={setForm(f)} />
-            : kind === 'toggle' ? <select value={sellerForm[f] ?? 'on'} onChange={setForm(f)}><option value="on">On</option><option value="off">Off</option></select>
-            : kind === 'sync' ? <select value={sellerForm.sync ?? 'off'} onChange={setForm(f)}>
-              <option value="off">Off (sync by hand)</option><option value="daily">Daily</option><option value="weekly">Weekly</option></select>
-            : <input {...(PRIVATE_SELLER.has(f) ? { 'data-private': '' } : {})} value={sellerForm[f] ?? ''} onChange={setForm(f)} />}</label>)}
+        <details className="advanced">
+          <summary>Advanced</summary>
+          {SELLER_ADVANCED.map(([f, l, kind]) => kind === 'h' ? <h3 key={f}>{l}</h3> :
+            <label key={f}>{l}{kind === 'area' ? <textarea rows="3" value={sellerForm[f] ?? ''} onChange={setForm(f)} />
+              : kind === 'toggle' ? <select value={sellerForm[f] ?? 'on'} onChange={setForm(f)}><option value="on">On</option><option value="off">Off</option></select>
+              : <input value={sellerForm[f] ?? ''} onChange={setForm(f)} />}</label>)}
+        </details>
         <span><button className="primary" onClick={saveSeller}>Save seller</button><button onClick={() => setSellerForm(null)}>Cancel</button>
           {sellerForm.created_at && !current?.active && <button onClick={deleteSeller}>Delete seller</button>}</span>
       </div>}
@@ -426,6 +431,9 @@ label{display:flex;flex-direction:column;font-size:13px;color:#6b5a4a;gap:2px}
 .who select,.site input,.tools input{flex:1;min-width:0}
 .panel{display:flex;flex-direction:column;gap:6px;padding:12px;margin-bottom:12px;background:#fff;border:1px solid #e6dfd6;border-radius:8px}
 .panel h3{margin:8px 0 0;font-size:14px;color:#1f6f6b}.panel span,.form span{display:flex;gap:6px}
+.advanced{margin:8px 0 0;border-top:1px solid #e6dfd6;padding-top:8px}
+.advanced summary{cursor:pointer;font-size:14px;color:#1f6f6b}
+.advanced label,.advanced h3{margin-top:6px}
 .run{width:100%;display:flex;flex-direction:column;gap:2px}.run progress{width:100%}.run small{color:#6b5a4a}
 .failed{width:100%;font-size:13px;color:#a3261b;max-height:200px;overflow:auto}.failed a{color:inherit}
 .bar{position:sticky;top:0;padding:10px 0;background:#faf8f5;z-index:1}.bar label{flex-direction:row;align-items:center;gap:6px;font-size:16px}
