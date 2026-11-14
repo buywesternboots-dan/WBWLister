@@ -254,17 +254,114 @@ export function hookPageUrls(pages, gender = '') {
   return urls;
 }
 
-// Visible-tab DOM fallback, judged against the expected count. Hitting the cap or overshooting fails.
+// Visible-tab DOM fallback. Known oracle: exact match only. Unknown oracle: a cap hit or >150 links is a failure.
+export const DOM_UNKNOWN_MAX = 150;
 export function judgeDomRead({ urls = [], expected = 0, capHit = false }) {
   if (capHit) return { ok: false, reason: `hit the scan cap (${urls.length} links)` };
+  if (!expected && urls.length > DOM_UNKNOWN_MAX) return { ok: false, reason: `${urls.length} links with no expected count (over ${DOM_UNKNOWN_MAX})` };
   const j = judgeCount(urls.length, expected);
   if (j.ok) return { ok: true, reason: '' };
   if (j.verdict === 'empty') return { ok: false, reason: 'no links' };
   return { ok: false, reason: `${urls.length}/${expected} ${j.verdict}` };
 }
 
+// Does a captured webapi URL belong to this shop and boots filter (gender '' = all boots)?
+export function hookUrlMatches(url, gender = '', id = '', kind = 'products') {
+  const u = String(url || '');
+  if (SOLD.test(u)) return false;
+  const m = u.match(SHOP_URL);
+  if (!m || m[2] !== kind || (id && m[1] !== String(id))) return false;
+  let q;
+  try { q = new URL(u).searchParams; } catch { return false; }
+  return q.get('product_types') === 'boots' && (q.get('groups') || 'footwear') === 'footwear' && (q.get('gender') || '') === String(gender || '');
+}
+
+const totalOf = v => { const n = Number(v); return Number.isInteger(n) && n > 0 ? n : 0; };
+
+// Depop's own responses for one filter (captured by depop-hook.js) -> unique on-sale ids/slugs, the has_more trail,
+// and an oracle from the aggregates total (or a product-response total). complete only when the trail ended and
+// the oracle, when known, matches exactly.
+export function collectHookProducts(hook, gender = '', id = '') {
+  const seen = new Set();
+  const ids = [];
+  const urls = [];
+  const hasMoreTrail = [];
+  let skipped = 0;
+  let pages = 0;
+  let pageTotal = 0;
+  for (const page of hook?.pages || []) {
+    if (!hookUrlMatches(page?.url, gender, id) || Number(page?.status) !== 200) continue;
+    pages += 1;
+    const more = page?.page_info?.has_more ?? page?.page_info?.hasMore;
+    hasMoreTrail.push(typeof more === 'boolean' ? more : null);
+    pageTotal = totalOf(page?.total) || pageTotal;
+    for (const item of page.items || []) {
+      const slug = str(item?.slug);
+      const status = String(item?.status || '');
+      if (!slug || status !== 'STATUS_ONSALE') { skipped += 1; continue; }
+      if (id && item?.user_id != null && String(item.user_id) !== String(id)) { skipped += 1; continue; }
+      const key = item.id != null && item.id !== '' ? String(item.id) : `slug:${slug}`;
+      if (seen.has(key) || seen.has(`slug:${slug}`)) continue;
+      seen.add(key);
+      seen.add(`slug:${slug}`);
+      ids.push(key);
+      urls.push(`https://www.depop.com/products/${slug}/`);
+    }
+  }
+  let aggregateTotalSeen = 0;
+  for (const a of hook?.aggregates || []) {
+    if (Number(a?.status) === 200 && hookUrlMatches(a?.url, gender, id, 'aggregates')) aggregateTotalSeen = totalOf(a?.total) || aggregateTotalSeen;
+  }
+  const expected = aggregateTotalSeen || pageTotal;
+  const ended = hasMoreTrail.includes(false);
+  const judged = judgeCount(ids.length, expected);
+  return { ids, urls, expected, expectedSource: aggregateTotalSeen ? 'aggregates' : pageTotal ? 'response' : '', pages, hasMoreTrail, ended,
+    skipped, verdict: ended ? judged.verdict : 'open', complete: ended && judged.ok };
+}
+
+// Merge another round's ids (e.g. after a reload) without duplicates; order of first sighting is kept.
+export function mergeHookRounds(a, b) {
+  const ids = [...(a?.ids || [])];
+  const urls = [...(a?.urls || [])];
+  const seen = new Set(ids);
+  (b?.ids || []).forEach((key, i) => { if (!seen.has(key)) { seen.add(key); ids.push(key); urls.push(b.urls[i]); } });
+  const expected = b?.expected || a?.expected || 0;
+  const ended = !!(a?.ended || b?.ended);
+  const judged = judgeCount(ids.length, expected);
+  return { ...b, ids, urls, expected, ended, hasMoreTrail: [...(a?.hasMoreTrail || []), ...(b?.hasMoreTrail || [])],
+    verdict: ended ? judged.verdict : 'open', complete: ended && judged.ok };
+}
+
+// The page's own first product-list request, used to replay Depop's exact init once before falling back.
+export function replayRequest(hook, id = '') {
+  for (const r of hook?.requests || []) {
+    const url = String(r?.url || '');
+    const m = url.match(SHOP_URL);
+    if (!m || m[2] !== 'products' || SOLD.test(url) || (id && m[1] !== String(id))) continue;
+    const init = r?.init && typeof r.init === 'object' ? r.init : {};
+    if (init.method && init.method !== 'GET') continue;
+    return { url, init };
+  }
+  return null;
+}
+
+// Product pages are only opened for listings in the collected boots list, one at a time, with a pause.
+export const PRODUCT_PAGE_PAUSE_MS = 1500;
+export function productPlan(urls, max = 200) {
+  const out = [];
+  const seen = new Set();
+  for (const raw of urls || []) {
+    const slug = String(raw || '').match(/^https:\/\/www\.depop\.com\/products\/([^/]+)\/?$/)?.[1];
+    if (!slug || seen.has(slug)) continue;
+    seen.add(slug);
+    out.push(`https://www.depop.com/products/${slug}/`);
+    if (out.length >= max) break;
+  }
+  return out;
+}
+
 // One JSON file Dan can send back after a live run.
-export function debugDump({ version = '', shop = '', shopId: id = '', source = '', sources = {}, variants = [], fallback = null, at = '' } = {}) {
+export function debugDump({ version = '', shop = '', shopId: id = '', source = '', sources = {}, variants = [], fallback = null, replay = null, hookRuns = [], productReads = [], at = '' } = {}) {
   return {
     kind: 'bootlister-depop-debug',
     version, shop, at,
@@ -281,6 +378,11 @@ export function debugDump({ version = '', shop = '', shopId: id = '', source = '
       perPage: (v.log || []).map(p => ({ pass: p.pass, url: p.url, status: p.status, count: p.count, added: p.added, error: p.error || undefined })),
       ids: v.ids || [], urls: v.urls || [],
     })),
+    replay,
+    hookRuns: hookRuns.map(r => ({ label: r.label, gender: r.gender, expected: r.expected || 0, expectedSource: r.expectedSource || '',
+      found: (r.ids || []).length, complete: !!r.complete, verdict: r.verdict || '', pages: r.pages || 0, rounds: r.rounds || 0,
+      scrolls: r.scrolls || 0, stop: r.stop || '', hasMoreTrail: r.hasMoreTrail || [], growth: r.growth || [], hookErrors: r.hookErrors || [], ids: r.ids || [] })),
+    productReads: productReads.slice(0, 200),
     fallback,
   };
 }

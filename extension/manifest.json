@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "BootLister",
-  "version": "0.21",
+  "version": "0.22",
   "permissions": [
     "contextMenus",
     "scripting",
@@ -39,6 +39,16 @@
       ],
       "run_at": "document_start",
       "world": "MAIN"
+    },
+    {
+      "matches": [
+        "https://www.depop.com/*"
+      ],
+      "js": [
+        "depop-bridge.js"
+      ],
+      "run_at": "document_start",
+      "world": "ISOLATED"
     }
   ],
   "action": {
