@@ -8,6 +8,8 @@ import { packCsvChunks } from '../lib/csv';
 import { toCsv } from '../lib/export';
 import { CHANNELS, post } from '../lib/crosspost';
 import { isExtensionShop, sellerFormState, sellerSavePayload } from '../lib/seller-links';
+import { intakeLabel } from '../lib/intake';
+import IntakeForm from '../components/intake-form';
 
 // Selected seller comes from ?seller= (the extension's seller dropdown uses the same names).
 const seller = () => new URLSearchParams(location.search).get('seller') || '';
@@ -96,6 +98,8 @@ export default function Screen({ admin = false }) {
   const [err, setErr] = useState('');
   const [me, setMe] = useState(null);
   const [optBusy, setOptBusy] = useState(false);
+  const [intakeOpen, setIntakeOpen] = useState(false);
+  const [intakeBusy, setIntakeBusy] = useState(false);
 
   const current = sellers.find(s => s.seller === who), hasDetails = !!current?.name;
   const setRun = patch => setRunState(r => ({ ...r, ...patch }));
@@ -111,6 +115,7 @@ export default function Screen({ admin = false }) {
   }, []);
   useEffect(() => { setSel(new Set()); setEdit(null); setFilter({}); load(); }, [tab, me?.seller]);
   useEffect(() => { setLink(current?.website || current?.fb_profile || ''); }, [current?.website, current?.fb_profile]);
+  useEffect(() => { if (!admin && current?.name && current.intake && !current.intake.done) setIntakeOpen(true); }, [admin, current?.name, current?.intake?.done]);
   // Facebook/Depop imports run in the extension (extension/bridge.js); it reports progress back here.
   useEffect(() => {
     const on = ({ source, data: d = {} }) => {
@@ -170,6 +175,13 @@ export default function Screen({ admin = false }) {
   };
   const saveSeller = () => api('POST', sellerSavePayload(sellerForm, { rename_from: sellerForm.created_at && current?.name }), '', '/api/sellers')
     .then(s => { setSellerForm(null); s.name === who ? loadSellers() : switchTo(s.name); }).catch(e => setErr(e.message));
+  const saveIntake = body => {
+    setErr(''); setIntakeBusy(true);
+    api('POST', body, '', '/api/intake')
+      .then(s => { loadSellers(); if (s.intake?.done) setIntakeOpen(false); })
+      .catch(e => setErr(e.message))
+      .finally(() => setIntakeBusy(false));
+  };
   const deleteSeller = () => confirm(`Delete seller "${current.display_name}"?`) &&
     api('DELETE', null, `?name=${encodeURIComponent(current.name)}`, '/api/sellers').then(() => location.assign('/')).catch(e => setErr(e.message));
 
@@ -255,10 +267,12 @@ export default function Screen({ admin = false }) {
       <div className="who">
         {!admin ? <strong>{current?.display_name ?? who}</strong> : <>Seller: <select value={who} onChange={e => switchTo(e.target.value)}>
           {!current && <option value={who}>{who || 'Pick a seller…'}</option>}
-          {sellers.map(s => <option key={s.seller} value={s.seller}>{s.display_name ?? s.seller} — {s.active} items{s.review ? `, ${s.review} new` : ''}</option>)}
+          {sellers.map(s => <option key={s.seller} value={s.seller}>{s.display_name ?? s.seller} — {s.active} items{s.review ? `, ${s.review} new` : ''}{s.intake ? `, ${intakeLabel(s.intake)}` : ''}</option>)}
         </select>
         {who && <button onClick={() => setSellerForm(sellerFormState(hasDetails ? current : { name: who, sync: 'off' }))}>{hasDetails ? 'Seller settings' : 'Set up seller'}</button>}
+        {who && hasDetails && <button type="button" onClick={() => setIntakeOpen(true)}>Seller intake</button>}
         <button className="primary" onClick={() => setSellerForm(sellerFormState({ sync: 'off' }))}>+ Add seller</button></>}
+        {!admin && current?.name && <button type="button" onClick={() => setIntakeOpen(true)}>{current.intake?.done ? 'Update intake' : 'Finish intake'}</button>}
         {admin && who && <button type="button" onClick={() => act({ action: 'optimize-backfill' })}>Optimize existing</button>}
         {admin && <a className="src" href="/bootlister-extension-0.19.zip" download title="Needed for Facebook and Depop imports">Chrome extension 0.19{ext ? ' ✓' : ''}</a>}
         {admin && <a className="src" href="/admin/bugs">Bug reports</a>}
@@ -266,6 +280,9 @@ export default function Screen({ admin = false }) {
       </div>
       {!admin && <p className="help">Your job is to double-check each listing before it goes live, including anything shown in yellow. When you approve it, it is published right away. It is marked exported here — WBW is not connected yet, so nothing is sent to the live site.</p>}
       {admin && who && <p className="help">When a seller approves a listing, it is published here right away. You can still see and edit every listing. Export CSV is the file for WBW. Nothing is sent to the live site yet.</p>}
+      {admin && current?.intake && <p className={current.intake.done ? 'help' : 'warn'}>{intakeLabel(current.intake)}</p>}
+      {admin && !who && !sellerForm && sellers.some(s => s.name) && <ul className="intake-list">{sellers.filter(s => s.name).map(s => <li key={s.seller}>{s.display_name ?? s.seller} — {intakeLabel(s.intake)}</li>)}</ul>}
+      {intakeOpen && current?.name && <IntakeForm seller={current} admin={admin} busy={intakeBusy} error={err} onSave={saveIntake} onClose={() => setIntakeOpen(false)} />}
       {!ext && isExtensionShop(link) && <p className="help">Facebook and Depop import through the BootLister Chrome extension, which uses the sign-in already in this browser:
         1) download it with the <a href="/bootlister-extension-0.19.zip" download>Chrome extension 0.19</a> link and unzip it; 2) open chrome://extensions and turn on
         Developer mode; 3) click Load unpacked and pick the unzipped wbw-importer folder; 4) reload this page.</p>}
@@ -454,5 +471,9 @@ dl{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:4p
 .guess{background:#fff3c4;border-radius:4px;padding:0 4px}.miss{background:#fde8e6;border-radius:4px;padding:0 4px}
 .preset{margin-left:6px;padding:0 6px;font-size:12px}
 .help{font-size:13px;color:#6b5a4a;background:#fff;border:1px solid #e6dfd6;border-radius:8px;padding:10px}
+.intake-list{margin:0 0 12px;padding:10px 12px 10px 28px;background:#fff;border:1px solid #e6dfd6;border-radius:8px;font-size:14px}
+.check{flex-direction:row;align-items:flex-start;gap:8px;font-size:15px;color:#2b2118}
+.check input{width:20px;height:20px;flex-shrink:0;margin-top:2px}
+@media(max-width:640px){.who,.site,.tools{align-items:stretch}.who select,.who button,.site input,.site button{width:100%}}
 .warn{color:#8a5a00!important}.err{color:#a3261b!important}.empty{color:#6b5a4a}
 `;

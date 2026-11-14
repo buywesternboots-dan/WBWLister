@@ -74,6 +74,7 @@ describe('seller save payload', () => {
     assert.equal(body.rename_from, 'ada');
     assert.equal('shop_link' in body, false);
     assert.equal('shop_link_2' in body, false);
+    assert.deepEqual(JSON.parse(body.shop_links), { website: SITE, depop: DEPOP });
   });
 
   it('does not blank hidden fields when only visible fields are edited', () => {
@@ -96,6 +97,7 @@ describe('seller save payload', () => {
     assert.equal(body.notes, 'Keep me');
     assert.equal(body.sync, 'daily');
     assert.equal(body.terms, 'BJ = Black Jack');
+    assert.deepEqual(JSON.parse(body.shop_links), { ebay: EBAY });
   });
 });
 
