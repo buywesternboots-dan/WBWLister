@@ -4,7 +4,7 @@ import { describe, it } from 'node:test';
 import { publicIntakeResponse } from '../app/api/public-intake/route.js';
 import { intakeSubmissionsResponse } from '../app/api/intake-submissions/route.js';
 import { decide } from '../lib/gate.js';
-import { decryptSecret, encryptSecret, hasIntakeSecret } from '../lib/intake-crypto.js';
+import { decryptSecret, encryptSecret, hasIntakeSecret, intakeKeyMaterial } from '../lib/intake-crypto.js';
 import { HONEYPOT, isHoneypot, publicIntakeView, validatePublicIntake } from '../lib/public-intake.js';
 import { sessionToken } from '../lib/session.js';
 
@@ -22,6 +22,8 @@ describe('public intake access', () => {
     assert.deepEqual(await decide('/intake', '', ENV), { type: 'next' });
     assert.deepEqual(await decide('/api/public-intake', '', ENV, 'POST'), { type: 'next' });
     assert.deepEqual(await decide('/api/public-intake', '', ENV, 'GET'), { type: 'json', status: 401, error: 'Please log in.' });
+    // /api/intake is the signed-in seller update API, not the public form.
+    assert.deepEqual(await decide('/api/intake', '', ENV, 'POST'), { type: 'json', status: 401, error: 'Please log in.' });
     assert.deepEqual(await decide('/api/intake-submissions', '', ENV), { type: 'json', status: 401, error: 'Please log in.' });
     const seller = await sessionToken('seller:ada', ENV.APP_PASSWORD);
     assert.equal((await decide('/intake', seller, ENV)).type, 'next');
@@ -61,7 +63,7 @@ describe('public intake validation', () => {
 });
 
 describe('temporary password encryption', () => {
-  it('round-trips with INTAKE_SECRET and fails closed without it', () => {
+  it('round-trips with INTAKE_SECRET and fails closed without any key source', () => {
     assert.equal(hasIntakeSecret(ENV), true);
     assert.equal(hasIntakeSecret({}), false);
     const stored = encryptSecret('temporary1', ENV);
@@ -69,6 +71,21 @@ describe('temporary password encryption', () => {
     assert.equal(decryptSecret(stored, ENV), 'temporary1');
     assert.throws(() => encryptSecret('temporary1', {}), /not taking submissions/);
     assert.throws(() => decryptSecret(stored, { INTAKE_SECRET: 'other-secret' }), /not available/);
+  });
+
+  it('derives the key from INTAKE_SECRET, else ADMIN_PASSWORD, else APP_PASSWORD, and does not need INTAKE_SECRET', () => {
+    assert.equal(intakeKeyMaterial({ INTAKE_SECRET: 'intake', ADMIN_PASSWORD: 'admin', APP_PASSWORD: 'app' }), 'intake');
+    assert.equal(intakeKeyMaterial({ ADMIN_PASSWORD: 'admin', APP_PASSWORD: 'app' }), 'admin');
+    assert.equal(intakeKeyMaterial({ APP_PASSWORD: 'app' }), 'app');
+    assert.equal(intakeKeyMaterial({}), '');
+    const fromAdmin = encryptSecret('temporary1', { ADMIN_PASSWORD: 'staff-secret' });
+    assert.equal(decryptSecret(fromAdmin, { ADMIN_PASSWORD: 'staff-secret' }), 'temporary1');
+    const fromApp = encryptSecret('temporary1', { APP_PASSWORD: 'signing-secret' });
+    assert.equal(decryptSecret(fromApp, { APP_PASSWORD: 'signing-secret' }), 'temporary1');
+    const preferIntake = encryptSecret('temporary1', { INTAKE_SECRET: 'intake-secret', ADMIN_PASSWORD: 'staff-secret' });
+    assert.equal(decryptSecret(preferIntake, { INTAKE_SECRET: 'intake-secret' }), 'temporary1');
+    assert.throws(() => decryptSecret(preferIntake, { ADMIN_PASSWORD: 'staff-secret' }), /not available/);
+    assert.throws(() => decryptSecret(fromAdmin, { APP_PASSWORD: 'signing-secret' }), /not available/);
   });
 
   it('never puts the password on a public or admin list view', () => {
@@ -111,13 +128,13 @@ describe('public intake API', () => {
 });
 
 describe('admin intake submissions', () => {
-  it('lets only an admin list, reveal, clear, and approve, and audits reveal', async () => {
+  it('lets only an admin list, reveal, and clear, and audits reveal', async () => {
     const revealed = [];
     const db = {
       async list() { return [{ id: 1, display_name: 'Ada', has_password: true, status: 'pending' }]; },
       async reveal(id, actor) { revealed.push({ id, actor }); return { password: 'temporary1', display_name: 'Ada' }; },
       async clear(id, actor) { return { id, has_password: false, cleared_by: actor }; },
-      async approve(id) { return { id, status: 'approved', seller_name: 'ada-boots' }; },
+      async approve() { throw new Error('should not approve'); },
       async invite() { return { code: 'abc', expires: '2099-01-01' }; },
     };
     const seller = await sessionToken('seller:ada', ENV.APP_PASSWORD);
@@ -135,8 +152,7 @@ describe('admin intake submissions', () => {
     await assert.rejects(() => intakeSubmissionsResponse(req(seller, 'POST', { action: 'reveal', id: 1 }), db, ENV), /admin/);
     const cleared = await intakeSubmissionsResponse(req(admin, 'POST', { action: 'clear', id: 1 }), db, ENV);
     assert.equal(cleared.has_password, false);
-    const approved = await intakeSubmissionsResponse(req(admin, 'POST', { action: 'approve', id: 1 }), db, ENV);
-    assert.equal(approved.status, 'approved');
+    await assert.rejects(() => intakeSubmissionsResponse(req(admin, 'POST', { action: 'approve', id: 1 }), db, ENV), /Unknown request/);
   });
 });
 
@@ -145,6 +161,8 @@ describe('public intake page', () => {
     const page = readFileSync(new URL('../app/intake/page.js', import.meta.url), 'utf8');
     const form = readFileSync(new URL('../components/public-intake-form.js', import.meta.url), 'utf8');
     const gate = readFileSync(new URL('../lib/gate.js', import.meta.url), 'utf8');
+    const adminUi = readFileSync(new URL('../components/intake-submissions.js', import.meta.url), 'utf8');
+    const store = readFileSync(new URL('../lib/public-intake-store.js', import.meta.url), 'utf8');
     assert.match(page, /index: false/);
     assert.match(page, /PublicIntakeForm/);
     assert.match(form, /Required/);
@@ -153,7 +171,13 @@ describe('public intake page', () => {
     assert.match(form, /Temporary password for WBW registration/);
     assert.match(form, /Profile picture/);
     assert.match(form, /\/api\/public-intake/);
+    assert.doesNotMatch(form, /\/api\/intake['"]/);
     assert.match(gate, /\/intake/);
     assert.match(gate, /\/api\/public-intake/);
+    assert.doesNotMatch(adminUi, /Approve into a seller/);
+    assert.match(adminUi, /integrate later/);
+    assert.doesNotMatch(store, /saveSeller/);
+    assert.doesNotMatch(store, /approveIntake/);
+    assert.doesNotMatch(store, /already on a seller/);
   });
 });

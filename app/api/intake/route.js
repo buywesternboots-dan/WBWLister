@@ -4,6 +4,7 @@ import * as wbw from '../../../lib/wbw';
 
 export const dynamic = 'force-dynamic';
 
+// Signed-in seller intake (not the public form; that posts to /api/public-intake).
 // POST → save this seller's intake answers. A seller can only update their own row. An admin uses Bearer.
 export async function intakeApi(req, db, env) {
   const { seller } = await sellerContext(req, env);
