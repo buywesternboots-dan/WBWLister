@@ -79,6 +79,12 @@ export function planFilteredShop(reports) {
   if (women && men && (women.urls || []).length && (women.urls || []).join('\n') === (men.urls || []).join('\n'))
     return { ok: false, fallback: true, reason: 'Women and Men returned the same count as each other, so the filter was not applied' };
   if (!keep.some(r => r.gender)) return { ok: false, fallback: true, reason: 'no filtered grid applied' };
+  // A known count that the read did not reach (or overshot) is a failed read. Nothing partial is imported.
+  for (const r of keep) {
+    const got = (r.urls || []).length;
+    const target = Number(r.resultCount) || 0;
+    if (target > 0 && got !== target) return { ok: false, short: true, reason: `${r.label || r.id} ${got}/${target} ${got < target ? 'short' : 'over'}` };
+  }
   const seen = new Set();
   const urls = [];
   for (const report of keep) for (const url of report.urls || []) {
@@ -89,9 +95,11 @@ export function planFilteredShop(reports) {
   const counts = keep.map(r => {
     const got = (r.urls || []).length;
     const target = Number(r.resultCount) || 0;
-    if (target > 0 && got < target) return `${r.label} ${got}/${target} short`;
-    if (target > 0) return `${r.label} ${got}/${target}`;
-    return `${r.label} ${got}`;
+    const pages = Number(r.pages) || 0;
+    const pageNote = pages ? ` (${pages} ${pages === 1 ? 'page' : 'pages'})` : '';
+    if (target > 0 && got < target) return `${r.label} ${got}/${target} short${pageNote}`;
+    if (target > 0) return `${r.label} ${got}/${target}${pageNote}`;
+    return `${r.label} ${got}${pageNote}`;
   }).join(', ');
   const extra = notes.length ? ` ${notes.join('. ')}.` : '';
   return { ok: true, urls, note: `${SHOP_MODE_BOOTS}. ${counts}.${extra}` };

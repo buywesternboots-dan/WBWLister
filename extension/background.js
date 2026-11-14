@@ -1,5 +1,6 @@
-import { acceptScan, collectIds, explainPageFailure, readDepopProduct, readDepopShop, rejectEmptyDepopShop, NO_FACEBOOK_LISTINGS } from './import-page.mjs';
+import { acceptScan, collectIds, driveDepopHook, explainPageFailure, replayDepopRequest, readDepopHook, readDepopProduct, readDepopShop, readDepopSources, rejectEmptyDepopShop, NO_FACEBOOK_LISTINGS } from './import-page.mjs';
 import { bootScanSummary, rejectToStore, westernBootDecision } from './boot-gate.mjs';
+import { aggregateTotal, collectDepopPages, collectHookProducts, debugDump, depopAggregatesUrl, DEPOP_PAGE_PAUSE_MS, judgeCount, judgeDomRead, mergeHookRounds, pickShopId, PRODUCT_PAGE_PAUSE_MS, productPlan, replayRequest } from './depop-feed.mjs';
 import { API_TIMEOUT_MS, actorForJob, allowedBootlisterOrigin, BOOTLISTER_ORIGINS, CANDIDATE_CAP, cookieReadUrl, createImportLock, depopBootFilters, gateWrite, importLimit, jobSummary, planFilteredShop, planKnownSkips, planSync, presenceIds, REJECT_BATCH, retryInjection, scanWindowOpen, scriptArgs, sessionFromCookie, shopAfterFilterError, shopReadArgs, SHOP_MODE_FULL, SHOP_READ_MS, SIGNED_OUT, validateItemEnvelope, withDeadline } from './import-job.mjs';
 
 const ITEM = /facebook\.com\/marketplace\/item\/(\d+)/;
@@ -235,10 +236,159 @@ async function importFacebook(profileId, sync) {
 
 // Depop: the shop tab's own document. Isolated world, so page scripts cannot replace querySelectorAll.
 // The result is a plain object. Zero candidates throw before any write and before "Done".
-async function readShopGrid(shop, url, deadline, allowEmpty) {
-  const args = shopReadArgs(shop, deadline, CANDIDATE_CAP, allowEmpty);
-  // Background tab so a filter navigation does not replace the shop the seller is looking at.
-  return inTab(url, 250, (id, site) => runCall(id, readDepopShop, 'ISOLATED', args, SHOP_READ_MS + 5000, site), false);
+// withHook also returns what depop-hook.js saw the page fetch itself while the grid scrolled.
+async function readShopGrid(shop, url, deadline, allowEmpty, visible, cap = CANDIDATE_CAP, withHook = false) {
+  const args = shopReadArgs(shop, deadline, cap, allowEmpty);
+  // A background tab never loads more than the first grid page. Visible is only the API fallback.
+  return inTab(url, 250, async (id, site) => {
+    const grid = await runCall(id, readDepopShop, 'ISOLATED', args, SHOP_READ_MS + 5000, site);
+    if (!withHook) return grid;
+    let hook = null;
+    try { hook = await runCall(id, readDepopHook, 'MAIN', [], 10000, site); } catch { hook = null; }
+    return grid && typeof grid === 'object' ? { ...grid, hook } : grid;
+  }, visible === true);
+}
+// Primary path: one visible, focused tab per filter. Depop's own page requests the product list while the grid is
+// scrolled; depop-hook.js records each response; we use the unique on-sale ids once the page reports has_more false.
+// Expected count: the page's own aggregates total (or a response total), else the replay's aggregates total.
+// A short or over-full list fails the filter (nothing imported). Up to 3 reloads are unioned for page-order shuffles.
+const HOOK_ROUNDS = 3;
+async function focusTab(tabId) {
+  try { const t = await chrome.tabs.get(tabId); await chrome.windows.update(t.windowId, { focused: true }); await chrome.tabs.update(tabId, { active: true }); }
+  catch { /* window already gone */ }
+}
+async function hookRound(variant, shopId, deadline) {
+  return inTab(variant.url, 1500, async (tabId, site) => {
+    await focusTab(tabId);
+    const budget = Math.max(15000, Math.min(150000, deadline - Date.now() - 8000));
+    return runCall(tabId, driveDepopHook, 'ISOLATED', [{ gender: variant.gender, shopId, pauseMs: 1500, quietMax: 4, maxScrolls: 60, deadlineMs: Date.now() + budget - 5000 }], budget, site);
+  }, true);
+}
+async function readHookReports(shop, shopId, deadline, expectedBy = {}) {
+  const reports = [];
+  const runs = [];
+  const fallback = [];
+  let variantError = '';
+  for (const variant of depopBootFilters(shop)) {
+    if (deadline - Date.now() < 20000) { variantError = `${variant.label}: time limit too close`; break; }
+    let merged = null;
+    const run = { label: variant.label, gender: variant.gender, rounds: 0, scrolls: 0, growth: [], hookErrors: [], stop: '' };
+    for (let round = 1; round <= HOOK_ROUNDS && deadline - Date.now() > 20000; round++) {
+      let raw = null;
+      try { raw = await hookRound(variant, shopId, deadline); } catch (e) { run.stop = `error: ${e.message}`; break; }
+      run.rounds = round;
+      run.scrolls += Number(raw?.scrolls) || 0;
+      run.growth.push(...(raw?.growth || []).map(g => ({ round, ...g })));
+      run.hookErrors.push(...(raw?.hook?.errors || []).slice(0, 5));
+      run.stop = raw?.stop || raw?.error || 'no result';
+      let got = collectHookProducts(raw?.hook, variant.gender, shopId);
+      if (!got.expected && expectedBy[variant.id]) {
+        const j = judgeCount(got.ids.length, expectedBy[variant.id]);
+        got = { ...got, expected: expectedBy[variant.id], expectedSource: 'replay-aggregates', verdict: got.ended ? j.verdict : 'open', complete: got.ended && j.ok };
+      }
+      merged = merged ? mergeHookRounds(merged, got) : got;
+      if (merged.complete || ['over', 'runaway'].includes(merged.verdict) || !merged.expected) break;
+    }
+    Object.assign(run, merged || {});
+    runs.push(run);
+    const ok = !!merged?.complete && merged.ids.length <= (merged.expected || 150);
+    if (ok) {
+      reports.push({ ...variant, urls: merged.urls, chips: [], cardTexts: [], href: variant.url, partial: false, limitHit: false, capHit: false, resultCount: merged.expected || merged.urls.length, pages: merged.pages });
+      continue;
+    }
+    // DOM fallback for this filter only. Capped at the expected count (or 151 when unknown, which then fails).
+    const expected = merged?.expected || Number(expectedBy[variant.id]) || 0;
+    const cap = expected ? Math.min(CANDIDATE_CAP, expected + 1) : 151;
+    let dom = null;
+    try { dom = await readShopGrid(shop, variant.url, deadline, true, true, cap, false); } catch (e) { dom = { ok: false, error: e.message }; }
+    const data = dom?.ok === true ? acceptScan(dom, 'Depop') : null;
+    const urls = data?.productUrls || [];
+    const judged = judgeDomRead({ urls, expected, capHit: !expected && data?.capHit === true });
+    fallback.push({ label: variant.label, expected, dom: urls.length, hook: merged?.ids?.length || 0, hookVerdict: merged?.verdict || '', ok: judged.ok, reason: judged.reason || dom?.error || '' });
+    if (!judged.ok) {
+      variantError = `${variant.label}: hook ${merged?.ids?.length || 0}/${expected || '?'} ${merged?.verdict || run.stop}; DOM ${judged.reason}`;
+      break;
+    }
+    reports.push({ ...variant, urls, chips: data?.chips || [], cardTexts: data?.cardTexts || [], href: data?.pageUrl || '', partial: false, limitHit: false, capHit: false, resultCount: expected || urls.length });
+  }
+  return { reports, variantError, runs, fallback };
+}
+// Debug dump for the popup's "Save Depop debug" button. Kept in local storage only.
+async function saveDepopDebug(dump) {
+  try { await chrome.storage.local.set({ depopDebug: { ...dump, version: chrome.runtime.getManifest().version, at: new Date().toISOString() } }); }
+  catch { /* storage full or unavailable; the import still reports in the popup */ }
+}
+// Product list in the shop tab's own session. One URL string per request, so the arguments stay serializable.
+async function readDepopProductList(shop) {
+  return inTab(`https://www.depop.com/${shop}/`, 250, async (tabId, site) => {
+    const cache = (await chrome.storage.local.get('depopShopIds').catch(() => ({})))?.depopShopIds || {};
+    const sources = await runCall(tabId, readDepopSources, 'MAIN', [shop, 5000], 20000, site);
+    const picked = pickShopId(sources || {}, shop, cache[shop]);
+    const dump = { shop, shopId: picked.id, source: picked.source, sources: sources || {}, variants: [] };
+    if (!picked.id) {
+      await saveDepopDebug(debugDump(dump));
+      return { ok: false, reason: 'shop id was not on the page', shopId: '', debug: dump };
+    }
+    if (cache[shop] !== picked.id) await chrome.storage.local.set({ depopShopIds: { ...cache, [shop]: picked.id } }).catch(() => {});
+    let hook = null;
+    try { hook = await runCall(tabId, readDepopHook, 'MAIN', [], 10000, site); } catch { hook = null; }
+    const replay = replayRequest(hook, picked.id);
+    dump.replay = { url: replay?.url || '', init: replay?.init ? { ...replay.init, headers: Object.keys(replay.init.headers || {}) } : null };
+    if (!replay) {
+      await saveDepopDebug(debugDump(dump));
+      return { ok: false, reason: 'no captured Depop request to replay', shopId: picked.id, debug: dump };
+    }
+    // One exact replay of Depop's own request first. Any network error goes straight to the hook-driven path.
+    const first = await runCall(tabId, replayDepopRequest, 'MAIN', [replay.url, replay.init], 20000, site);
+    dump.replay.status = first?.status || 0;
+    dump.replay.error = first?.error || '';
+    if (first?.status !== 200) {
+      await saveDepopDebug(debugDump(dump));
+      return { ok: false, reason: `replay of Depop's own request failed (${first?.status || 0}${first?.error ? `: ${first.error}` : ''})`, shopId: picked.id, debug: dump };
+    }
+    const fetchJson = url => runCall(tabId, replayDepopRequest, 'MAIN', [url, replay.init], 20000, site);
+    const reports = [];
+    const expectedBy = {};
+    let failure = '';
+    for (const variant of depopBootFilters(shop)) {
+      const agg = await fetchJson(depopAggregatesUrl(picked.id, variant.gender));
+      if (agg?.status === 429 || agg?.status === 403) { failure = `HTTP ${agg.status}`; break; }
+      const expected = aggregateTotal(agg?.status === 200 ? agg.body : null);
+      if (expected) expectedBy[variant.id] = expected;
+      const collected = await collectDepopPages({
+        shopId: picked.id,
+        gender: variant.gender,
+        cap: CANDIDATE_CAP,
+        expected,
+        template: replay.url,
+        pause: () => wait(DEPOP_PAGE_PAUSE_MS),
+        fetchJson,
+      });
+      dump.variants.push({ label: variant.label, gender: variant.gender, expected, ...collected, aggregatesStatus: agg?.status || 0, aggregatesError: agg?.error || '' });
+      if (!collected.ok) {
+        const err = collected.log?.at?.(-1)?.error;
+        failure = collected.status === 429 || collected.status === 403 ? `HTTP ${collected.status}` : `product list stopped (${collected.stop}${err ? `: ${err}` : ''})`;
+        break;
+      }
+      if (expected && !collected.complete) { failure = `${variant.label} ${collected.ids.length}/${expected} ${collected.verdict}`; break; }
+      const resultCount = expected || collected.urls.length;
+      reports.push({
+        ...variant,
+        urls: collected.urls,
+        chips: [],
+        cardTexts: [],
+        href: variant.url,
+        partial: false,
+        limitHit: false,
+        capHit: collected.stop === 'cap',
+        resultCount,
+        pages: collected.pages,
+      });
+    }
+    await saveDepopDebug(debugDump(dump));
+    if (failure) return { ok: false, reason: failure, expectedBy, shopId: picked.id, debug: dump };
+    return { ok: true, reports, expectedBy, shopId: picked.id, debug: dump };
+  }, false);
 }
 async function importDepop(shop, sync, recheck, shopMode) {
   const cap = lock.job?.limit;
@@ -246,39 +396,35 @@ async function importDepop(shop, sync, recheck, shopMode) {
   let scan;
   let productUrls;
   let modeNote;
+  let depopDump = null;
   if (shopMode === 'full') {
     status(`Reading the Depop shop (${SHOP_MODE_FULL})…`);
     scan = acceptScan(await readShopGrid(shop, `https://www.depop.com/${shop}/`, deadline, false), 'Depop');
     productUrls = rejectEmptyDepopShop(scan, shop);
     modeNote = `${SHOP_MODE_FULL}.`;
   } else {
-    status('Reading Depop boots filters…');
-    const reports = [];
+    let reports = [];
     let variantError = '';
-    for (const variant of depopBootFilters(shop)) {
-      if (deadline - Date.now() < 8000) break;
-      try {
-        const raw = await readShopGrid(shop, variant.url, deadline, true);
-        const data = raw?.ok === true ? acceptScan(raw, 'Depop') : null;
-        reports.push({
-          ...variant,
-          urls: data?.productUrls || [],
-          chips: data?.chips || [],
-          cardTexts: data?.cardTexts || [],
-          href: data?.pageUrl || '',
-          partial: data?.partial === true,
-          limitHit: data?.limitHit === true,
-          capHit: data?.capHit === true,
-          resultCount: Number(data?.resultCount) || 0,
-        });
-      } catch (e) {
-        const step = shopAfterFilterError(e);
-        variantError = step.reason;
-        reports.push({ ...variant, urls: [], chips: [], cardTexts: [], href: '', readError: step.reason });
-        if (variant.gender) break;
-      }
+    let api = { ok: false, reason: 'product list was not read' };
+    try {
+      status('Reading Depop boots from the shop product list…');
+      api = await readDepopProductList(shop);
+    } catch (e) {
+      api = { ok: false, reason: e?.message || 'product list failed' };
+    }
+    if (api?.ok && api.reports?.length) { reports = api.reports; depopDump = api.debug || null; }
+    else {
+      if (!api?.shopId) throw new Error(`Depop shop id was not found (${api?.reason || 'no id'}). Nothing was imported. Use "Save Depop debug" in the popup and send the file.`);
+      status(`Depop product list replay failed (${api?.reason || 'no list'}). Letting Depop's own page load each filtered grid in a visible tab.`);
+      const hooked = await readHookReports(shop, api.shopId, deadline, api?.expectedBy || {});
+      reports = hooked.reports;
+      variantError = hooked.variantError;
+      depopDump = { ...(api?.debug || {}), hookRuns: hooked.runs, fallback: hooked.fallback };
+      await saveDepopDebug(debugDump(depopDump));
+      if (variantError) throw new Error(`Depop boots list read was incomplete (${variantError}). Nothing was imported. Use "Save Depop debug" in the popup and send the file.`);
     }
     const plan = planFilteredShop(reports);
+    if (plan.short) throw new Error(`Depop boots list read was short (${plan.reason}). Nothing was imported. Use "Save Depop debug" in the popup and send the file.`);
     if (variantError || !plan.ok) {
       const reason = variantError || plan.reason;
       status(`Depop filter failed (${reason}). Reading the full shop.`);
@@ -289,7 +435,7 @@ async function importDepop(shop, sync, recheck, shopMode) {
     } else if (!plan.urls.length) {
       throw new Error(`${plan.note} No boots were listed in the filtered grids. Nothing was imported.`);
     } else {
-      productUrls = plan.urls.slice(0, CANDIDATE_CAP);
+      productUrls = productPlan(plan.urls, CANDIDATE_CAP);
       scan = { partial: reports.some(r => r.partial), limitHit: false, reason: '' };
       modeNote = plan.note;
     }
@@ -306,7 +452,9 @@ async function importDepop(shop, sync, recheck, shopMode) {
   const notes = [scan.reason].filter(Boolean);
   let scanned = 0;
   let cursor = 0;
+  const productReads = [];
   for (; cursor < planned.open.length; cursor++) {
+    if (cursor > 0) await wait(PRODUCT_PAGE_PAUSE_MS + Math.random() * 500);
     if (todo.length >= importLimit(cap)) break;
     if (!scanWindowOpen(lock.job?.deadline)) { notes.push('Import stopped before another product page: the time limit was too close. Nothing further was read.'); break; }
     const productUrl = planned.open[cursor];
@@ -323,11 +471,14 @@ async function importDepop(shop, sync, recheck, shopMode) {
         const reason = rejectToStore(decision);
         if (reason) remembered.push({ source_id: slug, source_url: productUrl, reason });
         notes.push(`${slug}: ${decision.reason}`);
+        productReads.push({ slug, ok: true, kind: decision.kind });
         continue;
       }
       todo.push(item);
-    } catch (e) { skipped.unread += 1; notes.push(`${slug || productUrl} not read: ${e.message}`); }
+      productReads.push({ slug, ok: true, kind: 'boot' });
+    } catch (e) { skipped.unread += 1; notes.push(`${slug || productUrl} not read: ${e.message}`); productReads.push({ slug, ok: false, error: String(e.message || e).slice(0, 200) }); }
   }
+  if (depopDump || productReads.some(r => !r.ok)) await saveDepopDebug(debugDump({ ...(depopDump || { shop }), productReads }));
   const unopened = planned.open.length - cursor;
   const partial = unopened > 0 || scan.partial === true;
   try { await rememberRejects(remembered); }

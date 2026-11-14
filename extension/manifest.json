@@ -1,10 +1,57 @@
 {
   "manifest_version": 3,
   "name": "BootLister",
-  "version": "0.19",
-  "permissions": ["contextMenus", "scripting", "tabs", "storage", "webNavigation", "cookies"],
-  "host_permissions": ["https://*.facebook.com/*", "https://*.depop.com/*", "https://bootlister.vercel.app/*", "https://wbw-lister.vercel.app/*"],
-  "background": { "service_worker": "background.js", "type": "module" },
-  "content_scripts": [{ "matches": ["https://wbw-lister.vercel.app/*", "https://bootlister.vercel.app/*"], "js": ["bridge.js"] }],
-  "action": { "default_popup": "popup.html" }
+  "version": "0.22",
+  "permissions": [
+    "contextMenus",
+    "scripting",
+    "tabs",
+    "storage",
+    "webNavigation",
+    "cookies"
+  ],
+  "host_permissions": [
+    "https://*.facebook.com/*",
+    "https://*.depop.com/*",
+    "https://bootlister.vercel.app/*",
+    "https://wbw-lister.vercel.app/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://wbw-lister.vercel.app/*",
+        "https://bootlister.vercel.app/*"
+      ],
+      "js": [
+        "bridge.js"
+      ]
+    },
+    {
+      "matches": [
+        "https://www.depop.com/*"
+      ],
+      "js": [
+        "depop-hook.js"
+      ],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": [
+        "https://www.depop.com/*"
+      ],
+      "js": [
+        "depop-bridge.js"
+      ],
+      "run_at": "document_start",
+      "world": "ISOLATED"
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html"
+  }
 }

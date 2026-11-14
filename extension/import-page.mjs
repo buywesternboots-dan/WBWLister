@@ -415,3 +415,150 @@ export async function collectIds(profileId, deadlineMs, stepMs = 1500, cap = 2) 
   const value = ids().slice(0, limit);
   return { ok: true, value, complete: false, reason: unproven };
 }
+
+// Shop id sources from the shop tab (MAIN world). Injected, so it does not call other modules; the background
+// picks the id with pickShopId. Waits up to waitMs for the page's own /shops/{id}/ requests, which fire after hydration.
+export async function readDepopSources(shop, waitMs = 5000) {
+  const SHOP = /webapi\.depop\.com\/presentation\/api\/v1\/shops\/\d{3,}\/(products|aggregates)\//;
+  const SOLD = /by-status\/sold/i;
+  const until = Date.now() + (Number(waitMs) > 0 ? Math.min(Number(waitMs), 15000) : 0);
+  const grab = () => {
+    let resourceUrls = [];
+    try { resourceUrls = performance.getEntriesByType('resource').map(e => String(e.name || '')).filter(u => SHOP.test(u) && !SOLD.test(u)); }
+    catch { resourceUrls = []; }
+    const hook = window.__bootlisterDepop || null;
+    const hookUrls = (hook?.urls || []).filter(u => !SOLD.test(u));
+    return { resourceUrls: resourceUrls.slice(0, 60), hookUrls: hookUrls.slice(0, 60), hookHeaders: hook?.headers || {}, hooked: !!hook };
+  };
+  let got = grab();
+  while (!got.resourceUrls.length && !got.hookUrls.length && Date.now() < until) {
+    await new Promise(r => setTimeout(r, 250));
+    got = grab();
+  }
+  let nextF = '';
+  try {
+    const chunks = Array.isArray(self.__next_f) ? self.__next_f : [];
+    nextF = chunks.map(c => (Array.isArray(c) ? c.filter(x => typeof x === 'string').join('') : '')).join('');
+  } catch { nextF = ''; }
+  if (nextF.length > 2_000_000) {
+    const at = nextF.toLowerCase().indexOf(`"username":"${String(shop || '').toLowerCase()}"`);
+    nextF = at >= 0 ? nextF.slice(Math.max(0, at - 4000), at + 4000) : nextF.slice(0, 2_000_000);
+  }
+  let nextData = '';
+  try { nextData = document.getElementById('__NEXT_DATA__')?.textContent || ''; } catch { nextData = ''; }
+  if (nextData.length > 2_000_000) nextData = '';
+  return { ...got, nextF, nextData, href: String(location.href || '') };
+}
+
+// Responses the page fetched itself, captured by depop-hook.js. Injected (MAIN world).
+export function readDepopHook() {
+  const hook = window.__bootlisterDepop || null;
+  if (!hook) return { hooked: false, urls: [], pages: [], aggregates: [], requests: [] };
+  return { hooked: true, urls: (hook.urls || []).slice(0, 200), pages: (hook.pages || []).slice(0, 100), aggregates: (hook.aggregates || []).slice(0, 50), requests: (hook.requests || []).slice(0, 100), errors: (hook.errors || []).slice(0, 50) };
+}
+
+// One product-list request, in the page's own session, with the headers Depop's own request used.
+// The sold list is never requested. A network/CORS failure returns status 0 with the error, not a throw.
+export async function depopFetchJson(url, headers) {
+  if (typeof url !== 'string' || /by-status\/sold/i.test(url)) return { status: 0, body: null };
+  const h = {};
+  if (headers && typeof headers === 'object') for (const [k, v] of Object.entries(headers)) {
+    if (/^[a-z0-9-]+$/i.test(k) && !/^(cookie|authorization|content-length|host|origin|referer)$/i.test(k)) h[k] = String(v);
+  }
+  let response;
+  try { response = await fetch(url, { credentials: 'include', headers: h }); }
+  catch (e) { return { status: 0, body: null, error: String(e?.message || e || 'fetch failed').slice(0, 200) }; }
+  if (response.status === 429 || response.status === 403) return { status: response.status, body: null };
+  let body = null;
+  try { body = await response.json(); } catch { body = null; }
+  return { status: response.status, body };
+}
+
+// Replays Depop's own captured product-list request once: same URL and same init (headers, credentials, mode).
+// Only GET on webapi.depop.com shop products/aggregates; never the sold list. Network/CORS failure returns status 0.
+export async function replayDepopRequest(url, init) {
+  if (typeof url !== 'string' || /by-status\/sold/i.test(url) || !/^https:\/\/webapi\.depop\.com\/presentation\/api\/v1\/shops\/\d{3,}\/(products|aggregates)\//.test(url))
+    return { status: 0, body: null, error: 'not a Depop shop list URL' };
+  const src = init && typeof init === 'object' ? init : {};
+  const opts = { method: 'GET', headers: {} };
+  for (const [k, v] of Object.entries(src.headers || {})) {
+    if (/^[a-z0-9-]+$/i.test(k) && !/^(cookie|authorization|content-length|host|origin|referer)$/i.test(k)) opts.headers[k] = String(v);
+  }
+  for (const k of ['credentials', 'mode', 'cache', 'redirect', 'referrerPolicy']) if (typeof src[k] === 'string' && src[k]) opts[k] = src[k];
+  let response;
+  try { response = await fetch(url, opts); }
+  catch (e) { return { status: 0, body: null, error: String(e?.message || e || 'fetch failed').slice(0, 200) }; }
+  if (response.status === 429 || response.status === 403) return { status: response.status, body: null };
+  let body = null;
+  try { body = await response.json(); } catch { body = null; }
+  return { status: response.status, body };
+}
+
+// Runs in the visible filtered shop tab (ISOLATED world, using depop-bridge.js snapshots). Depop's own page makes the requests; depop-hook.js records them.
+// Scrolls the grid until the page's own matching response says has_more === false, or the hook stops growing.
+// Self-contained (injected): it may not use imports.
+export async function driveDepopHook(opts) {
+  const o = opts && typeof opts === 'object' ? opts : {};
+  const gender = String(o.gender || '');
+  const id = String(o.shopId || '');
+  const pauseMs = Number.isInteger(o.pauseMs) && o.pauseMs >= 0 ? o.pauseMs : 1500;
+  const quietMax = Number.isInteger(o.quietMax) && o.quietMax > 0 ? o.quietMax : 4;
+  const maxScrolls = Number.isInteger(o.maxScrolls) && o.maxScrolls > 0 ? o.maxScrolls : 60;
+  const deadline = Number(o.deadlineMs) || Date.now() + 120000;
+  const wait = ms => new Promise(r => setTimeout(r, ms));
+  const hook = () => window.__bootlisterDepopSnapshot || null;
+  const matches = url => {
+    const u = String(url || '');
+    if (/by-status\/sold/i.test(u)) return false;
+    const m = u.match(/webapi\.depop\.com\/presentation\/api\/v1\/shops\/(\d{3,})\/products\//);
+    if (!m || (id && m[1] !== id)) return false;
+    try { const q = new URL(u).searchParams; return q.get('product_types') === 'boots' && (q.get('gender') || '') === gender; } catch { return false; }
+  };
+  const state = () => {
+    const pages = (hook()?.pages || []).filter(p => matches(p?.url));
+    const ids = new Set();
+    for (const p of pages) for (const it of p.items || []) if (it?.slug && it?.status === 'STATUS_ONSALE') ids.add(String(it.id ?? it.slug));
+    const last = pages.at(-1);
+    return { pages: pages.length, unique: ids.size, lastMore: last?.page_info?.has_more ?? last?.page_info?.hasMore };
+  };
+  const scroll = () => {
+    try {
+      const cards = document.querySelectorAll('a[href*="/products/"]');
+      const lastCard = cards.length ? cards[cards.length - 1] : null;
+      if (lastCard && typeof lastCard.scrollIntoView === 'function') lastCard.scrollIntoView({ block: 'end' });
+      window.scrollBy(0, -200);
+      const h = Math.max(document.body?.scrollHeight || 0, document.documentElement?.scrollHeight || 0);
+      window.scrollTo(0, h);
+    } catch { /* ignore */ }
+  };
+  try { window.postMessage({ bootlisterDepopRequest: true }, location.origin); } catch { /* ignore */ }
+  for (let i = 0; !hook() && i < 8; i++) await wait(250);
+  if (!hook()) return { ok: false, error: 'BootLister hook not present on this tab', scrolls: 0, growth: [], stop: 'no-hook', hook: null };
+  let scrolls = 0;
+  let quiet = 0;
+  let stop = 'time';
+  const growth = [];
+  let prev = state();
+  // Wait for the first matching page (Depop loads it after hydration).
+  while (!prev.pages && Date.now() < deadline - pauseMs && quiet < quietMax * 2) { await wait(500); prev = state(); quiet += 1; }
+  quiet = 0;
+  growth.push({ scroll: 0, ...prev });
+  while (Date.now() < deadline - pauseMs) {
+    if (prev.pages && prev.lastMore === false) { stop = 'has_more_false'; break; }
+    if (scrolls >= maxScrolls) { stop = 'max-scrolls'; break; }
+    scroll();
+    scrolls += 1;
+    await wait(pauseMs);
+    const now = state();
+    growth.push({ scroll: scrolls, ...now });
+    quiet = now.pages === prev.pages ? quiet + 1 : 0;
+    prev = now;
+    if (quiet >= quietMax) { stop = 'no-growth'; break; }
+  }
+  // One more settle so a trailing response that arrived with the last scroll is recorded.
+  await wait(Math.min(pauseMs, 1000));
+  const h = hook();
+  const copy = v => { try { return JSON.parse(JSON.stringify(v)); } catch { return []; } };
+  return { ok: true, scrolls, growth: growth.slice(-80), stop,
+    hook: { pages: copy(h?.pages || []), aggregates: copy(h?.aggregates || []), requests: copy(h?.requests || []), errors: copy(h?.errors || []) } };
+}

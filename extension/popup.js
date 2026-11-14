@@ -82,4 +82,17 @@ $('listing').onclick = async () => {
   say('Adding…');
   start({ type: 'listing', tabId: tab.id, url: tab.url });
 };
+// Last Depop boots read, saved by the background as depopDebug. Local file only; nothing is sent.
+$('depopDebug').onclick = async () => {
+  const { depopDebug } = await chrome.storage.local.get('depopDebug');
+  if (!depopDebug) return say('No Depop read yet. Run a Depop import first.');
+  const blob = new Blob([JSON.stringify(depopDebug, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `bootlister-depop-debug-${depopDebug.shop || 'shop'}-${String(depopDebug.at || '').replace(/[:.]/g, '-')}.json`;
+  document.body.append(a);
+  a.click();
+  a.remove();
+  say('Saved the Depop debug file to Downloads.');
+};
 loadSession();
