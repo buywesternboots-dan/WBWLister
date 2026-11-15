@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { HONEYPOT, MAX_PHOTO_BYTES } from '../lib/public-intake';
+import { HONEYPOT, MAX_PHOTO_BYTES } from '../lib/public-intake-constants';
 
 const CHANNELS = [
   ['depop', 'Depop shop'],
