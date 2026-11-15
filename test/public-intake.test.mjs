@@ -10,7 +10,7 @@ import { intakeSubmissionsResponse } from '../app/api/intake-submissions/route.j
 import { decide } from '../lib/gate.js';
 import { decryptSecret, encryptSecret, hasIntakeSecret, intakeKeyMaterial } from '../lib/intake-crypto.js';
 import { HONEYPOT, isHoneypot, publicIntakeView, validatePublicIntake } from '../lib/public-intake.js';
-import { DUPLICATE_MESSAGES, PAYMENT_METHODS, applicationsLabel, EMAIL_PREFS, EMAIL_PREFS_INTRO, INTAKE_LIMITS, USERNAME_RE } from '../lib/public-intake-constants.js';
+import { DUPLICATE_MESSAGES, PAYMENT_METHODS, PRICE_FREQUENCIES, applicationsLabel, EMAIL_PREFS, EMAIL_PREFS_INTRO, INTAKE_LIMITS, USERNAME_RE } from '../lib/public-intake-constants.js';
 import { sessionToken } from '../lib/session.js';
 
 const DEPOP = 'https://www.depop.com/westernbootworld/';
@@ -217,7 +217,7 @@ describe('intake v2 fields', () => {
 
   it('enforces a length limit on every text field', () => {
     for (const [k, max] of Object.entries(INTAKE_LIMITS)) {
-      if (['username', 'email', 'pricing_notes', 'payment_other'].includes(k)) continue; // covered in store policies
+      if (['username', 'email', 'pricing_notes', 'payment_other', 'price_change_frequency_other'].includes(k)) continue; // covered in store policies
       const extra = k in { depop: 1, facebook: 1, ebay: 1, poshmark: 1, website: 1 } ? `https://x.test/${'a'.repeat(max)}` : 'a'.repeat(max + 1);
       assert.throws(() => validatePublicIntake(valid({ [k]: extra })), /too long/i, k);
     }
@@ -237,7 +237,7 @@ describe('intake v2 fields', () => {
     assert.doesNotMatch(form, /lib\/(public-intake|auth)['"]/);
     assert.match(form, /USERNAME_RE/);
     for (const s of ['Display name', 'Username', 'Best email to reach you', 'Aliases', 'Bio', 'Fun fact about you',
-      'Where do you sell boots today?', 'What kind of boots do you deal in?', 'Roughly how many pairs would you list?',
+      'Where do you sell boots today?', 'What kind of boots do you deal in?', 'Roughly how many boots (and belts, if you sell them) do you have to list?',
       'Anything else we should know?', 'Email preferences', 'Profile photo']) assert.ok(form.includes(s), s);
     assert.ok(form.indexOf('Optional') < form.indexOf('Profile photo'));
     assert.match(store, /add column if not exists username/);
@@ -558,35 +558,69 @@ describe('intake store guards', () => {
 });
 
 describe('belt selling and boot measurement', () => {
-  it('stores optional belt selling answer, conditional belt types, and measurement method', () => {
+  it('stores the belt dealer flag only and the measurement method', () => {
     const blank = validatePublicIntake(valid());
     assert.equal(blank.sells_belts, null);
-    assert.equal(blank.belt_types, null);
+    assert.equal('belt_types' in blank, false);
     assert.equal(blank.measurement_method, null);
-    const yes = validatePublicIntake(valid({ sells_belts: 'yes', belt_types: 'Tooled leather', measurement_method: 'Brannock' }));
+    const yes = validatePublicIntake(valid({ sells_belts: 'yes', belt_types: 'ignored', measurement_method: 'Brannock' }));
     assert.equal(yes.sells_belts, true);
-    assert.equal(yes.belt_types, 'Tooled leather');
+    assert.equal('belt_types' in yes, false);
     assert.equal(yes.measurement_method, 'Brannock');
-    const no = validatePublicIntake(valid({ sells_belts: false, belt_types: 'ignored' }));
-    assert.equal(no.sells_belts, false);
-    assert.equal(no.belt_types, null);
+    assert.equal(validatePublicIntake(valid({ sells_belts: 'no' })).sells_belts, false);
     assert.throws(() => validatePublicIntake(valid({ sells_belts: 'maybe' })), /belts/i);
-    assert.throws(() => validatePublicIntake(valid({ sells_belts: 'yes', belt_types: 'a'.repeat(INTAKE_LIMITS.belt_types + 1) })), /too long/i);
     assert.throws(() => validatePublicIntake(valid({ measurement_method: 'a'.repeat(INTAKE_LIMITS.measurement_method + 1) })), /too long/i);
-    const view = publicIntakeView({ sells_belts: true, belt_types: 'Exotic', measurement_method: 'Tape' });
-    assert.equal(view.sells_belts, true);
-    assert.equal(view.belt_types, 'Exotic');
-    assert.equal(view.measurement_method, 'Tape');
+    assert.equal('belt_types' in INTAKE_LIMITS, false);
   });
-  it('asks near boot types, shows belt types only for yes, migrates safely, and shows to admin', () => {
+  it('asks the belts yes/no near boot types with no belt types field, and shows Belt dealer to admin', () => {
     const read = f => readFileSync(new URL(`../${f}`, import.meta.url), 'utf8');
     const form = read('components/public-intake-form.js');
-    for (const label of ['Do you also sell belts?', 'What kind of belts?', 'How do you measure your boots?']) assert.ok(form.includes(label), label);
+    assert.ok(form.includes('Do you also sell belts?'));
+    assert.doesNotMatch(form, /What kind of belts\?|belt_types/);
+    assert.ok(form.indexOf('Do you also sell belts?') > form.indexOf('What kind of boots do you deal in?'));
     assert.match(form, /How do you measure your boots\?<input \{\.\.\.field\('measurement_method'\)\} \/>/);
     assert.doesNotMatch(form, /Brannock|insole tracing/);
-    assert.match(form, /form\.sells_belts === 'yes' &&/);
-    assert.ok(form.indexOf('Do you also sell belts?') > form.indexOf('What kind of boots do you deal in?'));
-    for (const col of ['sells_belts boolean', 'belt_types text', 'measurement_method text']) assert.ok(read('lib/public-intake-store.js').includes(`add column if not exists ${col}`), col);
-    for (const col of ['sells_belts', 'belt_types', 'measurement_method']) assert.ok(read('components/intake-submissions.js').includes(col), col);
+    assert.match(form, /Roughly how many boots \(and belts, if you sell them\) do you have to list\?<input placeholder="e\.g\. 40 boots, 10 belts" \{\.\.\.field\('pairs_estimate'\)\} \/>/);
+    assert.doesNotMatch(form, /Roughly how many pairs/);
+    const store = read('lib/public-intake-store.js');
+    assert.ok(store.includes('add column if not exists sells_belts boolean'));
+    assert.doesNotMatch(store, /belt_types/);
+    for (const c of ['measurement_method text', 'encyclopedia_help boolean', 'encyclopedia_permission boolean', 'price_change_frequency text']) assert.ok(store.includes(`add column if not exists ${c}`), c);
+    const admin = read('components/intake-submissions.js');
+    assert.match(admin, /Belt dealer:/);
+    assert.doesNotMatch(admin, /belt_types|Sells belts/);
+  });
+});
+
+describe('boot encyclopedia and price frequency', () => {
+  it('validates encyclopedia yes/no answers', () => {
+    const blank = validatePublicIntake(valid());
+    assert.equal(blank.encyclopedia_help, null);
+    assert.equal(blank.encyclopedia_permission, null);
+    const v = validatePublicIntake(valid({ encyclopedia_help: 'yes', encyclopedia_permission: 'no' }));
+    assert.equal(v.encyclopedia_help, true);
+    assert.equal(v.encyclopedia_permission, false);
+    assert.throws(() => validatePublicIntake(valid({ encyclopedia_help: 'maybe' })), /encyclopedia/i);
+    assert.throws(() => validatePublicIntake(valid({ encyclopedia_permission: 'sure' })), /encyclopedia/i);
+  });
+  it('validates price change frequency with a short Other text', () => {
+    assert.equal(validatePublicIntake(valid()).price_change_frequency, null);
+    assert.equal(validatePublicIntake(valid({ price_change_frequency: 'weekly' })).price_change_frequency, 'weekly');
+    assert.equal(validatePublicIntake(valid({ price_change_frequency: 'other', price_change_frequency_other: 'Every season' })).price_change_frequency, 'other: Every season');
+    assert.equal(validatePublicIntake(valid({ price_change_frequency: 'other' })).price_change_frequency, 'other');
+    assert.throws(() => validatePublicIntake(valid({ price_change_frequency: 'hourly' })), /how often/i);
+    assert.throws(() => validatePublicIntake(valid({ price_change_frequency: 'other', price_change_frequency_other: 'a'.repeat(INTAKE_LIMITS.price_change_frequency_other + 1) })), /too long/i);
+    assert.deepEqual(PRICE_FREQUENCIES.map(([, l]) => l), ['Rarely or never', 'Monthly', 'Weekly', 'Daily', 'Other']);
+  });
+  it('asks the questions in the right sections and shows them to admin', () => {
+    const read = f => readFileSync(new URL(`../${f}`, import.meta.url), 'utf8');
+    const form = read('components/public-intake-form.js');
+    for (const q of ['Boot encyclopedia', 'Would you like to help build the Western Boot World boot encyclopedia?', 'May we use your photos and listing details in the boot encyclopedia?', 'How often do you change your prices?']) assert.ok(form.includes(q), q);
+    assert.ok(form.indexOf('How often do you change your prices?') > form.indexOf('Do you want to change the pricing of your items?'));
+    assert.ok(form.indexOf('How often do you change your prices?') < form.indexOf('What are your shipping policies?'));
+    const admin = read('components/intake-submissions.js');
+    for (const c of ['encyclopedia_help', 'encyclopedia_permission', 'price_change_frequency']) assert.ok(admin.includes(c), c);
+    const view = publicIntakeView({ encyclopedia_help: true, encyclopedia_permission: false, price_change_frequency: 'daily' });
+    assert.deepEqual([view.encyclopedia_help, view.encyclopedia_permission, view.price_change_frequency], [true, false, 'daily']);
   });
 });

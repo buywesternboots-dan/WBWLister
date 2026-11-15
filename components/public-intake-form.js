@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
 import { WBW_ACCOUNT_LABEL, WBW_ACCOUNT_URL } from '../lib/wbw-account';
-import { DUPLICATE_MESSAGES, PAYMENT_METHODS, EMAIL_PREFS, EMAIL_PREFS_INTRO, HONEYPOT, IMPORT_MODES, INTAKE_LIMITS as L, MAX_PHOTO_BYTES, USERNAME_RE } from '../lib/public-intake-constants';
+import { DUPLICATE_MESSAGES, PAYMENT_METHODS, PRICE_FREQUENCIES, EMAIL_PREFS, EMAIL_PREFS_INTRO, HONEYPOT, IMPORT_MODES, INTAKE_LIMITS as L, MAX_PHOTO_BYTES, USERNAME_RE } from '../lib/public-intake-constants';
 
 async function resizePhoto(file) {
   if (file.size > MAX_PHOTO_BYTES) throw new Error('Please use a photo of 5 MB or less.');
@@ -23,7 +23,8 @@ async function resizePhoto(file) {
 
 const empty = {
   display_name: '', username: '', email: '', phone: '', location: '', aliases: '',
-  bio: '', fun_fact: '', sells_where: '', boot_types: '', sells_belts: '', belt_types: '', measurement_method: '', pairs_estimate: '', notes: '',
+  bio: '', fun_fact: '', sells_where: '', boot_types: '', sells_belts: '', measurement_method: '',
+  encyclopedia_help: '', encyclopedia_permission: '', price_change_frequency: '', price_change_frequency_other: '', pairs_estimate: '', notes: '',
   terms: '', defaults: '', brand_context: 'on',
   email_prefs: Object.fromEntries(EMAIL_PREFS.map(([k]) => [k, true])),
   import_mode: '', has_wbw_account: '', password: '',
@@ -148,9 +149,8 @@ export default function PublicIntakeForm() {
           <label className="check"><input type="radio" name="sells_belts" value="yes" checked={form.sells_belts === 'yes'} onChange={set('sells_belts')} /> Yes</label>
           <label className="check"><input type="radio" name="sells_belts" value="no" checked={form.sells_belts === 'no'} onChange={set('sells_belts')} /> No</label>
         </fieldset>
-        {form.sells_belts === 'yes' && <label>What kind of belts?<input {...field('belt_types')} /></label>}
         <label>How do you measure your boots?<input {...field('measurement_method')} /></label>
-        <label>Roughly how many pairs would you list?<input inputMode="numeric" {...field('pairs_estimate')} /></label>
+        <label>Roughly how many boots (and belts, if you sell them) do you have to list?<input placeholder="e.g. 40 boots, 10 belts" {...field('pairs_estimate')} /></label>
         <label>Anything else we should know?<textarea rows="3" {...field('notes')} /></label>
         <label>Phone<input data-private="" type="tel" {...field('phone', { autoComplete: 'tel' })} /></label>
         <label>Shorthand you use, one per line<textarea rows="3" placeholder={"BJ = Black Jack\nSz = Size"} {...field('terms')} /></label>
@@ -168,6 +168,11 @@ export default function PublicIntakeForm() {
           <label className="check"><input type="radio" name="pricing_change" value="yes" checked={form.pricing_change === 'yes'} onChange={set('pricing_change')} /> Yes</label>
         </fieldset>
         {form.pricing_change === 'yes' && <label>How should we change your prices?<textarea rows="3" {...field('pricing_notes')} /></label>}
+        <fieldset className="choice" role="radiogroup">
+          <legend>How often do you change your prices?</legend>
+          {PRICE_FREQUENCIES.map(([k, l]) => <label key={k} className="check"><input type="radio" name="price_change_frequency" value={k} checked={form.price_change_frequency === k} onChange={set('price_change_frequency')} /> {l}</label>)}
+        </fieldset>
+        {form.price_change_frequency === 'other' && <label>How often?<input {...field('price_change_frequency_other')} /></label>}
         <label>What are your shipping policies?<textarea rows="3" {...field('shipping_policy')} /></label>
         <fieldset className="choice">
           <legend>What payment methods do you accept?</legend>
@@ -175,6 +180,17 @@ export default function PublicIntakeForm() {
         </fieldset>
         {pay.methods.includes('other') && <label>Other payment method<input maxLength={L.payment_other} value={pay.other} onChange={e => setForm({ ...form, payment_methods: { ...pay, other: e.target.value } })} /></label>}
         <label>What is your return policy?<textarea rows="3" {...field('return_policy')} /></label>
+        <h3>Boot encyclopedia</h3>
+        <fieldset className="choice" role="radiogroup">
+          <legend>Would you like to help build the Western Boot World boot encyclopedia?</legend>
+          <label className="check"><input type="radio" name="encyclopedia_help" value="yes" checked={form.encyclopedia_help === 'yes'} onChange={set('encyclopedia_help')} /> Yes</label>
+          <label className="check"><input type="radio" name="encyclopedia_help" value="no" checked={form.encyclopedia_help === 'no'} onChange={set('encyclopedia_help')} /> No</label>
+        </fieldset>
+        <fieldset className="choice" role="radiogroup">
+          <legend>May we use your photos and listing details in the boot encyclopedia?</legend>
+          <label className="check"><input type="radio" name="encyclopedia_permission" value="yes" checked={form.encyclopedia_permission === 'yes'} onChange={set('encyclopedia_permission')} /> Yes</label>
+          <label className="check"><input type="radio" name="encyclopedia_permission" value="no" checked={form.encyclopedia_permission === 'no'} onChange={set('encyclopedia_permission')} /> No</label>
+        </fieldset>
         <p className="hint"><b>Email preferences</b> — {EMAIL_PREFS_INTRO}</p>
         {EMAIL_PREFS.map(([k, l, h]) => (
           <label key={k} className="check"><input type="checkbox" checked={form.email_prefs[k]} onChange={setPref(k)} />
