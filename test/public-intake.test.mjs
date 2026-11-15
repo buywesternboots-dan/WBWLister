@@ -13,9 +13,8 @@ const DEPOP = 'https://www.depop.com/westernbootworld/';
 const SITE = 'https://adaboots.example/shop';
 const ENV = { NODE_ENV: 'production', ADMIN_PASSWORD: 'staff-secret', APP_PASSWORD: 'signing-secret', INTAKE_SECRET: 'test-intake-secret' };
 const valid = (extra = {}) => ({
-  display_name: 'Ada Boots', username: 'ada_boots', email: 'ada@shop.test', depop: DEPOP,
-  password: 'temporary1', password_confirm: 'temporary1',
-  photo_ok: 'on', import_mode: 'draft', ...extra,
+  display_name: 'Ada Boots', username: 'ada_boots', email: 'ada@shop.test',
+  password: 'temporary1', import_mode: 'draft', ...extra,
 });
 
 describe('public intake access', () => {
@@ -32,24 +31,19 @@ describe('public intake access', () => {
 });
 
 describe('public intake validation', () => {
-  it('requires name, email, one shop link, a confirmed password, and both consent checks', () => {
+  it('requires name, email, a temporary password, and the import choice', () => {
     assert.throws(() => validatePublicIntake({ ...valid(), display_name: '' }), /name to show on WBW/i);
     assert.throws(() => validatePublicIntake({ ...valid(), email: 'nope' }), /email/i);
-    assert.throws(() => validatePublicIntake({ ...valid(), depop: '', website: '' }), /at least one shop link/i);
     assert.throws(() => validatePublicIntake({ ...valid(), password: 'short' }), /at least 8/i);
-    assert.throws(() => validatePublicIntake({ ...valid(), password_confirm: 'different1' }), /do not match/i);
-    assert.throws(() => validatePublicIntake({ ...valid(), photo_ok: false }), /own the photos/i);
     assert.throws(() => validatePublicIntake({ ...valid(), import_mode: '' }), /how we should import/i);
     assert.throws(() => validatePublicIntake({ ...valid(), import_mode: 'review' }), /how we should import/i);
-    const v = validatePublicIntake(valid({ website: SITE, phone: '5551234567', location: 'El Paso, TX' }));
+    const v = validatePublicIntake(valid({ depop: DEPOP, website: SITE, phone: '5551234567', location: 'El Paso, TX' }));
     assert.equal(v.display_name, 'Ada Boots');
     assert.equal(v.email, 'ada@shop.test');
     assert.equal(v.fb_profile, DEPOP);
     assert.equal(v.website, SITE);
     assert.equal(v.phone, '+15551234567');
     assert.equal(v.location, 'El Paso, TX');
-    assert.equal(v.photo_ok, 'on');
-    assert.equal(v.import_ok, 'on');
     assert.equal(v.brand_context, 'on');
     assert.equal(v.password, 'temporary1');
   });
@@ -277,5 +271,18 @@ describe('import mode', () => {
     assert.doesNotMatch(page, /for review/);
     assert.match(store, /add column if not exists import_mode text/);
     assert.match(adminUi, /import_mode/);
+  });
+});
+
+describe('trimmed intake (Dan, Nov 15 3:20 AM)', () => {
+  it('needs no shop link, password confirmation, or consent checkbox', () => {
+    const v = validatePublicIntake(valid({ password_confirm: 'different1', photo_ok: false, import_ok: false }));
+    assert.equal(v.shop_links ?? null, null);
+    assert.equal(v.password, 'temporary1');
+    assert.throws(() => validatePublicIntake(valid({ password: 'x'.repeat(201) })), /too long/);
+    assert.throws(() => validatePublicIntake(valid({ password: 'short' })), /at least 8/);
+    const form = readFileSync(new URL('../components/public-intake-form.js', import.meta.url), 'utf8');
+    assert.doesNotMatch(form, /Shop links|Depop shop|Confirm temporary password|password_confirm|photo_ok|type="checkbox"[^>]*required/);
+    assert.match(form, /type="radio"/);
   });
 });

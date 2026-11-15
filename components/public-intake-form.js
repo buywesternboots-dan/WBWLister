@@ -2,14 +2,6 @@
 import { useEffect, useState } from 'react';
 import { EMAIL_PREFS, EMAIL_PREFS_INTRO, HONEYPOT, IMPORT_MODES, INTAKE_LIMITS as L, MAX_PHOTO_BYTES, USERNAME_RE } from '../lib/public-intake-constants';
 
-const CHANNELS = [
-  ['depop', 'Depop shop'],
-  ['facebook', 'Facebook Marketplace profile'],
-  ['ebay', 'eBay store'],
-  ['poshmark', 'Poshmark closet'],
-  ['website', 'Your website'],
-];
-
 async function resizePhoto(file) {
   if (file.size > MAX_PHOTO_BYTES) throw new Error('Please use a photo of 5 MB or less.');
   if (!/^image\/(jpeg|png|webp)$/i.test(file.type)) throw new Error('Please use a JPG, PNG, or WebP photo.');
@@ -30,11 +22,10 @@ async function resizePhoto(file) {
 
 const empty = {
   display_name: '', username: '', email: '', phone: '', location: '', aliases: '',
-  depop: '', facebook: '', ebay: '', poshmark: '', website: '',
   bio: '', fun_fact: '', sells_where: '', boot_types: '', pairs_estimate: '', notes: '',
   terms: '', defaults: '', brand_context: 'on',
   email_prefs: Object.fromEntries(EMAIL_PREFS.map(([k]) => [k, true])),
-  photo_ok: false, import_mode: '', password: '', password_confirm: '',
+  import_mode: '', password: '',
   [HONEYPOT]: '',
 };
 
@@ -65,9 +56,7 @@ export default function PublicIntakeForm() {
     e.preventDefault();
     setErr('');
     if (!USERNAME_RE.test(form.username.trim())) return setErr('Username must be 3 to 20 letters, numbers, or underscores.');
-    if (form.password !== form.password_confirm) return setErr('The temporary password and confirmation do not match.');
     if (!form.import_mode) return setErr('Please choose how we should import your listings (live or as drafts).');
-    if (!CHANNELS.some(([k]) => form[k].trim())) return setErr('Add at least one shop link (Depop, Facebook, eBay, Poshmark, or your website).');
     setBusy(true);
     try {
       const r = await fetch('/api/public-intake', {
@@ -99,10 +88,6 @@ export default function PublicIntakeForm() {
         <label>Best email to reach you<input required type="email" data-private="" {...field('email', { autoComplete: 'email' })} /></label>
         <label>Temporary password for WBW registration<input required data-private="" type="password" minLength={8} maxLength={200} autoComplete="new-password" value={form.password} onChange={set('password')} />
           <small>At least 8 characters. Dan uses this only to register you on Western Boot World, then it is cleared.</small></label>
-        <label>Confirm temporary password<input required data-private="" type="password" minLength={8} maxLength={200} autoComplete="new-password" value={form.password_confirm} onChange={set('password_confirm')} /></label>
-        <p className="hint">Shop links — add at least one place you sell now.</p>
-        {CHANNELS.map(([k, l]) => <label key={k}>{l}<input inputMode="url" autoComplete="off" placeholder="https://" {...field(k)} /></label>)}
-        <label className="check"><input type="checkbox" checked={form.photo_ok} onChange={set('photo_ok')} required /> I own these photos and I’m okay with BootLister renaming and optimizing them.</label>
         <fieldset className="choice" role="radiogroup">
           <legend>How should we import your listings to Western Boot World?</legend>
           {IMPORT_MODES.map(([k, l]) => <label key={k} className="check"><input type="radio" name="import_mode" value={k} checked={form.import_mode === k} onChange={set('import_mode')} required /> {l}</label>)}
