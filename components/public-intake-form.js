@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { EMAIL_PREFS, HONEYPOT, INTAKE_LIMITS as L, MAX_PHOTO_BYTES, USERNAME_RE } from '../lib/public-intake-constants';
+import { EMAIL_PREFS, EMAIL_PREFS_INTRO, HONEYPOT, INTAKE_LIMITS as L, MAX_PHOTO_BYTES, USERNAME_RE } from '../lib/public-intake-constants';
 
 const CHANNELS = [
   ['depop', 'Depop shop'],
@@ -128,7 +128,7 @@ export default function PublicIntakeForm() {
             <option value="off">Off</option>
           </select>
         </label>
-        <p className="hint"><b>Email preferences</b> — all on to start. Uncheck any you don’t want.</p>
+        <p className="hint"><b>Email preferences</b> — {EMAIL_PREFS_INTRO}</p>
         {EMAIL_PREFS.map(([k, l, h]) => (
           <label key={k} className="check"><input type="checkbox" checked={form.email_prefs[k]} onChange={setPref(k)} />
             <span>{l}<small>{h}</small></span></label>

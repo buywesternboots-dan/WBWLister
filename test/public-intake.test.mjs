@@ -6,7 +6,7 @@ import { intakeSubmissionsResponse } from '../app/api/intake-submissions/route.j
 import { decide } from '../lib/gate.js';
 import { decryptSecret, encryptSecret, hasIntakeSecret, intakeKeyMaterial } from '../lib/intake-crypto.js';
 import { HONEYPOT, isHoneypot, publicIntakeView, validatePublicIntake } from '../lib/public-intake.js';
-import { EMAIL_PREFS, INTAKE_LIMITS, USERNAME_RE } from '../lib/public-intake-constants.js';
+import { EMAIL_PREFS, EMAIL_PREFS_INTRO, INTAKE_LIMITS, USERNAME_RE } from '../lib/public-intake-constants.js';
 import { sessionToken } from '../lib/session.js';
 
 const DEPOP = 'https://www.depop.com/westernbootworld/';
@@ -243,5 +243,17 @@ describe('intake v2 fields', () => {
     assert.ok(form.indexOf('Optional') < form.indexOf('Profile photo'));
     assert.match(store, /add column if not exists username/);
     assert.match(store, /add column if not exists email_prefs jsonb/);
+  });
+});
+
+describe('email preference wording', () => {
+  it("uses Dan's exact labels, helper text, and intro", () => {
+    assert.deepEqual(EMAIL_PREFS.map(([, l]) => l), ["Email me about pairs I'm watching", 'Email me about buy-button holds',
+      'Email me when somebody tags me in Community', 'Email me when somebody beats my Shootout high score', 'Email me about new messages']);
+    assert.match(EMAIL_PREFS[1][2], /48-hour hold expires\.$/);
+    assert.match(EMAIL_PREFS[4][2], /Your inbox and the bell show them either way\.$/);
+    assert.equal(EMAIL_PREFS_INTRO, 'The bell in the header shows all of these, whether or not you take the email.');
+    const form = readFileSync(new URL('../components/public-intake-form.js', import.meta.url), 'utf8');
+    assert.match(form, /EMAIL_PREFS_INTRO/);
   });
 });
