@@ -556,3 +556,37 @@ describe('intake store guards', () => {
     useIntakeSql(null);
   });
 });
+
+describe('belt selling and boot measurement', () => {
+  it('stores optional belt selling answer, conditional belt types, and measurement method', () => {
+    const blank = validatePublicIntake(valid());
+    assert.equal(blank.sells_belts, null);
+    assert.equal(blank.belt_types, null);
+    assert.equal(blank.measurement_method, null);
+    const yes = validatePublicIntake(valid({ sells_belts: 'yes', belt_types: 'Tooled leather', measurement_method: 'Brannock' }));
+    assert.equal(yes.sells_belts, true);
+    assert.equal(yes.belt_types, 'Tooled leather');
+    assert.equal(yes.measurement_method, 'Brannock');
+    const no = validatePublicIntake(valid({ sells_belts: false, belt_types: 'ignored' }));
+    assert.equal(no.sells_belts, false);
+    assert.equal(no.belt_types, null);
+    assert.throws(() => validatePublicIntake(valid({ sells_belts: 'maybe' })), /belts/i);
+    assert.throws(() => validatePublicIntake(valid({ sells_belts: 'yes', belt_types: 'a'.repeat(INTAKE_LIMITS.belt_types + 1) })), /too long/i);
+    assert.throws(() => validatePublicIntake(valid({ measurement_method: 'a'.repeat(INTAKE_LIMITS.measurement_method + 1) })), /too long/i);
+    const view = publicIntakeView({ sells_belts: true, belt_types: 'Exotic', measurement_method: 'Tape' });
+    assert.equal(view.sells_belts, true);
+    assert.equal(view.belt_types, 'Exotic');
+    assert.equal(view.measurement_method, 'Tape');
+  });
+  it('asks near boot types, shows belt types only for yes, migrates safely, and shows to admin', () => {
+    const read = f => readFileSync(new URL(`../${f}`, import.meta.url), 'utf8');
+    const form = read('components/public-intake-form.js');
+    for (const label of ['Do you also sell belts?', 'What kind of belts?', 'How do you measure your boots?']) assert.ok(form.includes(label), label);
+    assert.match(form, /How do you measure your boots\?<input \{\.\.\.field\('measurement_method'\)\} \/>/);
+    assert.doesNotMatch(form, /Brannock|insole tracing/);
+    assert.match(form, /form\.sells_belts === 'yes' &&/);
+    assert.ok(form.indexOf('Do you also sell belts?') > form.indexOf('What kind of boots do you deal in?'));
+    for (const col of ['sells_belts boolean', 'belt_types text', 'measurement_method text']) assert.ok(read('lib/public-intake-store.js').includes(`add column if not exists ${col}`), col);
+    for (const col of ['sells_belts', 'belt_types', 'measurement_method']) assert.ok(read('components/intake-submissions.js').includes(col), col);
+  });
+});

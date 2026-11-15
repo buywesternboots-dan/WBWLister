@@ -6,7 +6,7 @@ const termsStatus = r => r.terms_accepted_at ? `Accepted ${day(r.terms_accepted_
 const copyLink = async path => { const url = new URL(path, location.origin).href; try { await navigator.clipboard.writeText(url); } catch { prompt('Copy this acceptance link:', url); } };
 
 const EXTRA = [['aliases', 'Aliases'], ['bio', 'Bio'], ['fun_fact', 'Fun fact'], ['sells_where', 'Sells today'],
-  ['boot_types', 'Boots'], ['pairs_estimate', 'Pairs to list'], ['notes', 'Notes'],
+  ['boot_types', 'Boots'], ['belt_types', 'Belts'], ['measurement_method', 'Measures boots by'], ['pairs_estimate', 'Pairs to list'], ['notes', 'Notes'],
   ['pricing_notes', 'Pricing change'], ['shipping_policy', 'Shipping policy'], ['return_policy', 'Return policy']];
 const payLabel = p => [...(p?.methods || []).filter(k => k !== 'other').map(k => PAYMENT_METHODS.find(([m]) => m === k)?.[1] || k), ...(p?.other ? [p.other] : p?.methods?.includes('other') ? ['Other'] : [])].join(', ');
 const STATUS = { pending: 'Pending application', approved: 'Approved', declined: 'Declined' };
@@ -49,6 +49,7 @@ export default function IntakeSubmissions({ rows = [], onChange, busy, setBusy, 
           <div>
             <strong>{r.display_name || 'Intake link (not filled yet)'}</strong>
             {r.username && <small>@{r.username}</small>}
+            {r.sells_belts != null && <small><b>Sells belts:</b> {r.sells_belts ? 'Yes' : 'No'}</small>}
             {r.pricing_change && <small><b>Change pricing:</b> {r.pricing_change === 'yes' ? 'Yes' : 'No, keep prices'}</small>}
             {r.payment_methods && <small><b>Payment methods:</b> {payLabel(r.payment_methods)}</small>}
             {r.email && <small><b>Terms:</b> {termsStatus(r)}</small>}

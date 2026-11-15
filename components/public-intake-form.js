@@ -23,7 +23,7 @@ async function resizePhoto(file) {
 
 const empty = {
   display_name: '', username: '', email: '', phone: '', location: '', aliases: '',
-  bio: '', fun_fact: '', sells_where: '', boot_types: '', pairs_estimate: '', notes: '',
+  bio: '', fun_fact: '', sells_where: '', boot_types: '', sells_belts: '', belt_types: '', measurement_method: '', pairs_estimate: '', notes: '',
   terms: '', defaults: '', brand_context: 'on',
   email_prefs: Object.fromEntries(EMAIL_PREFS.map(([k]) => [k, true])),
   import_mode: '', has_wbw_account: '', password: '',
@@ -143,6 +143,13 @@ export default function PublicIntakeForm() {
         <label>Fun fact about you<input placeholder="Your first pair, a grail boot, how long you've been collecting..." {...field('fun_fact')} /></label>
         <label>Where do you sell boots today?<input {...field('sells_where')} /></label>
         <label>What kind of boots do you deal in?<input {...field('boot_types')} /></label>
+        <fieldset className="choice" role="radiogroup">
+          <legend>Do you also sell belts?</legend>
+          <label className="check"><input type="radio" name="sells_belts" value="yes" checked={form.sells_belts === 'yes'} onChange={set('sells_belts')} /> Yes</label>
+          <label className="check"><input type="radio" name="sells_belts" value="no" checked={form.sells_belts === 'no'} onChange={set('sells_belts')} /> No</label>
+        </fieldset>
+        {form.sells_belts === 'yes' && <label>What kind of belts?<input {...field('belt_types')} /></label>}
+        <label>How do you measure your boots?<input {...field('measurement_method')} /></label>
         <label>Roughly how many pairs would you list?<input inputMode="numeric" {...field('pairs_estimate')} /></label>
         <label>Anything else we should know?<textarea rows="3" {...field('notes')} /></label>
         <label>Phone<input data-private="" type="tel" {...field('phone', { autoComplete: 'tel' })} /></label>
