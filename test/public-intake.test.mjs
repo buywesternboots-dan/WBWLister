@@ -719,3 +719,14 @@ describe('WBW account copy panel', () => {
     assert.doesNotMatch(ui, /fetch\(['"`]https:\/\/www\.westernbootworld/);
   });
 });
+
+describe('password show/hide', () => {
+  it('has an accessible eye toggle on the temporary password, which only shows when there is no WBW account', () => {
+    const form = readFileSync(new URL('../components/public-intake-form.js', import.meta.url), 'utf8');
+    assert.match(form, /type="button" className="eye"/);
+    assert.match(form, /'Hide password' : 'Show password'/);
+    assert.match(form, /type=\{showPw \? 'text' : 'password'\}/);
+    const block = form.split("form.has_wbw_account === 'no' && <label>Temporary password")[1].split('</label>}')[0];
+    assert.match(block, /className="eye"/);
+  });
+});

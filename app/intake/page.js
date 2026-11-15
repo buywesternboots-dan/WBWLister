@@ -44,6 +44,9 @@ h3{margin:12px 0 0;font-size:1rem;color:#1f6f6b}
 .terms{margin-top:16px;padding:12px 16px;background:#fff;border:1px solid #e6dfd6;border-radius:8px;display:flex;flex-direction:column;gap:8px}
 .terms summary{font-weight:600;cursor:pointer;color:#1f6f6b}
 .terms-text{max-height:50vh;overflow:auto;font-size:14px;border:1px solid #eee;padding:8px;border-radius:6px;margin:8px 0}
+.pw{position:relative;display:flex}
+.pw input{flex:1;padding-right:48px}
+.pw .eye{position:absolute;right:2px;top:50%;transform:translateY(-50%);width:44px!important;height:40px;padding:0;border:0;background:transparent;display:flex;align-items:center;justify-content:center;color:#6b5a4a}
 .preview{width:96px;height:96px;object-fit:cover;border-radius:8px;background:#eee}
 .hp{position:absolute;left:-10000px;width:1px;height:1px;overflow:hidden}
 .thanks p{margin:8px 0 0;color:#6b5a4a}

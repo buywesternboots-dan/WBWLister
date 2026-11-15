@@ -40,6 +40,7 @@ export default function PublicIntakeForm() {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const [done, setDone] = useState(false);
+  const [showPw, setShowPw] = useState(false);
   const checkId = useRef(0);
   const [status, setStatus] = useState(''); // '' unchecked, 'none' ok to continue, 'seller' or 'intake' already known
   const ready = () => USERNAME_RE.test(form.username.trim()) && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim());
@@ -122,7 +123,12 @@ export default function PublicIntakeForm() {
           <label className="check"><input type="radio" name="has_wbw_account" value="no" checked={form.has_wbw_account === 'no'} onChange={set('has_wbw_account')} required /> No</label>
         </fieldset>
         {form.has_wbw_account === 'yes' && <p className="hint">No password needed. We'll link your existing WBW account for you.</p>}
-        {form.has_wbw_account === 'no' && <label>Temporary password for WBW registration<input required data-private="" type="password" minLength={8} maxLength={200} autoComplete="new-password" value={form.password} onChange={set('password')} />
+        {form.has_wbw_account === 'no' && <label>Temporary password for WBW registration<span className="pw">
+          <input required data-private="" type={showPw ? 'text' : 'password'} minLength={8} maxLength={200} autoComplete="new-password" value={form.password} onChange={set('password')} />
+          <button type="button" className="eye" aria-label={showPw ? 'Hide password' : 'Show password'} aria-pressed={showPw} onClick={() => setShowPw(v => !v)}>
+            <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z" /><circle cx="12" cy="12" r="3" />{showPw && <path d="M3 3l18 18" />}</svg>
+          </button>
+        </span>
           <small>At least 8 characters. We set up your Western Boot World account for you with this password, then it is cleared.</small></label>}
         <fieldset className="choice" role="radiogroup">
           <legend>How should we import your listings to Western Boot World?</legend>
