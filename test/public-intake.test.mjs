@@ -1,3 +1,4 @@
+import { WBW_SIGNUP_URL, wbwCopyFields } from '../lib/wbw-account.js';
 import { TERMS_HEADING, TERMS_SOURCE, SELLER_TERMS } from '../lib/seller-terms.js';
 import { newTermsToken, isTermsToken, validateAcceptance } from '../lib/terms-acceptance.js';
 import { termsAcceptResponse } from '../app/api/terms-accept/route.js';
@@ -175,9 +176,8 @@ describe('public intake page', () => {
     assert.match(gate, /\/intake/);
     assert.match(gate, /\/api\/public-intake/);
     assert.doesNotMatch(adminUi, /Approve into a seller/);
-    assert.match(adminUi, /integrate later/);
-    assert.doesNotMatch(store, /saveSeller/);
-    assert.doesNotMatch(store, /approveIntake/);
+    assert.match(adminUi, /Approve creates the BootLister seller/);
+    assert.match(store, /approveIntakeSeller/);
     assert.doesNotMatch(store, /already on a seller/);
   });
 });
@@ -376,7 +376,7 @@ describe('pending applications', () => {
     const seller = await sessionToken('seller:ada', ENV.APP_PASSWORD);
     await assert.rejects(() => intakeSubmissionsResponse(req(seller, 'GET', null, '?count=1'), db, ENV), /admin/);
   });
-  it('approves or declines an application without creating a seller', async () => {
+  it('routes approve and decline to the review action', async () => {
     const calls = [];
     const db = { async review(id, decision) { calls.push([id, decision]); return { id, status: decision }; } };
     const t = await admin();
@@ -622,5 +622,100 @@ describe('boot encyclopedia and price frequency', () => {
     for (const c of ['encyclopedia_help', 'encyclopedia_permission', 'price_change_frequency']) assert.ok(admin.includes(c), c);
     const view = publicIntakeView({ encyclopedia_help: true, encyclopedia_permission: false, price_change_frequency: 'daily' });
     assert.deepEqual([view.encyclopedia_help, view.encyclopedia_permission, view.price_change_frequency], [true, false, 'daily']);
+  });
+});
+
+describe('approve creates the seller (Dan, Nov 15 4:54 AM)', () => {
+  const app = (extra = {}) => ({ id: 7, status: 'pending', display_name: 'Ada Boots', username: 'Ada_Boots', email: 'ada@shop.test', phone: null,
+    location: 'El Paso, TX', bio: 'Vintage', website: null, fb_profile: null, shop_links: null, terms: null, defaults: null, brand_context: 'on',
+    photo_url: null, photo_key: null, seller_name: null, ...extra });
+  // Tiny fake of the two tables this path touches.
+  const fakeDb = (row, sellers = []) => {
+    const state = { row: { ...row }, sellers: sellers.map(s => ({ ...s })), saved: [] };
+    const sql = async (ss, ...a) => {
+      const q = ss.join('?').replace(/\s+/g, ' ').trim();
+      if (/^select \* from seller_intake where id/.test(q)) return [state.row];
+      if (/^select name, email from sellers/.test(q)) return state.sellers;
+      if (/^update seller_intake set status/.test(q)) { Object.assign(state.row, { status: a[0], seller_name: a[1] ?? state.row.seller_name }); return [state.row]; }
+      if (/^update sellers set profile_photo/.test(q)) return [];
+      return [];
+    };
+    const save = async p => {
+      state.saved.push(p);
+      const i = state.sellers.findIndex(x => x.name === p.name);
+      if (i >= 0) state.sellers[i] = { ...state.sellers[i], ...p }; else state.sellers.push({ name: p.name, email: p.email });
+      return { name: p.name };
+    };
+    return { state, sql, save };
+  };
+
+  it('creates one seller from the intake data and links the intake row', async () => {
+    const { useIntakeSql, reviewIntake } = await import('../lib/public-intake-store.js');
+    const db = fakeDb(app());
+    useIntakeSql(db.sql);
+    const out = await reviewIntake(7, 'approved', { save: db.save });
+    assert.equal(out.status, 'approved');
+    assert.equal(out.seller_name, 'ada_boots');
+    assert.equal(db.state.sellers.length, 1);
+    const p = db.state.saved[0];
+    assert.deepEqual([p.name, p.display_name, p.email, p.location], ['ada_boots', 'Ada Boots', 'ada@shop.test', 'El Paso, TX']);
+    assert.equal('password' in p, false);
+    useIntakeSql(null);
+  });
+
+  it('is idempotent: approving twice does not create a second seller', async () => {
+    const { useIntakeSql, reviewIntake } = await import('../lib/public-intake-store.js');
+    const db = fakeDb(app());
+    useIntakeSql(db.sql);
+    await reviewIntake(7, 'approved', { save: db.save });
+    await reviewIntake(7, 'approved', { save: db.save });
+    assert.equal(db.state.sellers.length, 1);
+    assert.equal(db.state.saved.length, 1);
+    assert.equal(db.state.row.seller_name, 'ada_boots');
+    useIntakeSql(null);
+  });
+
+  it('links to an existing seller with the same email instead of duplicating, and avoids a name clash', async () => {
+    const { useIntakeSql, reviewIntake } = await import('../lib/public-intake-store.js');
+    let db = fakeDb(app(), [{ name: 'ada_old', email: 'ADA@shop.test' }]);
+    useIntakeSql(db.sql);
+    assert.equal((await reviewIntake(7, 'approved', { save: db.save })).seller_name, 'ada_old');
+    assert.equal(db.state.sellers.length, 1);
+    assert.equal(db.state.saved.length, 0);
+    db = fakeDb(app(), [{ name: 'ada_boots', email: 'someone@else.test' }]);
+    useIntakeSql(db.sql);
+    assert.equal((await reviewIntake(7, 'approved', { save: db.save })).seller_name, 'ada_boots-2');
+    assert.equal(db.state.sellers.length, 2);
+    useIntakeSql(null);
+  });
+
+  it('decline only changes the status', async () => {
+    const { useIntakeSql, reviewIntake } = await import('../lib/public-intake-store.js');
+    const db = fakeDb(app());
+    useIntakeSql(db.sql);
+    assert.equal((await reviewIntake(7, 'declined', { save: db.save })).status, 'declined');
+    assert.equal(db.state.saved.length, 0);
+    useIntakeSql(null);
+  });
+});
+
+describe('WBW account copy panel', () => {
+  it('lists the WBW signup and profile fields, and hides the password for existing WBW accounts', () => {
+    const fields = wbwCopyFields({ display_name: 'Ada', username: 'ada_b', email: 'a@b.test', phone: '+15551234567', location: 'TX', bio: 'Hi', aliases: 'AB', fun_fact: 'F', has_password: true, has_wbw_account: false });
+    assert.deepEqual(fields.map(f => f.key), ['email', 'password', 'display_name', 'username', 'phone', 'location', 'bio', 'aliases', 'fun_fact']);
+    assert.equal(fields.find(f => f.key === 'password').value, null);
+    const existing = wbwCopyFields({ display_name: 'Ada', email: 'a@b.test', has_password: false, has_wbw_account: true });
+    assert.equal(existing.some(f => f.key === 'password'), false);
+    assert.deepEqual(existing.map(f => f.key), ['email', 'display_name']);
+    assert.equal(WBW_SIGNUP_URL, 'https://www.westernbootworld.com/');
+  });
+  it('renders the Create WBW account link and copy buttons without automating WBW', () => {
+    const ui = readFileSync(new URL('../components/intake-submissions.js', import.meta.url), 'utf8');
+    assert.match(ui, /href=\{WBW_SIGNUP_URL\} target="_blank" rel="noopener noreferrer"/);
+    assert.match(ui, /Create WBW account/);
+    assert.match(ui, /Already has WBW account/);
+    assert.match(ui, /wbwCopyFields\(r\)/);
+    assert.match(ui, /action: 'reveal'/);
+    assert.doesNotMatch(ui, /fetch\(['"`]https:\/\/www\.westernbootworld/);
   });
 });
