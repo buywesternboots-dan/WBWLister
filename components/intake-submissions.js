@@ -41,6 +41,7 @@ export default function IntakeSubmissions({ rows = [], onChange, busy, setBusy, 
           <div>
             <strong>{r.display_name || 'Intake link (not filled yet)'}</strong>
             {r.username && <small>@{r.username}</small>}
+            {r.import_mode && <small><b>Import:</b> {r.import_mode === 'live' ? 'Live (list for sale right away)' : 'Drafts in their WBW account'}</small>}
             <small>{r.email || 'No email yet'}{r.location ? ` · ${r.location}` : ''}{r.phone ? ` · ${r.phone}` : ''}</small>
             <small>{r.status === 'approved' ? `Approved as ${r.seller_name}` : 'Pending'}{r.has_password ? ' · password saved' : r.password_cleared_at ? ' · password cleared' : ' · no password'}</small>
             {EXTRA.filter(([k]) => r[k]).map(([k, l]) => <small key={k}><b>{l}:</b> {r[k]}</small>)}

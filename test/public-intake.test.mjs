@@ -15,7 +15,7 @@ const ENV = { NODE_ENV: 'production', ADMIN_PASSWORD: 'staff-secret', APP_PASSWO
 const valid = (extra = {}) => ({
   display_name: 'Ada Boots', username: 'ada_boots', email: 'ada@shop.test', depop: DEPOP,
   password: 'temporary1', password_confirm: 'temporary1',
-  photo_ok: 'on', import_ok: 'on', ...extra,
+  photo_ok: 'on', import_mode: 'draft', ...extra,
 });
 
 describe('public intake access', () => {
@@ -39,7 +39,8 @@ describe('public intake validation', () => {
     assert.throws(() => validatePublicIntake({ ...valid(), password: 'short' }), /at least 8/i);
     assert.throws(() => validatePublicIntake({ ...valid(), password_confirm: 'different1' }), /do not match/i);
     assert.throws(() => validatePublicIntake({ ...valid(), photo_ok: false }), /own the photos/i);
-    assert.throws(() => validatePublicIntake({ ...valid(), import_ok: false }), /copy your current listings/i);
+    assert.throws(() => validatePublicIntake({ ...valid(), import_mode: '' }), /how we should import/i);
+    assert.throws(() => validatePublicIntake({ ...valid(), import_mode: 'review' }), /how we should import/i);
     const v = validatePublicIntake(valid({ website: SITE, phone: '5551234567', location: 'El Paso, TX' }));
     assert.equal(v.display_name, 'Ada Boots');
     assert.equal(v.email, 'ada@shop.test');
@@ -255,5 +256,26 @@ describe('email preference wording', () => {
     assert.equal(EMAIL_PREFS_INTRO, 'The bell in the header shows all of these, whether or not you take the email.');
     const form = readFileSync(new URL('../components/public-intake-form.js', import.meta.url), 'utf8');
     assert.match(form, /EMAIL_PREFS_INTRO/);
+  });
+});
+
+describe('import mode', () => {
+  it('requires live or draft, stores it, and shows it to the admin', () => {
+    assert.equal(validatePublicIntake(valid({ import_mode: 'live' })).import_mode, 'live');
+    assert.equal(validatePublicIntake(valid()).import_mode, 'draft');
+    assert.equal(publicIntakeView({ id: 1, import_mode: 'live' }).import_mode, 'live');
+    const form = readFileSync(new URL('../components/public-intake-form.js', import.meta.url), 'utf8');
+    const page = readFileSync(new URL('../app/intake/page.js', import.meta.url), 'utf8');
+    const consts = readFileSync(new URL('../lib/public-intake-constants.js', import.meta.url), 'utf8');
+    const store = readFileSync(new URL('../lib/public-intake-store.js', import.meta.url), 'utf8');
+    const adminUi = readFileSync(new URL('../components/intake-submissions.js', import.meta.url), 'utf8');
+    assert.match(form, /How should we import your listings to Western Boot World\?/);
+    assert.match(form, /type="radio"/);
+    assert.match(consts, /Live — list them for sale right away/);
+    assert.match(consts, /As drafts in my WBW account, so I can review them there first/);
+    assert.doesNotMatch(form, /review them here|until you review|import_ok/);
+    assert.doesNotMatch(page, /for review/);
+    assert.match(store, /add column if not exists import_mode text/);
+    assert.match(adminUi, /import_mode/);
   });
 });

@@ -8,7 +8,7 @@ export default function IntakePage() {
     <main>
       <style>{css}</style>
       <h1>Seller intake</h1>
-      <p className="intro">A short form so we can set up your Western Boot World seller profile and import your listings for review.</p>
+      <p className="intro">A short form so we can set up your Western Boot World seller profile and import your listings to Western Boot World.</p>
       <PublicIntakeForm />
     </main>
   );
@@ -32,6 +32,8 @@ input,select,textarea,button{font:inherit;padding:10px 12px;border:1px solid #cf
 .check span{display:flex;flex-direction:column;gap:2px}
 legend{font-size:1.05rem}
 b{color:#2b2118}
+.choice{border:0;padding:4px 0;gap:10px}
+.choice legend{padding:0;font-weight:500;color:#2b2118;font-size:15px}
 .preview{width:96px;height:96px;object-fit:cover;border-radius:8px;background:#eee}
 .hp{position:absolute;left:-10000px;width:1px;height:1px;overflow:hidden}
 .thanks p{margin:8px 0 0;color:#6b5a4a}
