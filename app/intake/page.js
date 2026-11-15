@@ -29,6 +29,9 @@ input,select,textarea,button{font:inherit;padding:10px 12px;border:1px solid #cf
 .primary{background:#1f6f6b;border-color:#1f6f6b;color:#fff}
 .primary:disabled{opacity:.5}
 .err{color:#a3261b;margin:0}
+.check span{display:flex;flex-direction:column;gap:2px}
+legend{font-size:1.05rem}
+b{color:#2b2118}
 .preview{width:96px;height:96px;object-fit:cover;border-radius:8px;background:#eee}
 .hp{position:absolute;left:-10000px;width:1px;height:1px;overflow:hidden}
 .thanks p{margin:8px 0 0;color:#6b5a4a}

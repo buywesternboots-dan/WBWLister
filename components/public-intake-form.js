@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { HONEYPOT, MAX_PHOTO_BYTES } from '../lib/public-intake-constants';
+import { EMAIL_PREFS, HONEYPOT, INTAKE_LIMITS as L, MAX_PHOTO_BYTES, USERNAME_RE } from '../lib/public-intake-constants';
 
 const CHANNELS = [
   ['depop', 'Depop shop'],
@@ -29,9 +29,11 @@ async function resizePhoto(file) {
 }
 
 const empty = {
-  display_name: '', email: '', phone: '', location: '',
+  display_name: '', username: '', email: '', phone: '', location: '', aliases: '',
   depop: '', facebook: '', ebay: '', poshmark: '', website: '',
+  bio: '', fun_fact: '', sells_where: '', boot_types: '', pairs_estimate: '', notes: '',
   terms: '', defaults: '', brand_context: 'on',
+  email_prefs: Object.fromEntries(EMAIL_PREFS.map(([k]) => [k, true])),
   photo_ok: false, import_ok: false, password: '', password_confirm: '',
   [HONEYPOT]: '',
 };
@@ -46,6 +48,8 @@ export default function PublicIntakeForm() {
   const [done, setDone] = useState(false);
   useEffect(() => { setCode(new URLSearchParams(location.search).get('code') || ''); }, []);
   const set = f => e => setForm({ ...form, [f]: e.target.type === 'checkbox' ? e.target.checked : e.target.value });
+  const setPref = k => e => setForm({ ...form, email_prefs: { ...form.email_prefs, [k]: e.target.checked } });
+  const field = (k, props = {}) => ({ value: form[k], onChange: set(k), maxLength: L[k], ...props });
   const onPhoto = async e => {
     const file = e.target.files?.[0];
     e.target.value = '';
@@ -59,7 +63,11 @@ export default function PublicIntakeForm() {
   };
   const submit = async e => {
     e.preventDefault();
-    setErr(''); setBusy(true);
+    setErr('');
+    if (!USERNAME_RE.test(form.username.trim())) return setErr('Username must be 3 to 20 letters, numbers, or underscores.');
+    if (form.password !== form.password_confirm) return setErr('The temporary password and confirmation do not match.');
+    if (!CHANNELS.some(([k]) => form[k].trim())) return setErr('Add at least one shop link (Depop, Facebook, eBay, Poshmark, or your website).');
+    setBusy(true);
     try {
       const r = await fetch('/api/public-intake', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -81,44 +89,57 @@ export default function PublicIntakeForm() {
 
   return (
     <form className="panel" onSubmit={submit}>
-      <p className="lead">Your WBW profile will have the longer bio, shipping, and contact details. This is only what we need to get you started.</p>
+      <p className="lead">Two parts: the <b>Required</b> questions first, then <b>Optional</b> ones you can skip or fill in later.</p>
 
       <fieldset>
         <legend>Required</legend>
-        <label>Name to show on WBW<input required value={form.display_name} onChange={set('display_name')} autoComplete="name" /></label>
-        <label>Email<input required type="email" data-private="" value={form.email} onChange={set('email')} autoComplete="email" /></label>
+        <label>Display name<input required {...field('display_name', { autoComplete: 'name' })} /><small>The name to show on WBW.</small></label>
+        <label>Username<input required {...field('username', { autoComplete: 'username', pattern: '[A-Za-z0-9_]{3,20}', autoCapitalize: 'none', spellCheck: false })} /><small>3 to 20 letters, numbers, or underscores. Your unique handle.</small></label>
+        <label>Best email to reach you<input required type="email" data-private="" {...field('email', { autoComplete: 'email' })} /></label>
+        <label>Temporary password for WBW registration<input required data-private="" type="password" minLength={8} maxLength={200} autoComplete="new-password" value={form.password} onChange={set('password')} />
+          <small>At least 8 characters. Dan uses this only to register you on Western Boot World, then it is cleared.</small></label>
+        <label>Confirm temporary password<input required data-private="" type="password" minLength={8} maxLength={200} autoComplete="new-password" value={form.password_confirm} onChange={set('password_confirm')} /></label>
         <p className="hint">Shop links — add at least one place you sell now.</p>
-        {CHANNELS.map(([k, l]) => <label key={k}>{l}<input inputMode="url" autoComplete="off" placeholder="https://" value={form[k]} onChange={set(k)} /></label>)}
-        <label>Temporary password for WBW registration<input required data-private="" type="password" minLength={8} autoComplete="new-password" value={form.password} onChange={set('password')} /></label>
-        <small>At least 8 characters. Dan uses this only to register you on Western Boot World, then it is cleared.</small>
-        <label>Confirm temporary password<input required data-private="" type="password" minLength={8} autoComplete="new-password" value={form.password_confirm} onChange={set('password_confirm')} /></label>
+        {CHANNELS.map(([k, l]) => <label key={k}>{l}<input inputMode="url" autoComplete="off" placeholder="https://" {...field(k)} /></label>)}
         <label className="check"><input type="checkbox" checked={form.photo_ok} onChange={set('photo_ok')} required /> I own these photos and I’m okay with BootLister renaming and optimizing them.</label>
         <label className="check"><input type="checkbox" checked={form.import_ok} onChange={set('import_ok')} required /> I’m okay with copying my current listings into BootLister so I can review them here. Nothing goes live until I approve it.</label>
       </fieldset>
 
       <fieldset>
         <legend>Optional</legend>
-        <label>Phone<input data-private="" type="tel" value={form.phone} onChange={set('phone')} autoComplete="tel" /></label>
-        <label>Location (city, state)<input value={form.location} onChange={set('location')} autoComplete="address-level2" /></label>
-        <label>Shorthand you use, one per line<textarea rows="3" placeholder={"BJ = Black Jack\nSz = Size"} value={form.terms} onChange={set('terms')} /></label>
-        <label>Defaults when a listing doesn’t say, one per line<textarea rows="3" placeholder={"sized_for = Women\nmade_in = USA"} value={form.defaults} onChange={set('defaults')} /></label>
+        <label>Profile photo (JPG, PNG, or WebP, 5 MB or less)
+          <input type="file" accept="image/jpeg,image/png,image/webp" onChange={onPhoto} />
+        </label>
+        {preview && <img src={preview} alt="Profile preview" className="preview" />}
+        <label>Aliases<input {...field('aliases')} /><small>Optional. Comma-separated other names you go by</small></label>
+        <label>Location<input {...field('location', { autoComplete: 'address-level2', placeholder: 'City, state' })} /></label>
+        <label>Bio<textarea rows="4" placeholder="Tell buyers what you collect, your shipping turnaround, anything that builds trust." {...field('bio')} /></label>
+        <label>Fun fact about you<input placeholder="Your first pair, a grail boot, how long you've been collecting..." {...field('fun_fact')} /></label>
+        <label>Where do you sell boots today?<input {...field('sells_where')} /></label>
+        <label>What kind of boots do you deal in?<input {...field('boot_types')} /></label>
+        <label>Roughly how many pairs would you list?<input inputMode="numeric" {...field('pairs_estimate')} /></label>
+        <label>Anything else we should know?<textarea rows="3" {...field('notes')} /></label>
+        <label>Phone<input data-private="" type="tel" {...field('phone', { autoComplete: 'tel' })} /></label>
+        <label>Shorthand you use, one per line<textarea rows="3" placeholder={"BJ = Black Jack\nSz = Size"} {...field('terms')} /></label>
+        <label>Defaults when a listing doesn’t say, one per line<textarea rows="3" placeholder={"sized_for = Women\nmade_in = USA"} {...field('defaults')} /></label>
         <label>Add a short brand note from Western Boot World to your listings?
           <select value={form.brand_context} onChange={set('brand_context')}>
             <option value="on">On (recommended)</option>
             <option value="off">Off</option>
           </select>
         </label>
-        <label>Profile picture (JPG, PNG, or WebP, 5 MB or less)
-          <input type="file" accept="image/jpeg,image/png,image/webp" onChange={onPhoto} />
-        </label>
-        {preview && <img src={preview} alt="Profile preview" className="preview" />}
+        <p className="hint"><b>Email preferences</b> — all on to start. Uncheck any you don’t want.</p>
+        {EMAIL_PREFS.map(([k, l, h]) => (
+          <label key={k} className="check"><input type="checkbox" checked={form.email_prefs[k]} onChange={setPref(k)} />
+            <span>{l}<small>{h}</small></span></label>
+        ))}
       </fieldset>
 
       <div className="hp" aria-hidden="true">
         <label>Company<input tabIndex={-1} autoComplete="off" value={form[HONEYPOT]} onChange={set(HONEYPOT)} /></label>
       </div>
 
-      {err && <p className="err">{err}</p>}
+      {err && <p className="err" role="alert">{err}</p>}
       <button type="submit" className="primary" disabled={busy}>{busy ? 'Sending…' : 'Send intake form'}</button>
     </form>
   );

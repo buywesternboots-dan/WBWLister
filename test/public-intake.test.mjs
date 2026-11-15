@@ -6,13 +6,14 @@ import { intakeSubmissionsResponse } from '../app/api/intake-submissions/route.j
 import { decide } from '../lib/gate.js';
 import { decryptSecret, encryptSecret, hasIntakeSecret, intakeKeyMaterial } from '../lib/intake-crypto.js';
 import { HONEYPOT, isHoneypot, publicIntakeView, validatePublicIntake } from '../lib/public-intake.js';
+import { EMAIL_PREFS, INTAKE_LIMITS, USERNAME_RE } from '../lib/public-intake-constants.js';
 import { sessionToken } from '../lib/session.js';
 
 const DEPOP = 'https://www.depop.com/westernbootworld/';
 const SITE = 'https://adaboots.example/shop';
 const ENV = { NODE_ENV: 'production', ADMIN_PASSWORD: 'staff-secret', APP_PASSWORD: 'signing-secret', INTAKE_SECRET: 'test-intake-secret' };
 const valid = (extra = {}) => ({
-  display_name: 'Ada Boots', email: 'ada@shop.test', depop: DEPOP,
+  display_name: 'Ada Boots', username: 'ada_boots', email: 'ada@shop.test', depop: DEPOP,
   password: 'temporary1', password_confirm: 'temporary1',
   photo_ok: 'on', import_ok: 'on', ...extra,
 });
@@ -167,9 +168,9 @@ describe('public intake page', () => {
     assert.match(page, /PublicIntakeForm/);
     assert.match(form, /Required/);
     assert.match(form, /Optional/);
-    assert.match(form, /Name to show on WBW/);
+    assert.match(form, /name to show on WBW/);
     assert.match(form, /Temporary password for WBW registration/);
-    assert.match(form, /Profile picture/);
+    assert.match(form, /Profile photo/);
     assert.match(form, /\/api\/public-intake/);
     assert.doesNotMatch(form, /\/api\/intake['"]/);
     assert.match(gate, /\/intake/);
@@ -179,5 +180,68 @@ describe('public intake page', () => {
     assert.doesNotMatch(store, /saveSeller/);
     assert.doesNotMatch(store, /approveIntake/);
     assert.doesNotMatch(store, /already on a seller/);
+  });
+});
+
+describe('intake v2 fields', () => {
+  it('requires a 3-20 character username of letters, numbers, or underscores', () => {
+    assert.throws(() => validatePublicIntake(valid({ username: '' })), /username/i);
+    assert.throws(() => validatePublicIntake(valid({ username: 'ab' })), /3 to 20/);
+    assert.throws(() => validatePublicIntake(valid({ username: 'has space' })), /3 to 20/);
+    assert.throws(() => validatePublicIntake(valid({ username: 'a'.repeat(21) })), /3 to 20/);
+    assert.equal(validatePublicIntake(valid()).username, 'ada_boots');
+    assert.match('ada_boots', USERNAME_RE);
+    assert.doesNotMatch('ada-boots', USERNAME_RE);
+  });
+
+  it('stores the optional profile fields and blanks them as null', () => {
+    const v = validatePublicIntake(valid({
+      aliases: 'Ada, AB', bio: 'Vintage Luccheses', fun_fact: 'First pair 1994', sells_where: 'Depop',
+      boot_types: 'Exotics', pairs_estimate: '40', notes: 'Ships Mondays',
+    }));
+    assert.deepEqual(
+      [v.aliases, v.bio, v.fun_fact, v.sells_where, v.boot_types, v.pairs_estimate, v.notes],
+      ['Ada, AB', 'Vintage Luccheses', 'First pair 1994', 'Depop', 'Exotics', '40', 'Ships Mondays'],
+    );
+    const blank = validatePublicIntake(valid());
+    for (const k of ['aliases', 'bio', 'fun_fact', 'sells_where', 'boot_types', 'pairs_estimate', 'notes']) assert.equal(blank[k], null, k);
+  });
+
+  it('defaults every email preference on and honors unchecked boxes', () => {
+    assert.deepEqual(validatePublicIntake(valid()).email_prefs, Object.fromEntries(EMAIL_PREFS.map(([k]) => [k, true])));
+    assert.equal(EMAIL_PREFS.length, 5);
+    const v = validatePublicIntake(valid({ email_prefs: { watching: false, messages: true, bogus: true } }));
+    assert.equal(v.email_prefs.watching, false);
+    assert.equal(v.email_prefs.messages, true);
+    assert.equal('bogus' in v.email_prefs, false);
+  });
+
+  it('enforces a length limit on every text field', () => {
+    for (const [k, max] of Object.entries(INTAKE_LIMITS)) {
+      if (k === 'username' || k === 'email') continue;
+      const extra = k in { depop: 1, facebook: 1, ebay: 1, poshmark: 1, website: 1 } ? `https://x.test/${'a'.repeat(max)}` : 'a'.repeat(max + 1);
+      assert.throws(() => validatePublicIntake(valid({ [k]: extra })), /too long/i, k);
+    }
+  });
+
+  it('shows the new fields on the admin view without the password', () => {
+    const view = publicIntakeView({ id: 1, username: 'ada_boots', bio: 'b', email_prefs: { watching: true }, password_cipher: 'x' });
+    assert.equal(view.username, 'ada_boots');
+    assert.equal(view.bio, 'b');
+    assert.deepEqual(view.email_prefs, { watching: true });
+    assert.equal(JSON.stringify(view).includes('password_cipher'), false);
+  });
+
+  it('keeps the form browser-safe and split into Required and Optional sections', () => {
+    const form = readFileSync(new URL('../components/public-intake-form.js', import.meta.url), 'utf8');
+    const store = readFileSync(new URL('../lib/public-intake-store.js', import.meta.url), 'utf8');
+    assert.doesNotMatch(form, /lib\/(public-intake|auth)['"]/);
+    assert.match(form, /USERNAME_RE/);
+    for (const s of ['Display name', 'Username', 'Best email to reach you', 'Aliases', 'Bio', 'Fun fact about you',
+      'Where do you sell boots today?', 'What kind of boots do you deal in?', 'Roughly how many pairs would you list?',
+      'Anything else we should know?', 'Email preferences', 'Profile photo']) assert.ok(form.includes(s), s);
+    assert.ok(form.indexOf('Optional') < form.indexOf('Profile photo'));
+    assert.match(store, /add column if not exists username/);
+    assert.match(store, /add column if not exists email_prefs jsonb/);
   });
 });

@@ -1,4 +1,8 @@
 'use client';
+import { EMAIL_PREFS } from '../lib/public-intake-constants';
+
+const EXTRA = [['aliases', 'Aliases'], ['bio', 'Bio'], ['fun_fact', 'Fun fact'], ['sells_where', 'Sells today'],
+  ['boot_types', 'Boots'], ['pairs_estimate', 'Pairs to list'], ['notes', 'Notes']];
 
 const api = (method, body, path = '/api/intake-submissions') =>
   fetch(path, { method, headers: { 'Content-Type': 'application/json' }, body: body && JSON.stringify(body) })
@@ -36,8 +40,11 @@ export default function IntakeSubmissions({ rows = [], onChange, busy, setBusy, 
           {r.photo_url && <img src={r.photo_url} alt="" width="48" height="48" />}
           <div>
             <strong>{r.display_name || 'Intake link (not filled yet)'}</strong>
+            {r.username && <small>@{r.username}</small>}
             <small>{r.email || 'No email yet'}{r.location ? ` · ${r.location}` : ''}{r.phone ? ` · ${r.phone}` : ''}</small>
             <small>{r.status === 'approved' ? `Approved as ${r.seller_name}` : 'Pending'}{r.has_password ? ' · password saved' : r.password_cleared_at ? ' · password cleared' : ' · no password'}</small>
+            {EXTRA.filter(([k]) => r[k]).map(([k, l]) => <small key={k}><b>{l}:</b> {r[k]}</small>)}
+            {r.email_prefs && <small><b>Emails:</b> {EMAIL_PREFS.filter(([k]) => r.email_prefs[k]).map(([, l]) => l).join(', ') || 'none'}</small>}
             {r.has_password && <label>Temporary WBW password<input id={`pw-${r.id}`} data-private="" type="text" readOnly autoComplete="off" />
             </label>}
             <span>
