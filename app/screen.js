@@ -10,7 +10,9 @@ import { CHANNELS, post } from '../lib/crosspost';
 import { isExtensionShop, sellerFormState, sellerSavePayload } from '../lib/seller-links';
 import { intakeLabel } from '../lib/intake';
 import IntakeForm from '../components/intake-form';
+import { WBW_ACCOUNT_LABEL, WBW_ACCOUNT_URL } from '../lib/wbw-account';
 import IntakeSubmissions from '../components/intake-submissions';
+import ApplicationsBanner from '../components/applications-banner';
 
 // Selected seller comes from ?seller= (the extension's seller dropdown uses the same names).
 const seller = () => new URLSearchParams(location.search).get('seller') || '';
@@ -266,6 +268,7 @@ export default function Screen({ admin = false }) {
   return (
     <main>
       <style>{css}</style>
+      {admin && <ApplicationsBanner />}
       {Object.entries(CHOICES).map(([f, opts]) => <datalist key={f} id={`dl-${f}`}>{opts.map(o => <option key={o} value={o} />)}</datalist>)}
 
       <div className="who">
@@ -280,6 +283,7 @@ export default function Screen({ admin = false }) {
         {admin && who && <button type="button" onClick={() => act({ action: 'optimize-backfill' })}>Optimize existing</button>}
         {admin && <a className="src" href="/bootlister-extension-0.19.zip" download title="Needed for Facebook and Depop imports">Chrome extension 0.19{ext ? ' ✓' : ''}</a>}
         {admin && <a className="src" href="/admin/bugs">Bug reports</a>}
+        {!admin && <a className="src" href={WBW_ACCOUNT_URL} target="_blank" rel="noopener noreferrer">{WBW_ACCOUNT_LABEL}</a>}
         <a className="src" href="/login" onClick={e => { e.preventDefault(); fetch('/api/login', { method: 'DELETE' }).then(() => location.assign('/login')); }}>Log out</a>
       </div>
       {!admin && <p className="help">Your job is to double-check each listing before it goes live, including anything shown in yellow. When you approve it, it is published right away. It is marked exported here — WBW is not connected yet, so nothing is sent to the live site.</p>}

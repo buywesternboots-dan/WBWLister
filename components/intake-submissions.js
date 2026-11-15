@@ -1,8 +1,15 @@
 'use client';
-import { EMAIL_PREFS } from '../lib/public-intake-constants';
+import { EMAIL_PREFS, PAYMENT_METHODS } from '../lib/public-intake-constants';
+import SellerTerms from './seller-terms';
+const day = v => new Date(v).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+const termsStatus = r => r.terms_accepted_at ? `Accepted ${day(r.terms_accepted_at)}${r.terms_accepted_name ? ` by ${r.terms_accepted_name}` : ''}` : r.terms_sent_at ? `Sent ${day(r.terms_sent_at)}` : 'Not sent';
+const copyLink = async path => { const url = new URL(path, location.origin).href; try { await navigator.clipboard.writeText(url); } catch { prompt('Copy this acceptance link:', url); } };
 
 const EXTRA = [['aliases', 'Aliases'], ['bio', 'Bio'], ['fun_fact', 'Fun fact'], ['sells_where', 'Sells today'],
-  ['boot_types', 'Boots'], ['pairs_estimate', 'Pairs to list'], ['notes', 'Notes']];
+  ['boot_types', 'Boots'], ['pairs_estimate', 'Pairs to list'], ['notes', 'Notes'],
+  ['pricing_notes', 'Pricing change'], ['shipping_policy', 'Shipping policy'], ['return_policy', 'Return policy']];
+const payLabel = p => [...(p?.methods || []).filter(k => k !== 'other').map(k => PAYMENT_METHODS.find(([m]) => m === k)?.[1] || k), ...(p?.other ? [p.other] : p?.methods?.includes('other') ? ['Other'] : [])].join(', ');
+const STATUS = { pending: 'Pending application', approved: 'Approved', declined: 'Declined' };
 
 const api = (method, body, path = '/api/intake-submissions') =>
   fetch(path, { method, headers: { 'Content-Type': 'application/json' }, body: body && JSON.stringify(body) })
@@ -15,6 +22,7 @@ export default function IntakeSubmissions({ rows = [], onChange, busy, setBusy, 
       const r = await api('POST', body);
       if (ok) ok(r);
       if (body.action !== 'reveal') onChange?.();
+      if (body.action === 'review') dispatchEvent(new Event('intake-reviewed'));
       return r;
     } catch (e) { setErr(e.message); }
     finally { setBusy(false); }
@@ -29,7 +37,7 @@ export default function IntakeSubmissions({ rows = [], onChange, busy, setBusy, 
   };
 
   return (
-    <div className="panel">
+    <div className="panel" id="applications">
       <strong>Public seller intake</strong>
       <small>Share <a href="/intake">/intake</a> or create a one-time link. Submissions are stored for you to review and integrate later — nothing here creates a seller. Temporary passwords are for WBW registration only. Reveal is recorded. Clear the password after you register them on WBW.</small>
       <span><button type="button" disabled={busy} onClick={() => act({ action: 'invite' }, r => { if (r?.url) { const el = document.getElementById('intake-invite-url'); if (el) el.value = `${location.origin}${r.url}`; } })}>Create intake link</button></span>
@@ -41,14 +49,22 @@ export default function IntakeSubmissions({ rows = [], onChange, busy, setBusy, 
           <div>
             <strong>{r.display_name || 'Intake link (not filled yet)'}</strong>
             {r.username && <small>@{r.username}</small>}
+            {r.pricing_change && <small><b>Change pricing:</b> {r.pricing_change === 'yes' ? 'Yes' : 'No, keep prices'}</small>}
+            {r.payment_methods && <small><b>Payment methods:</b> {payLabel(r.payment_methods)}</small>}
+            {r.email && <small><b>Terms:</b> {termsStatus(r)}</small>}
+            {r.email && <label className="check"><input type="checkbox" checked={!!r.terms_sent_at} disabled={busy} onChange={e => act({ action: 'terms-sent', id: r.id, sent: e.target.checked })} /> Terms sent</label>}
+            {r.terms_url && <span><button type="button" onClick={() => copyLink(r.terms_url)}>Copy acceptance link</button> <SellerTerms compact acceptanceUrl={r.terms_url} /></span>}
+            {r.has_wbw_account != null && <small><b>WBW account:</b> {r.has_wbw_account ? 'Already has one (link it)' : 'Needs one (we set it up)'}</small>}
             {r.import_mode && <small><b>Import:</b> {r.import_mode === 'live' ? 'Live (list for sale right away)' : 'Drafts in their WBW account'}</small>}
             <small>{r.email || 'No email yet'}{r.location ? ` · ${r.location}` : ''}{r.phone ? ` · ${r.phone}` : ''}</small>
-            <small>{r.status === 'approved' ? `Approved as ${r.seller_name}` : 'Pending'}{r.has_password ? ' · password saved' : r.password_cleared_at ? ' · password cleared' : ' · no password'}</small>
+            <small>{STATUS[r.status] || r.status}{r.has_password ? ' · password saved' : r.password_cleared_at ? ' · password cleared' : ' · no password'}</small>
             {EXTRA.filter(([k]) => r[k]).map(([k, l]) => <small key={k}><b>{l}:</b> {r[k]}</small>)}
             {r.email_prefs && <small><b>Emails:</b> {EMAIL_PREFS.filter(([k]) => r.email_prefs[k]).map(([, l]) => l).join(', ') || 'none'}</small>}
             {r.has_password && <label>Temporary WBW password<input id={`pw-${r.id}`} data-private="" type="text" readOnly autoComplete="off" />
             </label>}
             <span>
+              {r.status === 'pending' && r.email && <><button type="button" className="primary" disabled={busy} onClick={() => act({ action: 'review', id: r.id, decision: 'approved' })}>Approve application</button>
+              <button type="button" disabled={busy} onClick={() => confirm('Decline this application?') && act({ action: 'review', id: r.id, decision: 'declined' })}>Decline</button></>}
               {r.has_password && <button type="button" disabled={busy} onClick={() => reveal(r.id)}>Reveal password</button>}
               {r.has_password && <button type="button" disabled={busy} onClick={() => confirm('Clear this password? Use this after you register them on WBW.') && act({ action: 'clear', id: r.id })}>Clear password (registered on WBW)</button>}
             </span>

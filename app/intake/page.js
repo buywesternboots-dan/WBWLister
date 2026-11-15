@@ -1,4 +1,6 @@
 import PublicIntakeForm from '../../components/public-intake-form';
+import SellerTerms from '../../components/seller-terms';
+import { WBW_ACCOUNT_LABEL, WBW_ACCOUNT_URL } from '../../lib/wbw-account';
 
 export const metadata = { title: 'Seller intake · BootLister', robots: { index: false, follow: false } };
 
@@ -9,7 +11,9 @@ export default function IntakePage() {
       <style>{css}</style>
       <h1>Seller intake</h1>
       <p className="intro">A short form so we can set up your Western Boot World seller profile and import your listings to Western Boot World.</p>
+      <p className="intro"><a href={WBW_ACCOUNT_URL} target="_blank" rel="noopener noreferrer">{WBW_ACCOUNT_LABEL}</a></p>
       <PublicIntakeForm />
+      <SellerTerms />
     </main>
   );
 }
@@ -34,6 +38,12 @@ legend{font-size:1.05rem}
 b{color:#2b2118}
 .choice{border:0;padding:4px 0;gap:10px}
 .choice legend{padding:0;font-weight:500;color:#2b2118;font-size:15px}
+.known{margin:4px 0;padding:12px;border-radius:6px;background:#eef6f5;color:#1f4f4c;font-size:15px}
+.known a{color:#1f6f6b;font-weight:600}
+h3{margin:12px 0 0;font-size:1rem;color:#1f6f6b}
+.terms{margin-top:16px;padding:12px 16px;background:#fff;border:1px solid #e6dfd6;border-radius:8px;display:flex;flex-direction:column;gap:8px}
+.terms summary{font-weight:600;cursor:pointer;color:#1f6f6b}
+.terms-text{max-height:50vh;overflow:auto;font-size:14px;border:1px solid #eee;padding:8px;border-radius:6px;margin:8px 0}
 .preview{width:96px;height:96px;object-fit:cover;border-radius:8px;background:#eee}
 .hp{position:absolute;left:-10000px;width:1px;height:1px;overflow:hidden}
 .thanks p{margin:8px 0 0;color:#6b5a4a}

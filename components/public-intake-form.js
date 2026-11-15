@@ -1,6 +1,7 @@
 'use client';
-import { useEffect, useState } from 'react';
-import { EMAIL_PREFS, EMAIL_PREFS_INTRO, HONEYPOT, IMPORT_MODES, INTAKE_LIMITS as L, MAX_PHOTO_BYTES, USERNAME_RE } from '../lib/public-intake-constants';
+import { useEffect, useRef, useState } from 'react';
+import { WBW_ACCOUNT_LABEL, WBW_ACCOUNT_URL } from '../lib/wbw-account';
+import { DUPLICATE_MESSAGES, PAYMENT_METHODS, EMAIL_PREFS, EMAIL_PREFS_INTRO, HONEYPOT, IMPORT_MODES, INTAKE_LIMITS as L, MAX_PHOTO_BYTES, USERNAME_RE } from '../lib/public-intake-constants';
 
 async function resizePhoto(file) {
   if (file.size > MAX_PHOTO_BYTES) throw new Error('Please use a photo of 5 MB or less.');
@@ -25,7 +26,8 @@ const empty = {
   bio: '', fun_fact: '', sells_where: '', boot_types: '', pairs_estimate: '', notes: '',
   terms: '', defaults: '', brand_context: 'on',
   email_prefs: Object.fromEntries(EMAIL_PREFS.map(([k]) => [k, true])),
-  import_mode: '', password: '',
+  import_mode: '', has_wbw_account: '', password: '',
+  pricing_change: '', pricing_notes: '', shipping_policy: '', return_policy: '', payment_methods: { methods: [], other: '' },
   [HONEYPOT]: '',
 };
 
@@ -37,8 +39,26 @@ export default function PublicIntakeForm() {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const [done, setDone] = useState(false);
+  const checkId = useRef(0);
+  const [status, setStatus] = useState(''); // '' unchecked, 'none' ok to continue, 'seller' or 'intake' already known
+  const ready = () => USERNAME_RE.test(form.username.trim()) && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim());
+  const check = async (loud = false) => {
+    if (!ready()) { if (loud) setErr('Enter your email and a username (3 to 20 letters, numbers, or underscores).'); return; }
+    const id = ++checkId.current;
+    setErr(''); setBusy(true);
+    try {
+      const q = new URLSearchParams({ email: form.email.trim(), username: form.username.trim() });
+      const r = await fetch(`/api/public-intake/check?${q}`);
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || 'Could not check that right now.');
+      if (id === checkId.current) setStatus(j.status);
+    } catch (ex) { if (loud && id === checkId.current) setErr(ex.message); }
+    finally { setBusy(false); }
+  };
   useEffect(() => { setCode(new URLSearchParams(location.search).get('code') || ''); }, []);
-  const set = f => e => setForm({ ...form, [f]: e.target.type === 'checkbox' ? e.target.checked : e.target.value });
+  const set = f => e => { if (f === 'email' || f === 'username') { checkId.current++; setStatus(''); } setForm({ ...form, [f]: e.target.type === 'checkbox' ? e.target.checked : e.target.value }); };
+  const pay = form.payment_methods;
+  const setPay = k => e => setForm({ ...form, payment_methods: { ...pay, methods: e.target.checked ? [...pay.methods, k] : pay.methods.filter(m => m !== k) } });
   const setPref = k => e => setForm({ ...form, email_prefs: { ...form.email_prefs, [k]: e.target.checked } });
   const field = (k, props = {}) => ({ value: form[k], onChange: set(k), maxLength: L[k], ...props });
   const onPhoto = async e => {
@@ -56,14 +76,18 @@ export default function PublicIntakeForm() {
     e.preventDefault();
     setErr('');
     if (!USERNAME_RE.test(form.username.trim())) return setErr('Username must be 3 to 20 letters, numbers, or underscores.');
+    if (status !== 'none') return check(true);
+    if (!form.has_wbw_account) return setErr('Please tell us whether you already have a Western Boot World account.');
     if (!form.import_mode) return setErr('Please choose how we should import your listings (live or as drafts).');
     setBusy(true);
     try {
       const r = await fetch('/api/public-intake', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...form, code, photo }),
+        body: JSON.stringify({ ...form, password: form.has_wbw_account === 'yes' ? '' : form.password, code, photo }),
       });
       const j = await r.json().catch(() => ({}));
+      const dup = Object.keys(DUPLICATE_MESSAGES).find(k => DUPLICATE_MESSAGES[k] === j.error);
+      if (r.status === 409 && dup) return setStatus(dup);
       if (!r.ok) throw new Error(j.error || 'Could not send the form.');
       setDone(true);
     } catch (ex) { setErr(ex.message); }
@@ -73,7 +97,8 @@ export default function PublicIntakeForm() {
   if (done) return (
     <div className="panel thanks">
       <strong>Thanks — we have your form.</strong>
-      <p>Dan will use this to set up your Western Boot World account.</p>
+      <p>{form.has_wbw_account === 'yes' ? 'We’ll link your existing Western Boot World account for you.' : 'We’ll set up your Western Boot World account for you.'}</p>
+      <p><a href={WBW_ACCOUNT_URL} target="_blank" rel="noopener noreferrer">{WBW_ACCOUNT_LABEL}</a></p>
     </div>
   );
 
@@ -83,17 +108,29 @@ export default function PublicIntakeForm() {
 
       <fieldset>
         <legend>Required</legend>
+        <label>Best email to reach you<input required type="email" data-private="" {...field('email', { autoComplete: 'email', onBlur: () => check() })} /></label>
+        <label>Username<input required {...field('username', { autoComplete: 'username', pattern: '[A-Za-z0-9_]{3,20}', autoCapitalize: 'none', spellCheck: false, onBlur: () => check() })} /><small>3 to 20 letters, numbers, or underscores. Your unique handle.</small></label>
+        {!status && <button type="button" className="primary" disabled={busy} onClick={() => check(true)}>{busy ? 'Checking…' : 'Continue'}</button>}
+        {status === 'seller' && <p className="known" role="status">{DUPLICATE_MESSAGES.seller.replace(/ Sign in here$/, '')} <a href="/login">Sign in here</a>.</p>}
+        {status === 'intake' && <p className="known" role="status">{DUPLICATE_MESSAGES.intake}</p>}
+        {status === 'none' && <>
         <label>Display name<input required {...field('display_name', { autoComplete: 'name' })} /><small>The name to show on WBW.</small></label>
-        <label>Username<input required {...field('username', { autoComplete: 'username', pattern: '[A-Za-z0-9_]{3,20}', autoCapitalize: 'none', spellCheck: false })} /><small>3 to 20 letters, numbers, or underscores. Your unique handle.</small></label>
-        <label>Best email to reach you<input required type="email" data-private="" {...field('email', { autoComplete: 'email' })} /></label>
-        <label>Temporary password for WBW registration<input required data-private="" type="password" minLength={8} maxLength={200} autoComplete="new-password" value={form.password} onChange={set('password')} />
-          <small>At least 8 characters. Dan uses this only to register you on Western Boot World, then it is cleared.</small></label>
+        <fieldset className="choice" role="radiogroup">
+          <legend>Do you already have a Western Boot World account?</legend>
+          <label className="check"><input type="radio" name="has_wbw_account" value="yes" checked={form.has_wbw_account === 'yes'} onChange={set('has_wbw_account')} required /> Yes</label>
+          <label className="check"><input type="radio" name="has_wbw_account" value="no" checked={form.has_wbw_account === 'no'} onChange={set('has_wbw_account')} required /> No</label>
+        </fieldset>
+        {form.has_wbw_account === 'yes' && <p className="hint">No password needed. We'll link your existing WBW account for you.</p>}
+        {form.has_wbw_account === 'no' && <label>Temporary password for WBW registration<input required data-private="" type="password" minLength={8} maxLength={200} autoComplete="new-password" value={form.password} onChange={set('password')} />
+          <small>At least 8 characters. We set up your Western Boot World account for you with this password, then it is cleared.</small></label>}
         <fieldset className="choice" role="radiogroup">
           <legend>How should we import your listings to Western Boot World?</legend>
           {IMPORT_MODES.map(([k, l]) => <label key={k} className="check"><input type="radio" name="import_mode" value={k} checked={form.import_mode === k} onChange={set('import_mode')} required /> {l}</label>)}
         </fieldset>
+        </>}
       </fieldset>
 
+      {status === 'none' && <>
       <fieldset>
         <legend>Optional</legend>
         <label>Profile photo (JPG, PNG, or WebP, 5 MB or less)
@@ -117,6 +154,20 @@ export default function PublicIntakeForm() {
             <option value="off">Off</option>
           </select>
         </label>
+        <h3>Store policies</h3>
+        <fieldset className="choice" role="radiogroup">
+          <legend>Do you want to change the pricing of your items?</legend>
+          <label className="check"><input type="radio" name="pricing_change" value="no" checked={form.pricing_change === 'no'} onChange={set('pricing_change')} /> No, keep my prices</label>
+          <label className="check"><input type="radio" name="pricing_change" value="yes" checked={form.pricing_change === 'yes'} onChange={set('pricing_change')} /> Yes</label>
+        </fieldset>
+        {form.pricing_change === 'yes' && <label>How should we change your prices?<textarea rows="3" {...field('pricing_notes')} /></label>}
+        <label>What are your shipping policies?<textarea rows="3" {...field('shipping_policy')} /></label>
+        <fieldset className="choice">
+          <legend>What payment methods do you accept?</legend>
+          {PAYMENT_METHODS.map(([k, l]) => <label key={k} className="check"><input type="checkbox" checked={pay.methods.includes(k)} onChange={setPay(k)} /> {l}</label>)}
+        </fieldset>
+        {pay.methods.includes('other') && <label>Other payment method<input maxLength={L.payment_other} value={pay.other} onChange={e => setForm({ ...form, payment_methods: { ...pay, other: e.target.value } })} /></label>}
+        <label>What is your return policy?<textarea rows="3" {...field('return_policy')} /></label>
         <p className="hint"><b>Email preferences</b> — {EMAIL_PREFS_INTRO}</p>
         {EMAIL_PREFS.map(([k, l, h]) => (
           <label key={k} className="check"><input type="checkbox" checked={form.email_prefs[k]} onChange={setPref(k)} />
@@ -124,12 +175,14 @@ export default function PublicIntakeForm() {
         ))}
       </fieldset>
 
+      </>}
+
       <div className="hp" aria-hidden="true">
         <label>Company<input tabIndex={-1} autoComplete="off" value={form[HONEYPOT]} onChange={set(HONEYPOT)} /></label>
       </div>
 
       {err && <p className="err" role="alert">{err}</p>}
-      <button type="submit" className="primary" disabled={busy}>{busy ? 'Sending…' : 'Send intake form'}</button>
+      {status === 'none' && <button type="submit" className="primary" disabled={busy}>{busy ? 'Sending…' : 'Send intake form'}</button>}
     </form>
   );
 }
