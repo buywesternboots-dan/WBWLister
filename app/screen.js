@@ -9,6 +9,7 @@ import { toCsv } from '../lib/export';
 import { CHANNELS, post } from '../lib/crosspost';
 import { isExtensionShop, sellerFormState, sellerSavePayload } from '../lib/seller-links';
 import { intakeLabel } from '../lib/intake';
+import { wbwSellerStatus } from '../lib/wbw-status';
 import IntakeForm from '../components/intake-form';
 import { WBW_ACCOUNT_LABEL, WBW_ACCOUNT_URL } from '../lib/wbw-account';
 import IntakeSubmissions from '../components/intake-submissions';
@@ -78,6 +79,14 @@ const CONCURRENT = 4; // website products imported at once
 // Facebook and Depop block servers, so the Chrome extension imports them (isExtensionShop).
 const done = n => `Done: ${n.added} new, ${n.updated} changed${n.sold != null ? `, ${n.sold} already sold (skipped)` : ''}, ${n.removed} gone (now Pending sold), ${n.failed} failed${n.skipped ? ` ${n.skipped}` : ''}`;
 const daysLeft = i => Math.max(0, 30 - Math.floor((Date.now() - new Date(i.status_at)) / 864e5));
+
+// Read-only WBW API placeholders. There is no toggle; a later API sync will fill these in.
+function WbwStatusBadges({ status, where }) {
+  const badges = (status?.badges ?? wbwSellerStatus(status || {}).badges);
+  return <ul className="wbw-seller-status" data-wbw-status={where}>
+    {badges.map(b => <li key={b.key} data-wbw-status-badge={b.key}><span>{b.label}</span> <span className={b.value == null ? 'pending' : ''}>{b.text}</span></li>)}
+  </ul>;
+}
 
 // Shared item screen. The admin interface passes admin; the seller interface at /seller does not, so those controls are not rendered.
 export default function Screen({ admin = false }) {
@@ -287,7 +296,8 @@ export default function Screen({ admin = false }) {
       {!admin && <p className="help">Your job is to double-check each listing before it goes live, including anything shown in yellow. When you approve it, it is published right away. It is marked exported here — WBW is not connected yet, so nothing is sent to the live site.</p>}
       {admin && who && <p className="help">When a seller approves a listing, it is published here right away. You can still see and edit every listing. Export CSV is the file for WBW. Nothing is sent to the live site yet.</p>}
       {admin && current?.intake && <p className={current.intake.done ? 'help' : 'warn'}>{intakeLabel(current.intake)}</p>}
-      {admin && !who && !sellerForm && sellers.some(s => s.name) && <ul className="intake-list">{sellers.filter(s => s.name).map(s => <li key={s.seller}>{s.display_name ?? s.seller} — {intakeLabel(s.intake)}</li>)}</ul>}
+      {admin && current?.name && <div className="wbw-seller-status-detail" data-wbw-status-detail><WbwStatusBadges status={current.wbw_status} where="detail" /></div>}
+      {admin && !who && !sellerForm && sellers.some(s => s.name) && <ul className="intake-list" data-seller-list>{sellers.filter(s => s.name).map(s => <li key={s.seller}>{s.display_name ?? s.seller} — {intakeLabel(s.intake)}<WbwStatusBadges status={s.wbw_status} where="list" /></li>)}</ul>}
       {admin && <IntakeSubmissions rows={packets} onChange={() => { loadPackets(); loadSellers(); }} busy={intakeBusy} setBusy={setIntakeBusy} setErr={setErr} />}
       {intakeOpen && current?.name && <IntakeForm seller={current} admin={admin} busy={intakeBusy} error={err} onSave={saveIntake} onClose={() => setIntakeOpen(false)} />}
       {!ext && isExtensionShop(link) && <p className="help">Facebook and Depop import through the BootLister Chrome extension, which uses the sign-in already in this browser:
@@ -296,6 +306,7 @@ export default function Screen({ admin = false }) {
 
       {admin && sellerForm && <div className="panel">
         <strong>{sellerForm.created_at ? 'Edit seller' : 'New seller'}</strong>
+        {sellerForm.created_at && <WbwStatusBadges status={sellerForm.wbw_status || current?.wbw_status} where="detail" />}
         <label>WBW seller name* (the WBW account these items attach to)<input value={sellerForm.name ?? ''} onChange={setForm('name')} /></label>
         <label>Display name*<input value={sellerForm.display_name ?? ''} onChange={setForm('display_name')} /></label>
         <label>Shop link (website, Poshmark, eBay, Facebook, or Depop)<input value={sellerForm.shop_link ?? ''} onChange={setForm('shop_link')} /></label>
@@ -480,6 +491,10 @@ dl{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:4p
 .help{font-size:13px;color:#6b5a4a;background:#fff;border:1px solid #e6dfd6;border-radius:8px;padding:10px}
 .wbw-row{display:grid;grid-template-columns:1fr auto;gap:2px 8px;padding:6px 0;border-bottom:1px dashed #eee;align-items:center}.wbw-label{font-size:12px;color:#6b5a4a}.wbw-value{white-space:pre-wrap;word-break:break-word}.wbw-row .copy{grid-column:2;grid-row:1/span 2}.wbw-section h3{margin:8px 0 0;font-size:14px}
 .intake-list{margin:0 0 12px;padding:10px 12px 10px 28px;background:#fff;border:1px solid #e6dfd6;border-radius:8px;font-size:14px}
+.wbw-seller-status{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 0;padding:0;list-style:none}
+.wbw-seller-status li{display:inline-flex;align-items:center;gap:6px;font-size:12px;background:#f4efe8;border:1px solid #e6dfd6;border-radius:999px;padding:2px 8px;color:#2b2118}
+.wbw-seller-status .pending{color:#6b5a4a}
+.wbw-seller-status-detail{margin:0 0 12px}
 .packet{display:flex;gap:10px;align-items:flex-start;padding:8px 0;border-top:1px solid #e6dfd6}
 .packet img{width:48px;height:48px;object-fit:cover;border-radius:6px;background:#eee;flex-shrink:0}
 .packet > div{flex:1;display:flex;flex-direction:column;gap:4px;min-width:0}
