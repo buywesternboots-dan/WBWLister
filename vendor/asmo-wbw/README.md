@@ -20,7 +20,7 @@ cd /workspace/asmo-wbw
 .venv/bin/python -m asmo_wbw run --in fixtures/listings/appendix-example.json --out-dir /tmp/asmo-wbw-out
 cat listing.json | .venv/bin/python -m asmo_wbw run --out-dir /tmp/asmo-wbw-out
 # Operator-only URL fetch (never westernbootworld.com or eBay; no scheduler)
-.venv/bin/python -m asmo_wbw run --in listing.json --out-dir /tmp/asmo-wbw-out --fetch
+.venv/bin/python -m asmo_wbw run --in listing.json --out-dir /tmp/asmo-wbw-out --fetch --og-base-url https://example.public/media
 ```
 
 ## Commands

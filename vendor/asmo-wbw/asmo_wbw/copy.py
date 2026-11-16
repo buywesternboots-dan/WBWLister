@@ -234,6 +234,28 @@ def open_graph(
     return og
 
 
+def normalize_og_base_url(value: str | None) -> str | None:
+    """Return a cleaned https base, or None if unset. Reject non-https values."""
+    s = str(value or "").strip()
+    if not s:
+        return None
+    if not s.lower().startswith("https://"):
+        raise ValueError("og_base_url must be an https URL")
+    return s.rstrip("/")
+
+
+def absolute_og_image(image: str | None, base: str | None) -> str | None:
+    """Join og_base_url and a relative image path into an absolute https URL."""
+    if not image:
+        return image
+    img = str(image).strip()
+    if img.lower().startswith("https://"):
+        return img
+    if not base:
+        return img
+    return f"{base.rstrip('/')}/{img.lstrip('/')}"
+
+
 def slug_tokens(values: dict[str, Any], style: str) -> tuple[list[str], set[str]]:
     """Brand, gender, model, color, material, noun, compact size. Pin model+size."""
 

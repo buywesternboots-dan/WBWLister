@@ -118,17 +118,21 @@ class Handler(BaseHTTPRequestHandler):
 
     def _run(self, data: object) -> None:
         fetch = False
+        og_base_url = None
         payload = data
         if isinstance(data, dict) and "listing" in data:
             payload = data["listing"]
             fetch = bool(data.get("fetch"))
+            og_base_url = data.get("og_base_url")
+        if isinstance(payload, dict) and not og_base_url:
+            og_base_url = payload.get("og_base_url") or "https://bootlister.vercel.app"
         with tempfile.TemporaryDirectory(prefix="asmo-wbw-worker-") as tmp:
             out_dir = Path(tmp) / "out"
             store_dir = Path(tmp) / "store"
             out_dir.mkdir()
             store_dir.mkdir()
             try:
-                result = process_payload(payload, out_dir=out_dir, store_dir=store_dir, fetch=fetch)
+                result = process_payload(payload, out_dir=out_dir, store_dir=store_dir, fetch=fetch, og_base_url=og_base_url)
             except ContractError as exc:
                 self._send(400, {"ok": False, "error": str(exc)})
                 return

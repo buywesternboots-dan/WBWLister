@@ -1,6 +1,6 @@
 # Hosting asmoWBW for BootLister
 
-asmoWBW v0.2 is a local Python CLI (`python -m asmo_wbw run --in listing.json --out-dir out/`). It needs Python 3.11+, Pillow, NumPy, and piexif. It is CPU-only and free. It does not fit comfortably inside a short Vercel serverless request, so the live ASMO button should call it as a background/sidecar worker.
+asmoWBW v0.2.1 is a local Python CLI (`python -m asmo_wbw run --in listing.json --out-dir out/`). It needs Python 3.11+, Pillow, NumPy, and piexif. It is CPU-only and free. It does not fit comfortably inside a short Vercel serverless request, so the live ASMO button should call it as a background/sidecar worker.
 
 This PR does not deploy anything, create accounts, or add environment variables. It only documents what a later deploy would need.
 
@@ -46,10 +46,10 @@ A Render/Fly/Cloud Run service would work the same as the box worker, but it is 
 - Listing title, description, price, and size stay read-only.
 - Free tools only. No paid AI.
 
-## TODO (asmoWBW v0.2.1)
+## asmoWBW v0.2.1
 
-Reuse of a still-fresh prior `items.asmowbw` result is coming in asmoWBW v0.2.1. The field name is not settled yet. Leave BootLister as it is until that version lands: do not add a BootLister-side reuse of asmoWBW results, and keep sending the current listing JSON on each run. Today, asmoWBW's `reused_applied` flag only looks at the existing lens `opt_applied` pass.
+BootLister sends the previous `items.asmowbw` record as `asmowbw_prior`. asmoWBW reuses filenames, alt, caption, and SEO when `facts_fp` still matches and each image `stored_url` still equals `photos[i]` in order. The stored record keeps `reused_applied`, `reused_source`, `facts_fp`, and per-image `stored_url`.
 
-`og:image` must be an absolute `https` URL after BootLister rewrites it (the Blob JPEG URL, or the site origin plus `/img/{id}/{n}/{file}`). Never leave a relative path.
+Every run passes `og_base_url` / `--og-base-url` `https://bootlister.vercel.app` so `og:image` is already an absolute https URL. BootLister does not rewrite it.
 
 Undo uses the `items.asmowbw` record as the source of truth. Original photo blobs and `items.photos` URLs are never overwritten or deleted.

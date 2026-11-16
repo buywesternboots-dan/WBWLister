@@ -110,7 +110,10 @@ From `FIELDS` in `lib/wbw.js`. All text unless noted.
 |---|---|---|
 | `opt_original` | jsonb, nullable | Import snapshot from `importOriginal()`: `title`, `description`, `price`, `brand`, `size`, `width`, `material`, `photos`, `captured_at`, optional `src_hash`, optional nested `first` (first-import snapshot). ASMO reads both live fields and this snapshot so a later edit does not hide the source wording. |
 | `opt_proposal` | jsonb, nullable | Last Prepare draft. Includes `images[]` (`n`, `file`, `alt`, `stored_url`, `source_renamed`, `pixels`), `facts_fp`, `style_sample`, `portable.seo_title`, `portable.seo_description`, `maker_note`, `used`, `omitted`. |
-| `opt_applied` | jsonb, nullable | Last applied images-SEO pass (`media: "lens"`, `scope: "images-seo"`). `images[]` plus `facts_fp`, `seo_title`, `seo_description`. Reuse these names when the facts fingerprint still matches; otherwise recompute. |
+| `opt_applied` | jsonb, nullable | Last applied images-SEO pass (`media: "lens"`, `scope: "images-seo"`). `images[]` plus `facts_fp`, `seo_title`, `seo_description`. Reuse these names when the facts fingerprint still matches and photo URLs still match in order; otherwise recompute. |
+| `asmowbw` / send as `asmowbw_prior` (also tolerate `asmowbw`) | jsonb, nullable | Last asmoWBW result stored on `items.asmowbw`. Include `facts_fp`, SEO fields, and `images[]` with `stored_url`, `filename` (or `file`), `alt`, and `caption`. Reuse when still fresh (same rule as `opt_applied`). |
+| `og_base_url` | string, optional | https base (also accepted as CLI `--og-base-url`) used to make every `og:image` an absolute URL. |
+| `maker_directory` | array, optional | Exact-maker lookup sent with the listing. Shape is `[{name}]`, for example `[{"name": "Lucchese"}]`. |
 
 ### Seller row always joined for naming credit / context
 
@@ -146,8 +149,8 @@ If a future import or an admin-supplied payload includes a non-private notes fie
 
 | Data | Where | Use only when |
 |---|---|---|
-| Bundled maker directory | sent as `maker_directory?: { name: string }[]` (from `lib/wbw-ref.js` `bundledDirectory`) | Name-only rows. Use when exactly one maker name matches the listing brand. |
-| Style snapshot | sent as the per-listing `style_sample` match object from `matchStyleSample()` | Status is `candidate` and `matches.length === 1` (exact maker + full style number). Ambiguous or blank → ignore. Style string is kept verbatim, including leading zeros. BootLister does not send the raw models.csv catalog. |
+| Bundled maker directory | `lib/wbw-ref.js` (`bundledDirectory`) | `exactMaker(brand)` returns one maker. Then the stored brand may be replaced by that canonical `maker.name` for naming. |
+| Style snapshot | `data/wbw-reference/models.csv` via `matchStyleSample()` | Status is `candidate` and `matches.length === 1` (exact maker + full style number). Ambiguous or blank → ignore. Style string is kept verbatim, including leading zeros. |
 | `style_ref` | `items.style_ref` jsonb | Seller/admin accepted a catalog card (`acceptedStyleRef`). Shape includes `maker_name`, `style_number`, `record_title`, `record_url`, `source_url`, `other_card_text`, `accepted_at`. `other_card_text` is unverified; material is applied only on an exact material-name match (`exactMaterialName`). |
 | `opt_proposal.style_sample` | jsonb | Same match object as above if Prepare has already run. |
 | `boot_references` | separate table, keyed by seller + maker + model | Seller-entered note: `maker`, `model`, `status` (`confirmed` / `candidate`), `provenance`, `notes`. A confirmed model may inform naming only when that model already appears in the listing text or verified `id_text`. |
@@ -159,9 +162,15 @@ If a future import or an admin-supplied payload includes a non-private notes fie
 | `id_photos` | jsonb, nullable | Array of `{ photo, kind, text }` from `scanPhotos()` in `lib/idcheck.js` (`kind` is `insole stamp`, `tag`, `label`, `box`, or `other`; `photo` is 1-based). Use `text` as a model/style candidate only when it passes `acceptToken()` (not a size, width, or price). This path is optional and may be absent; ASMO must not call paid vision APIs itself. |
 | `id_checked_at` | timestamptz, nullable | When the scan ran. |
 
-### Existing photo-SEO and lens pass
+### Existing photo-SEO, prior asmoWBW result, and lens pass
 
-When `opt_applied.media === "lens"` and `opt_applied.facts_fp === factsFingerprint(item)` and each `images[i].stored_url` still matches `photos[i]`, reuse `file`, `alt`, `seo_title`, and `seo_description` as the starting point, then add web-optimized derivatives and metadata. If the fingerprint no longer matches, recompute names from current facts.
+Send the previous asmoWBW result (the `items.asmowbw` record) as `asmowbw_prior`. The field `asmowbw` is also accepted. When that record's `facts_fp` matches the current facts fingerprint and each `images[i].stored_url` still matches `photos[i]` in order, reuse its filenames, alt, caption, and SEO (`seo_title`, `seo_description`) as the starting point, then add web-optimized derivatives and metadata. The output always includes `facts_fp` and per-image `stored_url` so the next run can do the same check.
+
+The same freshness rule applies to `opt_applied` when `opt_applied.media === "lens"`: reuse `file`, `alt`, `seo_title`, and `seo_description` if `facts_fp` and photo URLs still match in order. Prefer a still-fresh prior asmoWBW result over the lens pass. If the fingerprint or URLs no longer match, recompute names from current facts.
+
+`og_base_url` (or CLI `--og-base-url`) must be an https URL. When it is given, every `og:image` is an absolute https URL. `og:image` must be absolute when BootLister publishes.
+
+The undo source of truth is the `items.asmowbw` record. Original photo blobs are never overwritten.
 
 ### Seller settings (optional)
 
@@ -323,7 +332,15 @@ type AsmowbwListingInput = {
   id_checked_at?: string | null;
   seller_notes?: string | null;    // only if explicitly supplied; LP Notes are not stored today
   sku?: string | null;             // only if explicitly supplied or safely parsed from source_id
-  maker_directory?: { name: string }[];  // exact maker names only; BootLister sends [{ name }] from the bundled snapshot
+
+  // --- asmoWBW integration (v0.2.1) ---
+  // Exact-maker directory. Shape is [{name}].
+  maker_directory?: Array<{ name: string }>;
+  // Previous asmoWBW result from items.asmowbw. Prefer asmowbw_prior; also tolerate asmowbw.
+  asmowbw_prior?: AsmoWbwListingResult | null;
+  asmowbw?: AsmoWbwListingResult | null;
+  // https base so og:image is an absolute URL (CLI --og-base-url overrides).
+  og_base_url?: string;
 
   // Photo bytes are attached at run time, not stored in Postgres.
   media?: Array<{

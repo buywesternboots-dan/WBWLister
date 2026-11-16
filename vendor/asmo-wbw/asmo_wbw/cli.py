@@ -143,6 +143,7 @@ def cmd_run(args: argparse.Namespace) -> int:
             store_dir=store,
             fetch=bool(args.fetch),
             use_cutout=bool(getattr(args, "cutout", False)),
+            og_base_url=getattr(args, "og_base_url", None),
         )
     except ContractError as exc:
         print(exc, file=sys.stderr)
@@ -220,6 +221,11 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--store", help="Journal directory for original-byte backups")
     run.add_argument("--fetch", action="store_true", help="Operator-only: fetch photo URLs (never westernbootworld.com or eBay)")
     run.add_argument("--cutout", action="store_true", help="Use the local cut-out model if the studio backdrop is weak")
+    run.add_argument(
+        "--og-base-url",
+        dest="og_base_url",
+        help="https base used to make og:image an absolute URL (overrides listing og_base_url)",
+    )
     run.set_defaults(func=cmd_run)
 
     doc = sub.add_parser("doctor", help="Show local setup (no network)")

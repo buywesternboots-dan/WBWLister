@@ -13,6 +13,8 @@ from .copy import (
     caption_text,
     credit_line,
     keywords as keyword_list,
+    absolute_og_image,
+    normalize_og_base_url,
     open_graph,
     pack_filename,
     seo_description,
@@ -27,7 +29,7 @@ from .media import media_source, optimize_image
 from .views import VIEW_WORDS, classify_image
 
 PROFILE = "asmo-wbw-bootlister"
-PROFILE_VERSION = "0.2.0"
+PROFILE_VERSION = "0.2.1"
 PROVIDER = "asmo-wbw-local"
 COPYRIGHT = "westernbootworld.com"
 
@@ -44,20 +46,48 @@ def _json_field(value: Any) -> dict | None:
     return None
 
 
-def _should_reuse(item: dict[str, Any], fp: str) -> bool:
-    applied = _json_field(item.get("opt_applied")) or {}
-    if applied.get("media") != "lens":
-        return False
-    if applied.get("facts_fp") != fp:
-        return False
-    images = applied.get("images") or []
-    photos = item.get("photos") or []
+def _urls_match(images: list, photos: list) -> bool:
     if not images or len(images) != len(photos):
         return False
     for i, rec in enumerate(images):
+        if not isinstance(rec, dict):
+            return False
         if str(rec.get("stored_url") or "") != str(photos[i]):
             return False
     return True
+
+
+def _prior_record(item: dict[str, Any]) -> dict[str, Any] | None:
+    """Previous asmoWBW result, stored by BootLister as items.asmowbw."""
+    return _json_field(item.get("asmowbw_prior")) or _json_field(item.get("asmowbw"))
+
+
+def _reuse_plan(item: dict[str, Any], fp: str) -> tuple[dict[str, Any] | None, str | None]:
+    """Reuse a still-fresh prior record when facts_fp and photo URLs (in order) match.
+
+    Prefer a prior asmoWBW result over the older opt_applied lens pass.
+    """
+    photos = list(item.get("photos") or [])
+    prior = _prior_record(item)
+    if prior and str(prior.get("facts_fp") or "") == str(fp) and _urls_match(prior.get("images") or [], photos):
+        return prior, "asmowbw"
+    applied = _json_field(item.get("opt_applied")) or {}
+    if (
+        applied.get("media") == "lens"
+        and str(applied.get("facts_fp") or "") == str(fp)
+        and _urls_match(applied.get("images") or [], photos)
+    ):
+        return applied, "opt_applied"
+    return None, None
+
+
+def _reused_image(record: dict[str, Any] | None, n: int) -> dict[str, Any]:
+    if not record:
+        return {}
+    for im in record.get("images") or []:
+        if isinstance(im, dict) and int(im.get("n") or 0) == n:
+            return im
+    return {}
 
 
 def _filename(values: dict[str, Any], style: str, n: int, view: str | None, taken: set[str]) -> str:
@@ -98,15 +128,25 @@ def process_listing(
     fetch: bool = False,
     use_cutout: bool = False,
     include_low_confidence_views: bool = False,
+    og_base_url: str | None = None,
 ) -> dict[str, Any]:
-    """Process one normalized listing. Writes derivatives under out_dir."""
+    """Process one normalized listing. Writes derivatives under out_dir.
+
+    Original source blobs are never overwritten; derivatives go only under
+    out_dir. The items.asmowbw record is the undo source of truth for names.
+    """
     facts = listing_facts(listing)
     values = facts["values"]
     style = facts["style"] or listing_model(facts["item"])
     fp = facts_fingerprint(facts["item"])
-    reused = _should_reuse(listing, fp)
-    applied = _json_field(listing.get("opt_applied")) or {}
+    reused_record, reused_source = _reuse_plan(listing, fp)
+    reused = reused_source is not None
     listing_id = listing["id"]
+    try:
+        og_base = normalize_og_base_url(og_base_url if og_base_url is not None else listing.get("og_base_url"))
+    except ValueError as exc:
+        from .contract import ContractError
+        raise ContractError(str(exc)) from exc
     photos = list(listing.get("photos") or [])
     media = _media_map(listing)
     total = max(len(photos), max(media, default=0))
@@ -121,11 +161,15 @@ def process_listing(
     store.mkdir(parents=True, exist_ok=True)
     recover_pending(store)
 
-    seo_t = applied.get("seo_title") if reused else seo_title(values, style, listing_id)
     source_desc = ""
     original = listing.get("opt_original") if isinstance(listing.get("opt_original"), dict) else {}
     source_desc = str(listing.get("description") or original.get("description") or "")
-    seo_d = applied.get("seo_description") if reused else seo_description(values, style, listing_id, source_desc)
+    seo_t = (reused_record or {}).get("seo_title") if reused else None
+    seo_d = (reused_record or {}).get("seo_description") if reused else None
+    if not seo_t:
+        seo_t = seo_title(values, style, listing_id)
+    if not seo_d:
+        seo_d = seo_description(values, style, listing_id, source_desc)
     credit = credit_line(listing.get("seller_profile") or {}, listing.get("seller") or "")
     tokens, _pinned = slug_tokens(values, style)
     listing_slug = "-".join(tokens) if tokens else f"listing-{listing_id}"
@@ -175,20 +219,15 @@ def process_listing(
                 finally:
                     tmp_path.unlink(missing_ok=True)
 
-            reused_img = None
-            if reused:
-                for im in applied.get("images") or []:
-                    if int(im.get("n") or 0) == n:
-                        reused_img = im
-                        break
-            filename = (reused_img or {}).get("file") or _filename(values, style, n, view, taken)
+            reused_img = _reused_image(reused_record, n) if reused else {}
+            filename = reused_img.get("filename") or reused_img.get("file") or _filename(values, style, n, view, taken)
             if not filename.lower().endswith(".jpg"):
                 filename = f"{filename}.jpg"
             taken.add(filename.lower())
             webp_name = Path(filename).stem + ".webp"
-            alt = (reused_img or {}).get("alt") or alt_text(values, style, listing_id, n, total, view)
-            caption = caption_text(values, style, listing_id, n, total, view)
-            title = title_text(values, style, listing_id, n, view)
+            alt = reused_img.get("alt") or alt_text(values, style, listing_id, n, total, view)
+            caption = reused_img.get("caption") or caption_text(values, style, listing_id, n, total, view)
+            title = reused_img.get("title") or title_text(values, style, listing_id, n, view)
             kws = keyword_list(values, style)
             meta = {
                 "title": title,
@@ -225,6 +264,11 @@ def process_listing(
                     optimized = optimize_image(src_bytes, meta=meta)
                     jpeg_path = out_root / filename
                     webp_path = out_root / webp_name
+                    # Never overwrite the source blob; derivatives stay in out_dir.
+                    src_path = rec.get("path")
+                    for dest in (jpeg_path, webp_path):
+                        if src_path and Path(dest).resolve() == Path(src_path).resolve():
+                            raise RuntimeError(f"refusing to overwrite source blob {src_path}")
                     jpeg_path.write_bytes(optimized["jpeg"])
                     webp_path.write_bytes(optimized["webp"])
                     width, height = optimized["width"], optimized["height"]
@@ -245,10 +289,11 @@ def process_listing(
                 # No pixels: still return the planned names and copy.
                 (out_root / filename).parent.mkdir(parents=True, exist_ok=True)
 
+            image_rel = str(Path(str(listing_id)) / jpeg_rel)
             og = open_graph(
                 title=title,
                 description=caption,
-                image=str(Path(str(listing_id)) / jpeg_rel),
+                image=absolute_og_image(image_rel, og_base),
                 width=width,
                 height=height,
                 alt=alt,
@@ -284,7 +329,7 @@ def process_listing(
     listing_og = open_graph(
         title=seo_t,
         description=seo_d,
-        image=first["jpeg"] if first else None,
+        image=absolute_og_image(first["jpeg"] if first else None, og_base),
         width=first.get("width") if first else None,
         height=first.get("height") if first else None,
         alt=first.get("alt") if first else None,
@@ -303,6 +348,7 @@ def process_listing(
         "seller": listing.get("seller"),
         "facts_fp": fp,
         "reused_applied": reused,
+        "reused_source": reused_source,
         "listing_slug": listing_slug,
         "fields": used_fields,
         "omitted": facts["omitted"],
@@ -331,6 +377,7 @@ def process_payload(
     store_dir: str | Path | None = None,
     fetch: bool = False,
     use_cutout: bool = False,
+    og_base_url: str | None = None,
 ) -> dict[str, Any]:
     listings = parse_payload(data)
     results = [
@@ -340,6 +387,7 @@ def process_payload(
             store_dir=Path(store_dir) / str(item["id"]) if store_dir else None,
             fetch=fetch,
             use_cutout=use_cutout,
+            og_base_url=og_base_url,
         )
         for item in listings
     ]

@@ -93,6 +93,9 @@ BONUS_KEYS = (
     "media",
     "maker_directory",
     "posted",
+    "asmowbw_prior",
+    "asmowbw",
+    "og_base_url",
 )
 
 

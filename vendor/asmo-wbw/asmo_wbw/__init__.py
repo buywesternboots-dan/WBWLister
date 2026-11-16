@@ -5,4 +5,4 @@ description plus the pictures themselves. It does not modify the core
 ASMO tree at /workspace/asmo-agent.
 """
 
-__version__ = "0.2.0"
+__version__ = "0.2.1"

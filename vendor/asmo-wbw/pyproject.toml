@@ -1,6 +1,6 @@
 [project]
 name = "asmo-wbw"
-version = "0.2.0"
+version = "0.2.1"
 description = "Western Boot World naming tool (asmoWBW). Standalone sibling of ASMO."
 requires-python = ">=3.11"
 readme = "README.md"

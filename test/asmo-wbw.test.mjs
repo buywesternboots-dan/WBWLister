@@ -8,7 +8,7 @@ import { ADMIN_ACTIONS, guardAction } from '../lib/http.js';
 import { itemsResponse } from '../lib/items-api.js';
 import { sessionToken } from '../lib/session.js';
 import {
-  ASMO_MEDIA, CONTENT_FIELDS, DEFAULT_ORIGIN, absoluteOgImage, appliedAsmo,
+  ASMO_MEDIA, CONTENT_FIELDS, OG_BASE_URL, appliedAsmo,
   asmoStorePath, assertNewDerivativePath, attachablePhotoUrl, inputFingerprint,
   isBlockedAsmoHost, listingPatch, storedRecord, undoRecord, withPrevious,
 } from '../lib/asmo-wbw.js';
@@ -70,6 +70,7 @@ function fakeResult(input, over = {}) {
     seller: input.seller,
     facts_fp: 'abcd1234',
     reused_applied: false,
+    reused_source: null,
     listing_slug: 'lucchese-0123',
     flags: { brand_exact: true, style_status: 'matched', material_status: 'applied' },
     seo_title: 'Lucchese Men\'s 0123 Black Cherry Goat cowboy boots size 10 D',
@@ -79,7 +80,7 @@ function fakeResult(input, over = {}) {
       'og:description': 'Lucchese 0123 size 10D Black Cherry.',
       'og:type': 'website',
       'og:site_name': 'Western Boot World',
-      'og:image': `${input.id}/${images[0].filename}`,
+      'og:image': `${OG_BASE_URL}/${input.id}/${images[0].filename}`,
     },
     credit: 'Dan Hoffenberg via westernbootworld.com',
     images,
@@ -147,8 +148,12 @@ test('storedRecord + undo keep listing text read-only and can restore the previo
   assert.equal(first.listing_text_readonly, true);
   assert.equal(first.images[0].file.includes('0123'), true);
   assert.equal(first.images[0].stored_url, PHOTOS[0]);
-  assert.equal(first.open_graph['og:image'], `${DEFAULT_ORIGIN}/img/1842/1/${first.images[0].file}`);
+  assert.equal(first.open_graph['og:image'], `${OG_BASE_URL}/1842/${first.images[0].file}`);
   assert.match(first.open_graph['og:image'], /^https:\/\//);
+  assert.equal(first.facts_fp, 'abcd1234');
+  assert.equal(first.reused_applied, false);
+  assert.equal(first.reused_source, null);
+  assert.equal(first.images[0].stored_url, PHOTOS[0]);
   for (const f of CONTENT_FIELDS) assert.equal(first[f], undefined);
   const second = withPrevious(storedRecord(fakeResult(input, { seo_title: 'Second' }), { now: '2026-11-16T17:00:00.000Z', input }), first);
   assert.equal(second.seo_title, 'Second');
@@ -158,27 +163,46 @@ test('storedRecord + undo keep listing text read-only and can restore the previo
   assert.equal(undoRecord(null).undone, false);
 });
 
-test('og:image is an absolute https URL: Blob JPEG when present, otherwise the site origin plus /img path', () => {
+test('listingInput sends og_base_url and a compact asmowbw_prior from the stored record', () => {
   const input = listingInput(lucchese(), seller);
-  const relative = fakeResult(input);
-  const withOrigin = storedRecord(relative, { now: '2026-11-16T16:00:00.000Z', input, origin: 'https://bootlister.vercel.app' });
-  const expectedPath = `${DEFAULT_ORIGIN}/img/1842/1/${withOrigin.images[0].file}`;
-  assert.equal(withOrigin.open_graph['og:image'], expectedPath);
-  assert.equal(withOrigin.result.images[0].open_graph['og:image'], expectedPath);
-  assert.match(withOrigin.open_graph['og:image'], /^https:\/\//);
-  assert.equal(withOrigin.open_graph['og:image'].startsWith('/'), false);
-  assert.equal(withOrigin.open_graph['og:image'].includes('1842/lucchese'), false);
+  assert.equal(input.og_base_url, OG_BASE_URL);
+  assert.match(input.og_base_url, /^https:\/\//);
+  assert.equal(input.asmowbw_prior, undefined);
 
-  const blob = 'https://abc.public.blob.vercel-storage.com/asmowbw/1842/1/lucchese-mens-0123-black-cherry-goat-cowboy-boots-10d-1.jpg';
-  const withBlob = storedRecord(fakeResult(input, {
-    images: fakeResult(input).images.map((im, i) => i === 0 ? { ...im, jpeg_url: blob } : im),
-    open_graph: { ...fakeResult(input).open_graph, 'og:image': '1842/relative.jpg' },
-  }), { now: '2026-11-16T16:00:00.000Z', input, origin: 'https://example.invalid' });
-  assert.equal(withBlob.open_graph['og:image'], blob);
-  assert.equal(withBlob.result.images[0].open_graph['og:image'], blob);
-  assert.match(withBlob.open_graph['og:image'], /^https:\/\//);
+  const applied = storedRecord(fakeResult(input), { now: '2026-11-16T16:00:00.000Z', input });
+  const again = listingInput(lucchese({ asmowbw: applied }), seller);
+  assert.equal(again.og_base_url, OG_BASE_URL);
+  assert.equal(again.asmowbw_prior.facts_fp, 'abcd1234');
+  assert.equal(again.asmowbw_prior.images[0].stored_url, PHOTOS[0]);
+  assert.equal(again.asmowbw_prior.images[0].filename.includes('0123'), true);
+  assert.equal(again.asmowbw_prior.previous, undefined);
+  assert.equal(again.asmowbw_prior.result, undefined);
+});
 
-  assert.equal(absoluteOgImage({ listingId: 1842, n: 1, filename: 'boot.jpg', origin: 'http://insecure.example' }), 'https://bootlister.vercel.app/img/1842/1/boot.jpg');
+test('og:image from asmoWBW is kept as an absolute https URL', () => {
+  const input = listingInput(lucchese(), seller);
+  const result = fakeResult(input);
+  const stored = storedRecord(result, { now: '2026-11-16T16:00:00.000Z', input });
+  assert.equal(stored.open_graph['og:image'], `${OG_BASE_URL}/1842/${stored.images[0].file}`);
+  assert.match(stored.open_graph['og:image'], /^https:\/\//);
+  assert.equal(stored.open_graph['og:image'].startsWith('/'), false);
+  assert.equal(stored.open_graph['og:image'].startsWith('1842/'), false);
+});
+
+test('runListing passes og_base_url and asmowbw_prior through to asmoWBW', async () => {
+  const applied = storedRecord(fakeResult(listingInput(lucchese(), seller)), { now: '2026-11-16T16:00:00.000Z', input: listingInput(lucchese(), seller) });
+  const input = listingInput(lucchese({ asmowbw: applied }), seller);
+  let seen;
+  await runListing(input, {
+    now: '2026-11-16T17:00:00.000Z',
+    run: async payload => {
+      seen = payload;
+      return { ok: true, result: fakeResult(payload, { reused_applied: true, reused_source: 'asmowbw' }), files: [] };
+    },
+  });
+  assert.equal(seen.og_base_url, OG_BASE_URL);
+  assert.equal(seen.asmowbw_prior.facts_fp, 'abcd1234');
+  assert.equal(seen.asmowbw_prior.images[0].stored_url, PHOTOS[0]);
 });
 
 test('ASMO run and undo never overwrite or delete original photo blobs', async () => {
@@ -361,6 +385,8 @@ test('asmoWBW CLI accepts a contract listing and returns the output shape (live 
     assert.equal(result.images[0].filename.includes('0123'), true);
     assert.notEqual(result.images[0].alt, result.images[1].alt);
     assert.equal(result.open_graph['og:site_name'], 'Western Boot World');
+    assert.match(result.open_graph['og:image'], /^https:\/\//);
+    assert.equal(result.open_graph['og:image'].startsWith(OG_BASE_URL + '/'), true);
     assert.ok(raw.files.some(f => f.path.endsWith('.jpg')));
     assert.ok(raw.files.some(f => f.path.endsWith('.webp')));
   } finally {
