@@ -1,6 +1,6 @@
 # What to request from Western Boot World
 
-Short list for WBW (Ergon Insights). Full contract: `docs/wbw-api-spec.md` in WBWLister (draft PR). WBW Lister will not write to westernbootworld.com until this API is built and approved. Public brand and boot lookups stay read-only GET.
+Short list for WBW (Ergon Insights). Full contract: `docs/wbw-api-spec.md` in WBWLister (draft PR). WBW Lister will not write to westernbootworld.com until this API is built and approved. Public brand and boot lookups stay read-only GET. Phase 1 (the current build) is items 1–6, 8, and 9: per-seller keys, seller lookup/profile, inventory and sync, webhooks/events, optional reminders, sandbox, and handoff. Item 7 is Phase 2 (later, not part of the current build).
 
 1. **Per-seller API keys, never passwords.** One key per seller, scoped only to that seller’s inventory. Issue, rotate, and revoke. Hash keys at rest. Sync must keep working after the seller changes their password.
 
@@ -14,7 +14,7 @@ Short list for WBW (Ergon Insights). Full contract: `docs/wbw-api-spec.md` in WB
 
 6. **Sold-but-still-listed reminders.** When sync sees an item sold on WBW or elsewhere that is still showing as active in the seller’s main inventory, WBW Lister will remind them (default). If WBW wants to own that notice, add `POST /sellers/{id}/reminders` and/or event `listing.sold_still_active_at_source`.
 
-7. **Boot-database contributions only — never other site content.** `POST /api/v1/boot-database/contributions` (batch, idempotency key, provenance, confidence `exact`). Exact maker plus full style/model-number match only (leading zeros kept; no fuzzy or partial), or a new maker/style with clear evidence such as a label photo. Additive only; never overwrite; flag conflicts for WBW review. App-level scope `boot_db:contribute` (not a seller key). Webhooks `boot_db.contribution_accepted` / `rejected`.
+7. **Phase 2 (later, not part of the current build): boot-database contributions only — never other site content.** `POST /api/v1/boot-database/contributions` (batch, idempotency key, provenance, confidence `exact`). Exact maker plus full style/model-number match only (leading zeros kept; no fuzzy or partial), or a new maker/style with clear evidence such as a label photo. Additive only; never overwrite; flag conflicts for WBW review. App-level scope `boot_db:contribute` (not a seller key). Webhooks `boot_db.contribution_accepted` / `rejected`. Do not include this in the first WBW build.
 
 8. **Sandbox, errors, pagination, versioning.** A sandbox URL with separate credentials; `/api/v1`; cursor pagination; a standard error body; rate limits.
 

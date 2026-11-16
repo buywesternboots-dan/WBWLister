@@ -29,7 +29,10 @@ This API is what WBW Lister needs WBW to build so that we can:
 5. Apply **per-seller dress-up** on the way in: photo optimization is standard for every seller; extra description information and video are separate opt-ins, controlled on the BootLister back end by WBW Lister admins, **not** by the seller.
 6. Send the seller a **reminder** when sync finds an item sold on WBW or elsewhere that is still showing as active in their main inventory. Default is a WBW Lister-side notification. Optionally, WBW can own the same reminder via an endpoint or webhook.
 7. Receive **notification alerts** when a seller gets a message from a buyer or other member (signed webhooks, with a polling fallback).
-8. **Contribute verifiable maker and style data to the WBW boot database only** — never to other site content. Exact maker plus full style/model-number match only (leading zeros kept; no fuzzy or partial matches), or a new maker/style backed by clear evidence such as a label photo. Additive only; never overwrite existing records.
+
+**Phase 1 (the current build)** is items 1-7, plus the secure handoff in section 15: per-seller keys, seller lookup/profile, inventory and sync, media, webhooks/events, optional reminders, and handoff.
+
+8. **Phase 2 (later, not part of the current build).** Contribute verifiable maker and style data to the WBW boot database only — never to other site content. Exact maker plus full style/model-number match only (leading zeros kept; no fuzzy or partial matches), or a new maker/style backed by clear evidence such as a label photo. Additive only; never overwrite existing records. See section 10. Do not include this in the first WBW build.
 
 Until WBW builds and approves this API, WBW Lister continues to use only public read-only GETs (makers library, `/lookup`, public listing pages) and the existing manual CSV / hand-setup path. Nothing here authorizes a sign-in, POST, or any change to westernbootworld.com itself.
 
@@ -40,10 +43,8 @@ Until WBW builds and approves this API, WBW Lister continues to use only public 
 - HTTPS only. TLS 1.2+.
 - Seller credentials are API keys, not passwords. A password change must not revoke the key.
 - A seller key can only read and change that seller’s own account, profile, inventory, and events.
-- Boot-database contributions use a separate **WBW Lister app-level** credential and the scope `boot_db:contribute`. They never ride a seller key.
 - Writes are idempotent (`Idempotency-Key` header and/or `external_id`).
-- Boot-database writes are additive only. Conflicts are flagged for WBW review, never overwritten.
-- Exact maker + full style/model match only. Leading zeros in style numbers are preserved. No fuzzy or partial matches.
+- **Phase 2 (later, not part of the current build):** boot-database contributions use a separate app-level credential and the scope `boot_db:contribute` (never a seller key). Writes are additive only; conflicts are flagged for WBW review, never overwritten. Exact maker + full style/model match only; leading zeros in style numbers are preserved; no fuzzy or partial matches.
 - Versioned under `/api/v1`. Breaking changes get a new version.
 - A sandbox environment is requested for build and test, with separate credentials.
 
@@ -53,7 +54,7 @@ Until WBW builds and approves this API, WBW Lister continues to use only public 
 
 Two kinds of credentials, neither of which is a seller password.
 
-**App-level (WBW Lister as a partner).** WBW issues WBW Lister a `client_id` and `client_secret`. WBW Lister exchanges them for a short-lived partner access token (`POST /api/v1/oauth/token`, client credentials). That token is used to look up sellers, issue or rotate per-seller keys, register webhooks, and — only with the extra scope `boot_db:contribute` — submit boot-database contributions. The `client_secret` and the webhook signing secret are handed over through a secure channel (see [§15 Handoff](#15-handoff-to-wbw-lister-once-built)), never email or plain chat.
+**App-level (WBW Lister as a partner).** WBW issues WBW Lister a `client_id` and `client_secret`. WBW Lister exchanges them for a short-lived partner access token (`POST /api/v1/oauth/token`, client credentials). That token is used to look up sellers, issue or rotate per-seller keys, and register webhooks. **Phase 2 (later, not part of the current build):** the extra scope `boot_db:contribute` will be used to submit boot-database contributions. The `client_secret` and the webhook signing secret are handed over through a secure channel (see [§15 Handoff](#15-handoff-to-wbw-lister-once-built)), never email or plain chat.
 
 **Per-seller API keys.** After the seller consents to connect WBW Lister (a Connect screen on WBW, or an admin-assisted setup), WBW issues **one active API key per seller**, scoped only to that seller’s inventory and profile. The raw key is shown or delivered **once**. WBW stores only a one-way hash (SHA-256 or stronger), plus a prefix and last four characters for display. WBW Lister stores the key encrypted at rest, never in logs. The seller (or a WBW Lister admin acting with the partner token, after consent) can **rotate** or **revoke** the key. Rotation may keep the old key valid for a short grace period (recommend 24 hours) so in-flight sync is not dropped; revoke is immediate. Changing the seller’s WBW password does **not** revoke the API key — that is the point of this model. The seller can still revoke the key from their WBW account.
 
@@ -64,7 +65,7 @@ Two kinds of credentials, neither of which is a seller password.
 | Scope | Who | What it allows |
 | --- | --- | --- |
 | `partner:admin` | App | Look up sellers, issue / list / rotate / revoke seller keys, manage app webhooks |
-| `boot_db:contribute` | App | Submit and read boot-database contributions only. Never granted on a seller key. |
+| `boot_db:contribute` | App | **Phase 2 (later, not part of the current build).** Submit and read boot-database contributions only. Never granted on a seller key. Do not implement this scope in the current build. |
 | `seller:read` | Seller | Account, verification, profile, completeness |
 | `inventory:read` | Seller | List and get listings |
 | `inventory:write` | Seller | Create, update, and media upload |
@@ -73,7 +74,7 @@ Two kinds of credentials, neither of which is a seller password.
 | `reminders:write` | Seller or app | Optional WBW-owned sold-still-active reminders |
 
 Default seller key: `seller:read inventory:read inventory:write inventory:sell events:read`.  
-Default app token: `partner:admin`. `boot_db:contribute` is added only when WBW enables boot-database intake for WBW Lister.
+Default app token: `partner:admin`. The scope `boot_db:contribute` is **Phase 2 (later, not part of the current build)** and should not be issued in Phase 1.
 
 ### 3.2 Rate limits
 
@@ -82,7 +83,7 @@ Return `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Reset`, and on
 | Key | Reads | Writes | Notes |
 | --- | --- | --- | --- |
 | Seller | 300 | 60 | Media: 30 upload inits/min, 100 MB each |
-| App / partner | 600 | 120 | Boot-database: 30 batches/min, max 100 records per batch |
+| App / partner | 600 | 120 | Phase 2 later: boot-database 30 batches/min, max 100 records per batch |
 
 ---
 
@@ -139,7 +140,7 @@ Pass `cursor` and optional `limit` (default 50, max 200). Do not use offset pagi
 
 ## 5. Endpoints
 
-There are **27** endpoints, grouped below. Optional reminder endpoints are included because WBW may want to own that notification; the default path does not require them (see [§9](#9-seller-reminders-sold-but-still-active-in-the-primary-tool)).
+There are **24 Phase 1 endpoints** in the current build (including two optional reminder endpoints; the default reminder path does not require them — see [§9](#9-seller-reminders-sold-but-still-active-in-the-primary-tool)), plus **3 Phase 2 endpoints** for boot-database contributions ([§10](#10-boot-database-contributions--phase-2-later-not-part-of-the-current-build)). Phase 2 is later and is **not part of the current build**.
 
 ### 5.1 App token
 
@@ -152,7 +153,7 @@ Exchange the app-level `client_id` and `client_secret` for a short-lived partner
   "grant_type": "client_credentials",
   "client_id": "wbw_live_id_...",
   "client_secret": "wbw_live_secret_...",
-  "scope": "partner:admin boot_db:contribute"
+  "scope": "partner:admin"
 }
 ```
 
@@ -161,7 +162,7 @@ Exchange the app-level `client_id` and `client_secret` for a short-lived partner
   "access_token": "wbw_live_at_...",
   "token_type": "Bearer",
   "expires_in": 3600,
-  "scope": "partner:admin boot_db:contribute"
+  "scope": "partner:admin"
 }
 ```
 
@@ -441,9 +442,7 @@ App token, `partner:admin`.
     "listing.sold",
     "listing.changed",
     "seller.verification_changed",
-    "listing.sold_still_active_at_source",
-    "boot_db.contribution_accepted",
-    "boot_db.contribution_rejected"
+    "listing.sold_still_active_at_source"
   ],
   "secret": null
 }
@@ -499,7 +498,7 @@ Event body shape:
 `member_message.received` `data` should include `conversation_id`, `message_id`, `listing_id` (if any), `from` (member public handle only, not email), `preview` (short, no full PII), and a URL the seller can open on WBW. Do not send payment account numbers or private addresses over the webhook.
 
 `listing.sold_still_active_at_source` is **optional** and only used if WBW owns the reminder (see §9).  
-`boot_db.contribution_accepted` / `boot_db.contribution_rejected` are used for boot-database submissions (see §10).
+**Phase 2 (later, not part of the current build):** `boot_db.contribution_accepted` / `boot_db.contribution_rejected` are used for boot-database submissions (see §10). Do not implement these events in Phase 1.
 
 ### 7.3 Polling fallback
 
@@ -572,7 +571,9 @@ These two endpoints are optional. The default path in §9.1 ships in WBW Lister 
 
 ---
 
-## 10. Boot-database contributions
+## 10. Boot-database contributions — Phase 2 (later, not part of the current build)
+
+This entire section, its three endpoints, the `boot_db:contribute` scope, and the `boot_db.contribution_accepted` / `boot_db.contribution_rejected` webhooks are **Phase 2 (later, not part of the current build)**. WBW should not implement them in the first API delivery. They are specified now so the later contract is clear.
 
 The WBW API should automatically accept verifiable data that WBW Lister gathers from sellers into the **WBW boot database only** — never into other site content (marketplace listings, community posts, seller bios, encyclopedia prose beyond the structured boot record, and so on).
 
@@ -584,7 +585,7 @@ WBW Lister itself **never writes to westernbootworld.com** until WBW builds and 
 - **Or** a **new** maker or style, only when there is clear evidence (typically a label photo, plus the listing and a source URL).
 - Confidence sent by WBW Lister is always `exact`. We will not submit guessed or partial facts.
 
-### 10.1 `POST /api/v1/boot-database/contributions`
+### 10.1 `POST /api/v1/boot-database/contributions` — Phase 2 (later, not part of the current build)
 
 App-level token **only**, scope `boot_db:contribute`. Not allowed on a seller key. Batch, with an `Idempotency-Key`. Max 100 records per call.
 
@@ -620,11 +621,11 @@ App-level token **only**, scope `boot_db:contribute`. Not allowed on a seller ke
 
 For a new maker or style, set `action` to `new_maker` or `new_style` and include evidence. WBW should hold those for review rather than auto-publishing if that is WBW’s editorial practice; the API still accepts the batch and returns a per-row status.
 
-### 10.2 `GET /api/v1/boot-database/contributions`
+### 10.2 `GET /api/v1/boot-database/contributions` — Phase 2 (later, not part of the current build)
 
 App token, same scope. Filter by `status`, `cursor`, `limit`, or `idempotency_key`.
 
-### 10.3 `GET /api/v1/boot-database/contributions/{contribution_id}`
+### 10.3 `GET /api/v1/boot-database/contributions/{contribution_id}` — Phase 2 (later, not part of the current build)
 
 Status of one record: `accepted`, `duplicate`, `conflict_pending_review`, `rejected`, `pending`. Include a short `reason` when not `accepted`.
 
@@ -644,7 +645,7 @@ No new permission is requested for:
 - `/lookup` and other public boot-database **reads**
 - Public listing and market pages
 
-WBW Lister will keep using those as **GET only**. It will not sign in, post, hold, message, or change anything on westernbootworld.com. This API is the only future write path, and boot-database writes go only to the boot database.
+WBW Lister will keep using those as **GET only**. It will not sign in, post, hold, message, or change anything on westernbootworld.com. This API is the only future write path. **Phase 2 (later, not part of the current build):** boot-database writes go only to the boot database.
 
 ---
 
@@ -669,7 +670,7 @@ WBW Lister will build and test against sandbox first. Production credentials are
 - Hash seller API keys at rest; show the raw secret once. Encrypt tokens WBW Lister stores.
 - Never accept or store a seller’s WBW password.
 - Partner `client_secret` and webhook secret are delivered only through the secure handoff in §15 — never email, SMS, or plain chat.
-- Scopes are enforced on every request. `boot_db:contribute` is app-only.
+- Scopes are enforced on every request. `boot_db:contribute` is app-only and is **Phase 2 (later, not part of the current build)**.
 - Webhook signatures are HMAC-SHA256 with a timestamp window. Endpoints should reject unsigned or stale deliveries.
 - Least PII on event payloads: public handle and a short preview, not emails, phone numbers, or payment details.
 - Log `request_id`, seller id, and outcome; never log full secrets or raw Authorization headers.
@@ -686,7 +687,7 @@ Not WBW work, but useful context:
 - Phone-sheet intake already collects profile answers and creates a BootLister seller. Shipping, returns, and payment are collected there today; WBW’s 400-character policy box is composed from those answers for hand setup. This API’s profile completeness check replaces the guesswork after a seller has a WBW account.
 - Photo optimization already runs on import. Video is a placeholder until an admin opt-in and this API’s media upload exist.
 - Sync inside BootLister today is source → BootLister (new / changed / pending sold). There is not yet a recorded “last sent to WBW” cursor. This API’s `external_id`, ETags, and `updated_since` are what make WBW a live destination.
-- Exact-only maker/style matching is already BootLister policy for optimization. The same rule applies to boot-database contributions.
+- Exact-only maker/style matching is already BootLister policy for optimization. The same rule will apply to Phase 2 boot-database contributions (later, not part of the current build).
 - No live eBay API calls are part of this request.
 
 ---
@@ -729,9 +730,9 @@ Suggested Vercel names (WBW Lister will set these once the values arrive):
 
 **Webhooks.** WBW Lister exposes an HTTPS endpoint (for example `https://bootlister.vercel.app/api/wbw/webhooks`). It is registered with `POST /webhooks`. Each delivery is checked with HMAC-SHA256 and the `WBW_WEBHOOK_SECRET` (and the timestamp window). If signatures fail or deliveries stop, WBW Lister falls back to `GET /events`. Production and sandbox use different URLs or a path prefix, and different secrets.
 
-**Boot database.** Only after this API is approved, and only with a token that includes `boot_db:contribute`, WBW Lister submits exact, evidenced contributions. Nothing is written to any other WBW surface.
+**Phase 2 boot database (later, not part of the current build).** After Phase 2 is approved, and only with a token that includes `boot_db:contribute`, WBW Lister will submit exact, evidenced contributions. Nothing is written to any other WBW surface. This is not part of the Phase 1 handoff or first production use.
 
-**Sandbox first.** WBW Lister will confirm connect, import, sync, reminders, webhooks, and (if enabled) contributions against the sandbox URL before any production client secret is used.
+**Sandbox first.** WBW Lister will confirm connect, import, sync, reminders, and webhooks against the sandbox URL before any production client secret is used. Phase 2 contributions are tested later, when that work starts.
 
 ---
 
@@ -741,17 +742,17 @@ The following is a copy-pasteable prompt for WBW’s engineering team (or their 
 
 > Build a versioned HTTPS API (`/api/v1`) for Western Boot World that WBW Lister / BootLister will use as the only write path into WBW. Do not change westernbootworld.com until this API is built and approved. Public makers-library and `/lookup` reads stay as they are (GET only).
 >
-> **Auth.** Support an app-level `client_id` / `client_secret` exchanged at `POST /api/v1/oauth/token` (client credentials) for a short-lived partner token, and one hashed-at-rest API key per seller (prefix `wbw_live_sk_` / `wbw_test_sk_`), issued, listed (metadata only), rotated, and revoked by the partner after seller consent. Never accept the seller’s password. A password change must not revoke the seller key. Scopes: `partner:admin`, `boot_db:contribute` (app only), `seller:read`, `inventory:read`, `inventory:write`, `inventory:sell`, `events:read`, optional `reminders:write`. Enforce scopes, rate limits, and `Authorization: Bearer`.
+> **Auth.** Support an app-level `client_id` / `client_secret` exchanged at `POST /api/v1/oauth/token` (client credentials) for a short-lived partner token, and one hashed-at-rest API key per seller (prefix `wbw_live_sk_` / `wbw_test_sk_`), issued, listed (metadata only), rotated, and revoked by the partner after seller consent. Never accept the seller’s password. A password change must not revoke the seller key. Scopes: `partner:admin`, `seller:read`, `inventory:read`, `inventory:write`, `inventory:sell`, `events:read`, optional `reminders:write`. Enforce scopes, rate limits, and `Authorization: Bearer`.
 >
 > **Sellers.** `GET /api/v1/sellers/lookup` (by email or username, partner only) and `GET /api/v1/sellers/{seller_id}` returning account setup, apply-to-sell status, verification (including verified phone), profile, and a `completeness` object whose required fields are contact preference (how a member should contact them), shipping policy (400 character max, matching WBW’s shipping & return policies box), location, and verified phone, plus `missing` for anything not set.
 >
 > **Inventory.** Listing JSON should cover the WBW listing fields (title, description, seller notes, price, optional price type, brand, model/style `id_text` with leading zeros preserved, custom made, sized for, size, size estimated, width, condition, material type, material, cut, color, where made, keywords, toe, heel, sole, five measurements, shipping, payment options, photos, at most one video ≤30 seconds and ≤100 MB, website URL, timestamps). Identify records by WBW `id` and client `external_id`. Endpoints: `POST /listings`, `POST /listings/bulk` (idempotent, max 100), `GET /listings` (filter `status`, `updated_since`, cursor, ETag), `GET /listings/{id}`, `PATCH /listings/{id}` (If-Match), `POST /listings/{id}/mark-sold`, `POST /listings/{id}/delist`, and two-step media upload (`POST .../media`, `POST .../media/{id}/complete`, `DELETE .../media/{id}`).
 >
-> **Webhooks and poll.** Partners register `POST/GET/PATCH/DELETE /api/v1/webhooks`. Deliver HMAC-SHA256 signed POSTs (`X-WBW-Signature` over `{timestamp}.{body}`, `X-WBW-Timestamp`, `X-WBW-Event`, `X-WBW-Delivery-Id`) with retries and backoff for: `member_message.received`, `listing.sold`, `listing.changed`, `seller.verification_changed`, optional `listing.sold_still_active_at_source`, `boot_db.contribution_accepted`, `boot_db.contribution_rejected`. Provide `GET /api/v1/events` as a polling fallback with the same event objects.
+> **Webhooks and poll.** Partners register `POST/GET/PATCH/DELETE /api/v1/webhooks`. Deliver HMAC-SHA256 signed POSTs (`X-WBW-Signature` over `{timestamp}.{body}`, `X-WBW-Timestamp`, `X-WBW-Event`, `X-WBW-Delivery-Id`) with retries and backoff for: `member_message.received`, `listing.sold`, `listing.changed`, `seller.verification_changed`, optional `listing.sold_still_active_at_source`. Provide `GET /api/v1/events` as a polling fallback with the same event objects.
 >
 > **Reminders (optional on the WBW side).** WBW Lister will, by default, email/SMS the seller when sync shows an item sold on WBW or elsewhere but still active in the seller’s primary inventory, with dedupe, a 3-day / 7-day / weekly cadence, admin visibility, and clear-on-delist. If WBW wants to own that notice, also build `POST` and `GET /api/v1/sellers/{id}/reminders` and/or the `listing.sold_still_active_at_source` event. Do not auto-delist the source item.
 >
-> **Boot database.** `POST /api/v1/boot-database/contributions` (batch, idempotency keys, provenance: seller_id, listing external_id, source URL, label/photo evidence, confidence always `exact`) plus `GET` list and `GET` by id. Scope `boot_db:contribute` on the app key only. Accept only exact maker + full style/model-number matches (no fuzzy or partial; keep leading zeros) or a new maker/style with clear evidence. Dedupe against existing entries. Additive only: never overwrite an existing record; flag conflicts for WBW review. Apply accepted facts only to the boot database, never to other site content. Fire contribution accepted/rejected webhooks.
+> **Phase 2 comes later** (boot-database contributions, the `boot_db:contribute` scope, and `boot_db.contribution_*` webhooks). It is not part of this build; see section 10 of the spec when that work starts.
 >
 > **Platform.** Standard error envelope (`error.code`, `message`, `details`, `request_id`). Cursor pagination. Idempotency-Key on writes (24 hour retention). Sandbox host with separate credentials and test sellers. Rate-limit headers and 429 + Retry-After.
 >
@@ -767,7 +768,7 @@ The following is a copy-pasteable prompt for WBW’s engineering team (or their 
 2. Whether listing create may pass existing HTTPS photo URLs for WBW to fetch, or media must always be a signed upload.
 3. Maximum photos per listing, allowed image types, and whether alt text is stored.
 4. Whether WBW wants to own sold-still-active reminders (§9.2) or leave them entirely to WBW Lister.
-5. Editorial workflow for new maker/style contributions: auto-accept exact additive facts on known styles, and review-queue everything else?
+5. **Phase 2 (later, not part of the current build):** editorial workflow for new maker/style contributions — auto-accept exact additive facts on known styles, and review-queue everything else?
 6. Token lifetime for the partner access token, and whether seller keys can have a grace period on rotate (24 hours recommended).
 7. Any additional profile fields WBW requires before a seller can list, so we can add them to `completeness.required`.
 
