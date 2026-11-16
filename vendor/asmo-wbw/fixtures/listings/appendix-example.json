@@ -1,0 +1,142 @@
+{
+  "id": 1842,
+  "seller": "danhoffenberg",
+  "source": "listperfectly",
+  "source_id": "2024-11-02 13:04:00 0123 main-0123.jpg",
+  "source_url": null,
+  "status": "review",
+  "boot": "boot",
+  "boot_score": 0.99,
+  "photos": [
+    "https://abc.public.blob.vercel-storage.com/photos/aa11.jpg",
+    "https://abc.public.blob.vercel-storage.com/photos/aa12.jpg"
+  ],
+  "src_photos": "https://listperfectly.example/main-0123.jpg\nhttps://listperfectly.example/side-0123.jpg",
+  "title": "Lucchese 1883 boots, style 0123, size 10 D",
+  "description": "Style #: 0123\nBlack cherry goat Lucchese cowboy boots, size 10 D.",
+  "id_text": "0123",
+  "price": "250",
+  "wbw_price": "250",
+  "brand": "Lucchese",
+  "sized_for": "Men",
+  "size": "10",
+  "size_estimated": null,
+  "width": "D",
+  "material_type": "Leather",
+  "material": "Goat",
+  "material_cut": null,
+  "made_in": "USA",
+  "condition": "Broken In",
+  "color": "Black Cherry",
+  "keywords": "Lucchese, 1883, goat",
+  "sole_length": "12",
+  "sole_width": "4",
+  "heel_height": "1.5",
+  "shaft_circ": "15",
+  "shaft_height": "12",
+  "sole": "Leather",
+  "heel": "Walking heel",
+  "toe": "R toe",
+  "guessed": [
+    "material_type"
+  ],
+  "verified": [
+    "brand",
+    "id_text",
+    "size",
+    "width",
+    "color",
+    "material"
+  ],
+  "opt_error": null,
+  "opt_original": {
+    "title": "Lucchese 1883 boots, style 0123, size 10 D",
+    "description": "Style #: 0123\nBlack cherry goat Lucchese cowboy boots, size 10 D.",
+    "price": "250",
+    "brand": "Lucchese",
+    "size": "10",
+    "width": "D",
+    "material": "Goat",
+    "photos": [
+      "https://abc.public.blob.vercel-storage.com/photos/aa11.jpg",
+      "https://abc.public.blob.vercel-storage.com/photos/aa12.jpg"
+    ],
+    "captured_at": "2026-11-16T15:00:00.000Z"
+  },
+  "opt_proposal": null,
+  "opt_applied": {
+    "media": "lens",
+    "scope": "images-seo",
+    "facts_fp": "a1b2c3d4",
+    "seo_title": "Lucchese Men's 0123 Black Cherry Goat cowboy boots size 10 D width",
+    "seo_description": "Lucchese 0123 size 10D Black Cherry. Style #: 0123 Black cherry goat Lucchese cowboy boots, size 10 D.",
+    "images": [
+      {
+        "n": 1,
+        "file": "lucchese-mens-0123-black-cherry-goat-cowboy-boots-10d-1.jpg",
+        "alt": "Lucchese Men's 0123 Black Cherry Goat cowboy boots size 10 D width - photo 1 of 2",
+        "stored_url": "https://abc.public.blob.vercel-storage.com/photos/aa11.jpg",
+        "source_renamed": false,
+        "pixels": "unchanged"
+      },
+      {
+        "n": 2,
+        "file": "lucchese-mens-0123-black-cherry-goat-cowboy-boots-10d-2.jpg",
+        "alt": "Lucchese Men's 0123 Black Cherry Goat cowboy boots size 10 D width - photo 2 of 2",
+        "stored_url": "https://abc.public.blob.vercel-storage.com/photos/aa12.jpg",
+        "source_renamed": false,
+        "pixels": "unchanged"
+      }
+    ]
+  },
+  "seller_profile": {
+    "name": "danhoffenberg",
+    "display_name": "Dan Hoffenberg",
+    "location": "Texas",
+    "website": null,
+    "brand_context": null
+  },
+  "markets": "eBay, Poshmark",
+  "sku": "0123",
+  "style_ref": {
+    "maker_name": "Lucchese",
+    "style_number": "0123",
+    "record_title": "1883 Goat Boot 0123",
+    "record_url": "https://catalog.example/record/0123",
+    "other_card_text": "Goat",
+    "status": "candidate",
+    "accepted_at": "2026-11-16T15:05:00.000Z"
+  },
+  "id_photos": [
+    {
+      "photo": 2,
+      "kind": "insole stamp",
+      "text": "0123"
+    }
+  ],
+  "id_checked_at": "2026-11-16T14:50:00.000Z",
+  "media": [
+    {
+      "n": 1,
+      "stored_url": "https://abc.public.blob.vercel-storage.com/photos/aa11.jpg",
+      "content_type": "image/jpeg",
+      "width": 2400,
+      "height": 3200,
+      "exif": {
+        "gps_present": false,
+        "orientation": 1
+      }
+    },
+    {
+      "n": 2,
+      "stored_url": "https://abc.public.blob.vercel-storage.com/photos/aa12.jpg",
+      "content_type": "image/jpeg",
+      "width": 2400,
+      "height": 3200,
+      "exif": {
+        "gps_present": true,
+        "orientation": 1
+      }
+    }
+  ]
+}

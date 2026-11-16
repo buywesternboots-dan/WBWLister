@@ -1,0 +1,21 @@
+[project]
+name = "asmo-wbw"
+version = "0.2.0"
+description = "Western Boot World naming tool (asmoWBW). Standalone sibling of ASMO."
+requires-python = ">=3.11"
+readme = "README.md"
+authors = [{ name = "Spades Quiz / asmoWBW" }]
+
+[project.scripts]
+asmo-wbw = "asmo_wbw.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["asmo_wbw*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
