@@ -1,23 +1,14 @@
-import { cookies } from 'next/headers';
-import { redirect } from 'next/navigation';
 import PublicIntakeForm from '../../components/public-intake-form';
-import { sessionSecret } from '../../lib/gate';
-import { readSession } from '../../lib/session';
 
-export const dynamic = 'force-dynamic';
-export const metadata = { title: 'Seller intake sheet · BootLister', robots: { index: false, follow: false } };
+export const metadata = { title: 'Seller intake · BootLister', robots: { index: false, follow: false } };
 
-// Admin-only phone sheet. Dan fills it in while talking to the seller. Signed-out visitors go to /login.
-export default async function IntakePage() {
-  const jar = await cookies();
-  const who = await readSession(jar.get('auth')?.value, sessionSecret());
-  if (!who) redirect('/login');
-  if (who.role !== 'admin') redirect('/');
+// Open form, no sign-in (Dan, Nov 15 11:35 PM). Often filled in by Dan on a call with the seller.
+export default function IntakePage() {
   return (
     <main>
       <style>{css}</style>
-      <h1>Seller intake sheet</h1>
-      <p className="intro">For calls with a new seller. Saving creates the BootLister seller, then shows what to paste into WBW.</p>
+      <h1>Seller intake</h1>
+      <p className="intro">Saving creates the BootLister seller, then shows what to paste into Western Boot World.</p>
       <PublicIntakeForm />
     </main>
   );
@@ -58,5 +49,6 @@ h3{margin:12px 0 0;font-size:1rem;color:#1f6f6b}
 .wbw-value{grid-column:1;white-space:pre-wrap;word-break:break-word}
 .wbw-row .copy{grid-column:2;grid-row:1/span 2;width:auto!important;padding:8px 12px}
 .warn{color:#a3261b}
+.hp{position:absolute;left:-10000px;width:1px;height:1px;overflow:hidden}
 @media(max-width:640px){main{padding:12px 12px 40px}input,select,textarea,button{width:100%;box-sizing:border-box}}
 `;

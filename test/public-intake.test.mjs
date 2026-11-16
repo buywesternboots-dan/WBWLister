@@ -7,7 +7,7 @@ import { publicIntakeResponse } from '../app/api/public-intake/route.js';
 import { intakeSubmissionsResponse } from '../app/api/intake-submissions/route.js';
 import { decide } from '../lib/gate.js';
 import { decryptSecret, encryptSecret, hasIntakeSecret, intakeKeyMaterial } from '../lib/intake-crypto.js';
-import { publicIntakeView, validatePublicIntake } from '../lib/public-intake.js';
+import { HONEYPOT, isHoneypot, publicIntakeView, validatePublicIntake } from '../lib/public-intake.js';
 import { DUPLICATE_MESSAGES, PAYMENT_METHODS, PRICE_FREQUENCIES, EMAIL_PREFS, EMAIL_PREFS_INTRO, INTAKE_LIMITS, USERNAME_RE } from '../lib/public-intake-constants.js';
 import { sessionToken } from '../lib/session.js';
 
@@ -19,23 +19,20 @@ const valid = (extra = {}) => ({
   password: 'temporary1', import_mode: 'draft', has_wbw_account: 'no', ...extra,
 });
 
-describe('intake sheet access (admin only)', () => {
-  it('sends signed-out visitors to /login and keeps every intake API behind a session', async () => {
-    assert.deepEqual(await decide('/intake', '', ENV), { type: 'redirect', to: '/login' });
-    for (const m of ['POST', 'GET']) assert.deepEqual(await decide('/api/public-intake', '', ENV, m), { type: 'json', status: 401, error: 'Please log in.' });
+describe('intake access (open form, no sign-in)', () => {
+  it('lets anyone open /intake and POST the form; everything else stays behind a session', async () => {
+    assert.deepEqual(await decide('/intake', '', ENV), { type: 'next' });
+    assert.deepEqual(await decide('/api/public-intake', '', ENV, 'POST'), { type: 'next' });
+    assert.deepEqual(await decide('/api/public-intake', '', ENV, 'GET'), { type: 'json', status: 401, error: 'Please log in.' });
     assert.deepEqual(await decide('/api/public-intake/check', '', ENV, 'GET'), { type: 'json', status: 401, error: 'Please log in.' });
     assert.deepEqual(await decide('/api/intake', '', ENV, 'POST'), { type: 'json', status: 401, error: 'Please log in.' });
     assert.deepEqual(await decide('/api/intake-submissions', '', ENV), { type: 'json', status: 401, error: 'Please log in.' });
     const seller = await sessionToken('seller:ada', ENV.APP_PASSWORD);
-    const sd = await decide('/intake', seller, ENV);
-    assert.deepEqual([sd.type, sd.to], ['redirect', '/seller']);
-    const admin = await sessionToken('admin', ENV.APP_PASSWORD);
-    assert.equal((await decide('/intake', admin, ENV)).type, 'next');
+    assert.equal((await decide('/intake', seller, ENV)).type, 'next');
   });
-  it('checks for an admin session on the page itself', () => {
+  it('has no sign-in check on the page', () => {
     const page = readFileSync(new URL('../app/intake/page.js', import.meta.url), 'utf8');
-    assert.match(page, /if \(!who\) redirect\('\/login'\)/);
-    assert.match(page, /if \(who\.role !== 'admin'\) redirect\('\/'\)/);
+    assert.doesNotMatch(page, /readSession|redirect\(|cookies\(/);
   });
 });
 
@@ -106,26 +103,29 @@ describe('temporary password encryption', () => {
   });
 });
 
-describe('intake sheet API', () => {
-  it('needs an admin session, saves, and returns the new seller without the password', async () => {
+describe('intake API (open)', () => {
+  it('accepts a form with no session, drops honeypot posts, rate-limits, and returns only the new seller name', async () => {
     const submitted = [];
-    const db = { async submit(body) { submitted.push(body); return { ok: true, id: 9, seller_name: 'ada_boots' }; } };
-    const post = (token, body) => new Request('http://localhost/api/public-intake', {
-      method: 'POST', headers: { 'content-type': 'application/json', ...(token ? { 'x-auth': token } : {}) }, body: JSON.stringify(body),
+    const db = {
+      async admit(key) { return key.includes('blocked') ? { ok: false } : { ok: true }; },
+      async submit(body) { submitted.push(body); return { ok: true, id: 9, seller_name: 'ada_boots' }; },
+    };
+    const post = (body, headers = {}) => new Request('http://localhost/api/public-intake', {
+      method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify(body),
     });
-    await assert.rejects(() => publicIntakeResponse(post('', valid()), db, ENV), /log in/);
-    const seller = await sessionToken('seller:ada', ENV.APP_PASSWORD);
-    await assert.rejects(() => publicIntakeResponse(post(seller, valid()), db, ENV), /admin/);
-    assert.equal(submitted.length, 0);
-    const admin = await sessionToken('admin', ENV.APP_PASSWORD);
-    const ok = await publicIntakeResponse(post(admin, valid()), db, ENV);
-    assert.deepEqual(ok, { ok: true, id: 9, seller_name: 'ada_boots' });
+    const ok = await publicIntakeResponse(post(valid()), db, ENV);
+    assert.deepEqual(ok, { ok: true, seller_name: 'ada_boots' });
+    assert.equal(submitted.length, 1);
     assert.equal(JSON.stringify(ok).includes('temporary1'), false);
-    // No honeypot or rate limit any more: a "company" field is just ignored.
-    await publicIntakeResponse(post(admin, valid({ company: 'x' })), db, ENV);
-    assert.equal(submitted.length, 2);
-    const route = readFileSync(new URL('../app/api/public-intake/route.js', import.meta.url), 'utf8');
-    assert.doesNotMatch(route, /isHoneypot|admit|429/);
+    assert.equal('id' in ok, false);
+    const honey = await publicIntakeResponse(post(valid({ [HONEYPOT]: 'spam' })), db, ENV);
+    assert.deepEqual(honey, { ok: true });
+    assert.equal(submitted.length, 1);
+    assert.equal(isHoneypot({ [HONEYPOT]: '' }), false);
+    await assert.rejects(() => publicIntakeResponse(post(valid(), { 'x-forwarded-for': 'blocked' }), {
+      async admit() { return { ok: false }; },
+      async submit() { throw new Error('should not submit'); },
+    }, ENV), /wait a bit/);
   });
 });
 
@@ -161,8 +161,8 @@ describe('admin intake submissions', () => {
   });
 });
 
-describe('intake sheet page', () => {
-  it('is a noindex admin sheet with Required and Optional sections that saves and creates the seller', () => {
+describe('intake page', () => {
+  it('is a noindex open form with Required and Optional sections that saves and creates the seller', () => {
     const page = readFileSync(new URL('../app/intake/page.js', import.meta.url), 'utf8');
     const form = readFileSync(new URL('../components/public-intake-form.js', import.meta.url), 'utf8');
     const adminUi = readFileSync(new URL('../components/intake-submissions.js', import.meta.url), 'utf8');
@@ -177,7 +177,8 @@ describe('intake sheet page', () => {
     assert.match(form, /\/api\/public-intake['"]/);
     assert.match(form, /Save and create seller/);
     assert.match(form, /<WbwSetupPanel/);
-    assert.doesNotMatch(form, /\/api\/intake['"]|HONEYPOT|\/api\/public-intake\/check|Continue/);
+    assert.match(form, /HONEYPOT/);
+    assert.doesNotMatch(form, /\/api\/intake['"]|\/api\/public-intake\/check|Continue/);
     assert.match(adminUi, /Saving creates the BootLister seller/);
     assert.doesNotMatch(adminUi, /Approve application|>Decline<|Create intake link/);
     assert.match(store, /createSellerFromIntake\(row\.id/);
@@ -296,8 +297,8 @@ describe('trimmed intake (Dan, Nov 15 3:20 AM)', () => {
 
 describe('duplicate check at submit', () => {
   it('rejects a duplicate email or username at save, with admin-facing messages; the public check endpoint is gone', () => {
-    assert.equal(DUPLICATE_MESSAGES.seller, 'This seller is already on BootLister (same email or username).');
-    assert.equal(DUPLICATE_MESSAGES.intake, 'There is already an intake for this email or username. See Seller intakes in admin.');
+    assert.equal(DUPLICATE_MESSAGES.seller, 'That email or username is already on BootLister. Sign in instead.');
+    assert.equal(DUPLICATE_MESSAGES.intake, 'We already have an intake for that email or username. Dan will be in touch.');
     assert.equal(existsSync(new URL('../app/api/public-intake/check/route.js', import.meta.url)), false);
     const store = readFileSync(new URL('../lib/public-intake-store.js', import.meta.url), 'utf8');
     assert.match(store, /DUPLICATE_MESSAGES/);
@@ -625,5 +626,18 @@ describe('password show/hide', () => {
     assert.match(form, /type=\{showPw \? 'text' : 'password'\}/);
     const block = form.split("form.has_wbw_account === 'no' && <label>Temporary WBW password")[1].split('</label>}')[0];
     assert.match(block, /className="eye"/);
+  });
+});
+
+describe('result panel shows only this submission', () => {
+  it('builds the WBW panel from the browser’s own answers; the API returns no other intake data', () => {
+    const form = readFileSync(new URL('../components/public-intake-form.js', import.meta.url), 'utf8');
+    const done = form.split('if (done) {')[1].split('return (')[0];
+    assert.match(done, /const row = \{ \.\.\.form,/);
+    assert.doesNotMatch(form, /intake-submissions|fetch\([^)]*GET/);
+    const panel = readFileSync(new URL('../components/wbw-setup-panel.js', import.meta.url), 'utf8');
+    assert.doesNotMatch(panel, /fetch\(/);
+    const route = readFileSync(new URL('../app/api/public-intake/route.js', import.meta.url), 'utf8');
+    assert.match(route, /return \{ ok: true, seller_name: out\?\.seller_name \?\? null \}/);
   });
 });

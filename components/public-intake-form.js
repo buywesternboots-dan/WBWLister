@@ -2,7 +2,7 @@
 import { useState } from 'react';
 import WbwSetupPanel from './wbw-setup-panel';
 import { WBW_PASSWORD_RULE } from '../lib/wbw-account';
-import { PAYMENT_METHODS, PRICE_FREQUENCIES, EMAIL_PREFS, EMAIL_PREFS_INTRO, IMPORT_MODES, INTAKE_LIMITS as L, MAX_PHOTO_BYTES, USERNAME_RE } from '../lib/public-intake-constants';
+import { PAYMENT_METHODS, PRICE_FREQUENCIES, EMAIL_PREFS, EMAIL_PREFS_INTRO, HONEYPOT, IMPORT_MODES, INTAKE_LIMITS as L, MAX_PHOTO_BYTES, USERNAME_RE } from '../lib/public-intake-constants';
 
 async function resizePhoto(file) {
   if (file.size > MAX_PHOTO_BYTES) throw new Error('Please use a photo of 5 MB or less.');
@@ -30,6 +30,7 @@ const empty = {
   email_prefs: Object.fromEntries(EMAIL_PREFS.map(([k]) => [k, true])),
   import_mode: '', has_wbw_account: '', password: '',
   pricing_change: '', pricing_notes: '', shipping_policy: '', return_policy: '', payment_methods: { methods: [], other: '' },
+  [HONEYPOT]: '',
 };
 
 function YesNo({ name, legend, form, set, required = false, labels = ['Yes', 'No'] }) {
@@ -42,7 +43,8 @@ function YesNo({ name, legend, form, set, required = false, labels = ['Yes', 'No
   );
 }
 
-// Admin-only phone sheet. Dan reads each prompt to the seller and types the answer.
+// Open intake form (no sign-in). Worded as prompts Dan reads to the seller on a call.
+// The result panel is built only from this browser's own answers; the server returns nothing else.
 export default function PublicIntakeForm() {
   const [form, setForm] = useState(empty);
   const [photo, setPhoto] = useState('');
@@ -96,7 +98,7 @@ export default function PublicIntakeForm() {
       <div className="panel">
         <p className="known" role="status">Saved. BootLister seller {done.seller_name ? <b>{done.seller_name}</b> : ''} is set up.</p>
         <WbwSetupPanel row={row} password={pw} />
-        <p><a href="/intake">Start a new sheet</a> · <a href="/">Back to BootLister</a></p>
+        <p><a href="/intake">Start a new form</a></p>
       </div>
     );
   }
@@ -184,6 +186,10 @@ export default function PublicIntakeForm() {
         </label>
         <label>Ask: anything else we should know?<textarea rows="3" {...field('notes')} /></label>
       </fieldset>
+
+      <div className="hp" aria-hidden="true">
+        <label>Company<input tabIndex={-1} autoComplete="off" value={form[HONEYPOT]} onChange={set(HONEYPOT)} /></label>
+      </div>
 
       {err && <p className="err" role="alert">{err}</p>}
       <button type="submit" className="primary" disabled={busy}>{busy ? 'Saving…' : 'Save and create seller'}</button>
