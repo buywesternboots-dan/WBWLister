@@ -6,6 +6,7 @@ import { exportReadiness } from '../lib/readiness';
 import OptimizePanel from '../components/optimize-panel';
 import { packCsvChunks } from '../lib/csv';
 import { toCsv } from '../lib/export';
+import { fillSummary, prepareForExport, toFullCsv } from '../lib/pipeline';
 import { CHANNELS, post } from '../lib/crosspost';
 import { isExtensionShop, sellerFormState, sellerSavePayload } from '../lib/seller-links';
 import { intakeLabel } from '../lib/intake';
@@ -57,6 +58,11 @@ const SELLER_ADVANCED = [
   ['ship_price', 'Shipping price (USD)'], ['handle_days', 'Handling time (business days)'],
   ['return_days', 'Return window in days (blank = final sale)'],
   ['brand_context', 'Brand context on WBW listings (from the WBW brand page)', 'toggle'],
+  ['h5', 'Pre-drop extras (admin only, off unless turned on; photo names, alt text and SEO always run)', 'h'],
+  ['extra_text', 'Extra description info (adds the "about the maker" note to the description)', 'optin'],
+  ['video_opt', 'Video from photos (placeholder until the video tool is plugged in)', 'optin'],
+  ['h6', 'Store policies (filled from intake; go on every WBW export)', 'h'],
+  ['shipping_policy', 'Shipping', 'area'], ['payment_methods', 'Payment options (e.g. PayPal, Venmo)'], ['return_policy', 'Returns', 'area'],
 ];
 // Export: every field on the WBW "Sell a pair" form, then the extra columns this import still needs. Built in lib/export.js.
 const download = (rows, brands = {}, s = {}) => {
@@ -156,6 +162,23 @@ export default function Screen({ admin = false }) {
     download(rows, names.length ? await api('GET', null, `?names=${encodeURIComponent(names)}`, '/api/brand').catch(() => ({})) : {}, current);
     if (note) setErr(note);
   };
+  // Full WBW export for this seller: makes sure every listing has had the photo/SEO pass, then downloads every WBW field
+  // (selected rows, or every row on this tab) with a readiness status per row and a fill-rate summary.
+  const exportFull = async () => {
+    setErr('');
+    try {
+      for (let n = 0; n < 10; n++) if (!(await api('PATCH', { action: 'optimize-backfill' })).left) break;
+      const fresh = await api('GET', null, `?status=${tab}`);
+      const rows = sel.size ? fresh.filter(i => sel.has(i.id)) : fresh;
+      if (!rows.length) return setErr('Nothing to export on this tab.');
+      const names = current?.brand_context === 'off' ? [] : [...new Set(rows.map(r => r.brand).filter(Boolean))];
+      const brands = names.length ? await api('GET', null, `?names=${encodeURIComponent(names)}`, '/api/brand').catch(() => ({})) : {};
+      const { csv, summary } = toFullCsv(rows, { origin: location.origin, brands, seller: current ?? {} });
+      Object.assign(document.createElement('a'), { href: URL.createObjectURL(new Blob([csv], { type: 'text/csv' })), download: `wbw-full-${who}-${new Date().toISOString().slice(0, 10)}.csv` }).click();
+      setRunState({ label: `WBW full export: ${fillSummary(summary)}` });
+      load();
+    } catch (e) { setErr(e.message); }
+  };
   const prepareOpt = i => {
     setErr(''); setOptBusy(true);
     api('PATCH', { ids: [i.id], action: 'optimize' })
@@ -235,22 +258,24 @@ export default function Screen({ admin = false }) {
   // The last call marks listings that the new file no longer contains.
   const importLp = async file => {
     setErr(''); setFailed([]);
-    setRunState({ label: 'Reading the List Perfectly CSV…', busy: true, done: 0, total: 1 });
+    setRunState({ label: 'Reading the CSV…', busy: true, done: 0, total: 1 });
     try {
       const parts = packCsvChunks(await file.text());
       if (!parts.length) throw new Error('No listings found in that CSV.');
       const totals = { new: 0, updated: 0, sold: 0, notCowboy: 0, skipped: 0, missingGroupPrice: 0 }, seen = [];
+      let source = 'listperfectly';
       const total = parts.reduce((n, p) => n + p.count, 0);
-      setRun({ label: 'Importing List Perfectly CSV', done: 0, total });
+      setRun({ label: 'Importing CSV', done: 0, total });
       let doneRows = 0;
       for (const part of parts) {
         const r = await api('POST', { csv: part.csv }, '', '/api/import/lp');
         for (const k of Object.keys(totals)) totals[k] += r[k] || 0;
         seen.push(...(r.sourceIds || []));
+        if (r.source) source = r.source;
         doneRows += part.count;
         setRun({ done: doneRows });
       }
-      totals.sold += (await api('POST', { done: true, sourceIds: seen }, '', '/api/import/lp')).removed || 0;
+      totals.sold += (await api('POST', { done: true, sourceIds: seen, source }, '', '/api/import/lp')).removed || 0;
       const missingGroup = totals.missingGroupPrice ? `, ${totals.missingGroupPrice} missing a group price` : '';
       setRunState({ label: `${totals.new} new, ${totals.updated} updated, ${totals.sold} sold or removed, ${totals.notCowboy} not cowboy boots, ${totals.skipped} skipped${missingGroup}` });
     } catch (e) { setRunState(null); setErr(e.message); }
@@ -311,6 +336,7 @@ export default function Screen({ admin = false }) {
           {SELLER_ADVANCED.map(([f, l, kind]) => kind === 'h' ? <h3 key={f}>{l}</h3> :
             <label key={f}>{l}{kind === 'area' ? <textarea rows="3" value={sellerForm[f] ?? ''} onChange={setForm(f)} />
               : kind === 'toggle' ? <select value={sellerForm[f] ?? 'on'} onChange={setForm(f)}><option value="on">On</option><option value="off">Off</option></select>
+              : kind === 'optin' ? <select value={sellerForm[f] === 'on' ? 'on' : 'off'} onChange={setForm(f)}><option value="off">No</option><option value="on">Yes</option></select>
               : <input value={sellerForm[f] ?? ''} onChange={setForm(f)} />}</label>)}
         </details>
         <span><button className="primary" onClick={saveSeller}>Save seller</button><button onClick={() => setSellerForm(null)}>Cancel</button>
@@ -325,7 +351,7 @@ export default function Screen({ admin = false }) {
         <button disabled={!link || run?.busy} onClick={() => startImport(true)}>Sync</button>
         {run?.label && <div className="run">{run.total > 0 && <progress value={run.done} max={run.total} />}
           <small>{run.label}{run.total > 0 && run.done < run.total && ` — ${run.done} of ${run.total}`}</small></div>}
-        <label className="file">Import List Perfectly CSV
+        <label className="file">Import List Perfectly CSV (or any spreadsheet CSV)
           <input type="file" accept=".csv,text/csv" disabled={run?.busy} onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) importLp(f); }} />
         </label>
         {failed.length > 0 && <details className="failed">
@@ -358,6 +384,7 @@ export default function Screen({ admin = false }) {
           </span>}
           {admin && <button className="primary" onClick={() => bulk({ action: 'approve' })}>Approve selected</button>}
           {admin && live && <button className="primary" onClick={exportCsv}>Export CSV</button>}
+          {admin && live && <button onClick={exportFull}>WBW full export</button>}
           {live && <button onClick={() => bulk({ action: 'remove' })}>Remove</button>}
           {tab === 'pending' && <button className="primary" onClick={() => bulk({ action: 'sold' })}>Mark sold</button>}
           {tab === 'pending' && <button onClick={() => bulk({ action: 'restore' })}>Still for sale</button>}
@@ -408,6 +435,7 @@ export default function Screen({ admin = false }) {
               {i.source === 'listperfectly' && <small>List Perfectly{i.markets ? ` · listed on ${i.markets}` : ''}</small>}
               {i.changed_at && <small className="warn">Changed at source — review before it goes back to WBW</small>}
               <small className={ready.ready ? '' : 'warn'} data-export-ready>{ready.ready ? 'Ready for export' : `Export: ${ready.missing.join('; ')}`}</small>
+              {(() => { const p = prepareForExport(i, { seller: current ?? {} }); return <small className={p.status === 'ready' ? '' : 'warn'} data-pre-drop>Pre-drop: {p.status}{p.missing.length ? ` · blank on WBW: ${p.missing.join(', ')}` : ''}</small>; })()}
               {i.opt_error && <small className="err">Optimization failed: {i.opt_error}</small>}
               {i.status === 'pending' && <small className="warn">Gone from the source — confirm sold, or it's marked sold in {daysLeft(i)} days</small>}
               {i.source_condition && <small>Source condition: {i.source_condition}</small>}

@@ -234,6 +234,6 @@ test('optimize-backfill regenerates lens media and is still a manual admin actio
   const create = src.slice(src.indexOf('export async function createItem'), src.indexOf('export async function syncSource'));
   assert.equal(create.includes('backfillOptimization'), false);
   const screen = read('app/screen.js');
-  assert.equal(screen.match(/optimize-backfill/g).length, 1);
+  assert.equal(screen.match(/optimize-backfill/g).length, 2); // Optimize existing + WBW full export pre-drop pass
   assert.match(screen, /onClick=\{\(\) => act\(\{ action: 'optimize-backfill' \}\)\}>Optimize existing/);
 });
