@@ -178,6 +178,39 @@ export default function Screen({ admin = false }) {
       .catch(e => setErr(e.message))
       .finally(() => setOptBusy(false));
   };
+  const runAsmo = async ids => {
+    if (!ids?.length) return setErr('Nothing to run ASMOwbw on.');
+    setErr('');
+    setRunState({ label: 'ASMOwbw…', done: 0, total: ids.length, busy: true });
+    let done = 0, optimized = 0, failed = 0, skipped = 0, photos = 0;
+    const chunk = 10;
+    try {
+      for (let i = 0; i < ids.length; i += chunk) {
+        const part = await api('PATCH', { action: 'asmowbw', ids: ids.slice(i, i + chunk) });
+        done += part.processed || ids.slice(i, i + chunk).length;
+        optimized += part.optimized || 0;
+        failed += part.failed || 0;
+        skipped += part.skipped || 0;
+        photos += part.photos || 0;
+        setRun({ done, total: ids.length, label: `ASMOwbw: ${optimized} updated${failed ? `, ${failed} failed` : ''}` });
+      }
+      setRunState({
+        label: `ASMOwbw finished: ${optimized} listing(s) updated, ${photos} photo(s) named${failed ? `, ${failed} failed` : ''}${skipped ? `, ${skipped} skipped` : ''}. Original photos kept. Titles, descriptions, prices, and sizes were not changed.`,
+      });
+      setSel(new Set());
+      load();
+    } catch (e) { setRunState(null); setErr(e.message); }
+  };
+  const undoAsmo = async ids => {
+    if (!ids?.length) return setErr('Select at least one item to undo ASMOwbw.');
+    setErr('');
+    try {
+      const r = await api('PATCH', { action: 'asmowbw-undo', ids });
+      setRunState({ label: `ASMOwbw undo: ${r.undone || 0} listing(s) restored${r.skipped ? `, ${r.skipped} had nothing to undo` : ''}.` });
+      setSel(new Set());
+      load();
+    } catch (e) { setErr(e.message); }
+  };
   const saveSeller = () => api('POST', sellerSavePayload(sellerForm, { rename_from: sellerForm.created_at && current?.name }), '', '/api/sellers')
     .then(s => { setSellerForm(null); s.name === who ? loadSellers() : switchTo(s.name); }).catch(e => setErr(e.message));
   const saveIntake = body => {
@@ -279,6 +312,12 @@ export default function Screen({ admin = false }) {
         <button className="primary" onClick={() => setSellerForm(sellerFormState({ sync: 'off' }))}>+ Add seller</button></>}
         {!admin && current?.name && <button type="button" onClick={() => setIntakeOpen(true)}>{current.intake?.done ? 'Update intake' : 'Finish intake'}</button>}
         {admin && who && <button type="button" onClick={() => act({ action: 'optimize-backfill' })}>Optimize existing</button>}
+        {admin && who && <button type="button" data-asmowbw disabled={run?.busy} onClick={() => {
+          const ids = sel.size ? [...sel] : shown.map(i => i.id);
+          if (!ids.length) return setErr('Nothing to run ASMOwbw on.');
+          if (!sel.size && !confirm(`Run ASMOwbw on all ${ids.length} listings in this view? Photo names, alt text, and web-sized copies may change. Titles, descriptions, prices, and sizes stay the same. Original photos are kept.`)) return;
+          runAsmo(ids);
+        }}>ASMOwbw</button>}
         {admin && <a className="src" href="/bootlister-extension-0.19.zip" download title="Needed for Facebook and Depop imports">Chrome extension 0.19{ext ? ' ✓' : ''}</a>}
         {admin && <a className="src" href="/admin/bugs">Bug reports</a>}
         {!admin && <a className="src" href={WBW_ACCOUNT_URL} target="_blank" rel="noopener noreferrer">{WBW_ACCOUNT_LABEL}</a>}
@@ -364,6 +403,8 @@ export default function Screen({ admin = false }) {
           {!live && tab !== 'pending' && <button onClick={() => bulk({ action: 'restore' })}>Restore</button>}
           {admin && <button onClick={scan}>Scan photos for ID info</button>}
           {admin && <button onClick={() => { const to = prompt('Move the selected items to which seller?'); if (to) bulk({ action: 'move', to }); }}>Move to seller…</button>}
+          {admin && <button type="button" data-asmowbw disabled={run?.busy} onClick={() => runAsmo([...sel])}>ASMOwbw</button>}
+          {admin && <button type="button" data-asmowbw-undo disabled={run?.busy} onClick={() => undoAsmo([...sel])}>Undo ASMOwbw</button>}
           {admin && <button onClick={() => confirm(`Delete ${sel.size} items? Their photos and details stay in the WBW photo archive.`) && bulk({ action: 'delete' })}>Delete</button>}
         </>}
       </div>}
@@ -403,6 +444,7 @@ export default function Screen({ admin = false }) {
               {!admin && i.approved_at && <small className="warn">Saving changes takes it off the exported list until you approve it again.</small>}
             </div> : <div className="info" onClick={() => setEdit(i)}>
               <strong>{i.title || 'Untitled'}</strong>
+              {i.asmowbw?.media === 'asmowbw' && <small data-asmowbw-applied>ASMOwbw applied{i.asmowbw.applied_at ? ` ${String(i.asmowbw.applied_at).slice(0, 10)}` : ''}</small>}
               {i.source_url && <a className="src" href={i.source_url} target="_blank" onClick={e => e.stopPropagation()}>
                 View on {{ facebook: 'Facebook', depop: 'Depop', poshmark: 'Poshmark', ebay: 'eBay' }[i.source] ?? i.source}</a>}
               {i.source === 'listperfectly' && <small>List Perfectly{i.markets ? ` · listed on ${i.markets}` : ''}</small>}

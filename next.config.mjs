@@ -2,6 +2,7 @@
 const nextConfig = {
   // Bug screenshots are JPEG/WebP data URLs, capped around 3MB. The proxy clones the body; the default 10MB already fits.
   experimental: { proxyClientMaxBodySize: '6mb' },
+  serverExternalPackages: ['sharp'],
   // The maker snapshot is read with fs from process.cwd(), so the tracer must be told to ship it.
   outputFileTracingIncludes: {
     '/api/items': ['./data/wbw-reference/makers.csv', './data/wbw-reference/models.csv'],
