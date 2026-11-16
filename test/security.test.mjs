@@ -8,7 +8,7 @@ import { decide } from '../lib/gate.js';
 import { loginResponse, registerResponse } from '../lib/login-api.js';
 import { bump, MAX_ATTEMPTS, underLimit } from '../lib/login-limit.js';
 import { allowedPhotoUrl, imageType, isPrivateAddress, safeFetch } from '../lib/net.js';
-import { LEGACY_UNTIL, readSession, sessionToken, sha256 } from '../lib/session.js';
+import { readSession, sessionToken } from '../lib/session.js';
 
 const SECRET = 'test-signing-secret';
 const ENV = { NODE_ENV: 'production', ADMIN_PASSWORD: 'staff-secret', APP_PASSWORD: SECRET };
@@ -36,20 +36,14 @@ test('an invite is one-time and hashed, and a password bumps the session version
   await assert.rejects(() => registerSeller([{ name: 'ada', email: 'ada@shop.test', phone: null }], { display_name: 'Ada', email: 'ada@shop.test', password: 'long-enough' }), /already on a seller/);
 });
 
-test('sessions expire, keep one old cookie readable, and a bad cookie is not a session', async () => {
+test('sessions expire, old cookies are rejected, and a bad cookie is not a session', async () => {
   const token = await sessionToken('seller:ada', SECRET, { version: 2 });
   assert.equal((await readSession(token, SECRET)).version, 2);
   const stale = await sessionToken('seller:ada', SECRET, { now: Date.now() - 31 * day });
   assert.equal(await readSession(stale, SECRET), null);
-  const who = 'seller:ada';
-  const legacy = `${encodeURIComponent(who)}.${await sha256(`wbwlister:${SECRET}:${who}`)}`;
-  const old = await readSession(legacy, SECRET, LEGACY_UNTIL - 1);
-  assert.equal(old.seller, 'ada');
-  assert.equal(old.version, 0);
-  assert.equal(old.legacy, true);
-  assert.equal(await readSession(legacy, SECRET, LEGACY_UNTIL), null);
-  const adminLegacy = `${encodeURIComponent('admin')}.${await sha256(`wbwlister:${SECRET}:admin`)}`;
-  assert.equal(await readSession(adminLegacy, SECRET, LEGACY_UNTIL - day), null);
+  const legacy = `${encodeURIComponent('seller:ada')}.old-wbwlister-signature`;
+  assert.equal(await readSession(legacy, SECRET), null);
+  assert.equal(await readSession(`${encodeURIComponent('admin')}.old-wbwlister-signature`, SECRET), null);
   assert.equal(await readSession('not a cookie', SECRET), null);
   assert.equal(await readSession('bootlister.%%% .nope', SECRET), null);
   assert.equal(await readSession('', SECRET), null);
