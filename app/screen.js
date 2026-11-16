@@ -4,9 +4,11 @@ import { CHOICES, displayWidth, searchMatch } from '../lib/vocab';
 import { needsCheck, REQUIRED } from '../lib/publish';
 import { exportReadiness } from '../lib/readiness';
 import OptimizePanel from '../components/optimize-panel';
+import WbwSyncPanel from '../components/wbw-sync-panel';
 import { packCsvChunks } from '../lib/csv';
 import { toCsv } from '../lib/export';
 import { fillSummary, prepareForExport, toFullCsv } from '../lib/pipeline';
+import { PRIMARY_SOURCES } from '../lib/sync';
 import { CHANNELS, post } from '../lib/crosspost';
 import { isExtensionShop, sellerFormState, sellerSavePayload } from '../lib/seller-links';
 import { intakeLabel } from '../lib/intake';
@@ -61,6 +63,7 @@ const SELLER_ADVANCED = [
   ['h5', 'Pre-drop extras (admin only, off unless turned on; photo names, alt text and SEO always run)', 'h'],
   ['extra_text', 'Extra description info (adds the "about the maker" note to the description)', 'optin'],
   ['video_opt', 'Video from photos (placeholder until the video tool is plugged in)', 'optin'],
+  ['primary_source', 'Primary inventory tool (WBW sync follows it)', 'primary'],
   ['h6', 'Store policies (filled from intake; go on every WBW export)', 'h'],
   ['shipping_policy', 'Shipping', 'area'], ['payment_methods', 'Payment options (e.g. PayPal, Venmo)'], ['return_policy', 'Returns', 'area'],
 ];
@@ -336,6 +339,7 @@ export default function Screen({ admin = false }) {
           {SELLER_ADVANCED.map(([f, l, kind]) => kind === 'h' ? <h3 key={f}>{l}</h3> :
             <label key={f}>{l}{kind === 'area' ? <textarea rows="3" value={sellerForm[f] ?? ''} onChange={setForm(f)} />
               : kind === 'toggle' ? <select value={sellerForm[f] ?? 'on'} onChange={setForm(f)}><option value="on">On</option><option value="off">Off</option></select>
+              : kind === 'primary' ? <select value={sellerForm[f] ?? ''} onChange={setForm(f)}><option value="">Not set</option>{PRIMARY_SOURCES.map(p => <option key={p} value={p}>{p}</option>)}</select>
               : kind === 'optin' ? <select value={sellerForm[f] === 'on' ? 'on' : 'off'} onChange={setForm(f)}><option value="off">No</option><option value="on">Yes</option></select>
               : <input value={sellerForm[f] ?? ''} onChange={setForm(f)} />}</label>)}
         </details>
@@ -343,6 +347,7 @@ export default function Screen({ admin = false }) {
           {sellerForm.created_at && !current?.active && <button onClick={deleteSeller}>Delete seller</button>}</span>
       </div>}
       {admin && !who && !sellerForm && <p className="empty">Pick a seller above, or add one.</p>}
+      {admin && who && hasDetails && !sellerForm && <WbwSyncPanel api={api} seller={who} onChange={() => { load(); loadSellers(); }} />}
       {admin && who && !hasDetails && !sellerForm && <p className="err">Set up this seller (details and import settings) before importing for them.</p>}
 
       {hasDetails && <div className="site">

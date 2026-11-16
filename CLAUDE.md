@@ -35,6 +35,8 @@
 - Seller opt-ins (admin-only, Seller settings, default off): extra_text = additive description info (maker note appended at import); video_opt = video slot (placeholder). Photo names / alt text / SEO always run. Store policies on the seller: shipping_policy, payment_methods (display text), return_policy.
 - CSV import: a List Perfectly export, or any spreadsheet CSV with Title + Price columns (header aliases in lib/lp.js GENERIC; source 'csv').
 
+- WBW sync (lib/sync.js, app/api/sync, components/wbw-sync-panel.js; admin only). We cannot write to WBW, so: sellers.primary_source = the seller's main inventory tool; each re-import / CSV re-upload / extension Sync / server "Re-scan source" (website or Poshmark only; lib/rescan.js, 240 s budget, a partial run never marks sold; eBay refused without Dan's OK; FB/Depop via extension) updates items; the panel diffs items against items.wbw_state (what Dan last applied on WBW) → new / price / update / mark-sold (+ held = waiting for approval), downloads a delta CSV, and "Mark applied on WBW" stamps wbw_state + sellers.last_synced_at. Scheduled re-scan: app/api/cron/sync is OFF (SYNC_CRON_ENABLED=1 + CRON_SECRET + a vercel.json crons entry + letting the path through lib/gate.js, all needing Dan's OK). Hobby cron = once a day (±59 min), 300 s functions; Pro = per-minute, 800 s.
+
 ## Status
 - Live on Vercel with Neon + Blob. Build in the cloud: push and let Vercel build (don't build locally).
 - Extension untested; FB reader will need tuning from a real listing.
