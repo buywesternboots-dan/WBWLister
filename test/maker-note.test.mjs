@@ -34,21 +34,31 @@ test('maker notes vary by listing and stay fixed for one listing', () => {
   }
 });
 
-test('import appends the maker note and keeps the original description as a prefix', () => {
+test('maker note is off by default: description stays as imported, photo names still run', () => {
   const original = 'Size 9 AAA. Old heel.';
   const fields = { title: 'Lucchese boots', description: original, brand: 'Lucchese', price: 80, photos: ['https://cdn.example/a.jpg'] };
-  applyAutoOptimization(fields, { ...fields, source_id: 'sku-9' }, { directory: dir.makers, now: '2026-11-09T00:00:00.000Z' });
+  applyAutoOptimization(fields, { ...fields, source_id: 'sku-9' }, { directory: dir.makers });
+  assert.equal(fields.description, original);
+  assert.equal(fields.opt_applied.maker_note, '');
+  assert.equal(fields.opt_applied.media, 'lens');
+  assert.ok(fields.opt_applied.images[0].file && fields.opt_applied.images[0].alt);
+});
+
+test('import appends the maker note (seller opted in) and keeps the original description as a prefix', () => {
+  const original = 'Size 9 AAA. Old heel.';
+  const fields = { title: 'Lucchese boots', description: original, brand: 'Lucchese', price: 80, photos: ['https://cdn.example/a.jpg'] };
+  applyAutoOptimization(fields, { ...fields, source_id: 'sku-9' }, { directory: dir.makers, now: '2026-11-09T00:00:00.000Z', extraText: true });
   assert.equal(fields.opt_original.description, original);
   assert.equal(fields.description.slice(0, original.length), original);
   assert.equal(fields.description.startsWith(`${original}\n\n`), true);
   assert.equal(withoutMakerNote(fields.description, original, fields.opt_applied.maker_note), original);
   assert.equal(fields.opt_proposal.maker_note, fields.opt_applied.maker_note);
   const again = { ...fields, description: original };
-  applyAutoOptimization(again, { ...again, source_id: 'sku-9' }, { directory: dir.makers });
+  applyAutoOptimization(again, { ...again, source_id: 'sku-9' }, { directory: dir.makers, extraText: true });
   assert.equal(again.description, fields.description);
 
   const quiet = { title: 'Boots', description: original, brand: 'Not A Maker', price: 1, photos: ['https://cdn.example/a.jpg'] };
-  applyAutoOptimization(quiet, quiet, { directory: dir.makers });
+  applyAutoOptimization(quiet, quiet, { directory: dir.makers, extraText: true });
   assert.equal(quiet.description, original);
 });
 
@@ -90,5 +100,5 @@ test('style match is exact on maker and the full style number', () => {
   const started = Date.now();
   for (let i = 0; i < 2000; i++) matchStyleSample({ verified: ['id_text'], id_text: '0030', description: '' }, sample, 'Dan Post');
   assert.ok(Date.now() - started < 500);
-  assert.equal(appendMakerNote('Worn.', fields.opt_applied.maker_note).startsWith('Worn.\n\n'), true);
+  assert.equal(appendMakerNote('Worn.', fields.opt_proposal.maker_note).startsWith('Worn.\n\n'), true);
 });

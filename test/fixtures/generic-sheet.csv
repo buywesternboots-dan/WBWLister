@@ -1,0 +1,5 @@
+Handle,Title,Vendor,Variant Price,Body (HTML),Size,Color,Image Src,Status
+anderson-bean-1,Anderson Bean Kangaroo Cowboy Boots 9 D,Anderson Bean,375,"<p>Men's kangaroo western boots. Made in Mercedes, Texas. Heel height: 1.5</p>",9 D,Brown,https://cdn.example/g1.jpg,active
+anderson-bean-1,,,,,,,https://cdn.example/g2.jpg,
+belt-1,Hand tooled leather belt 36,Nocona,60,Belt,,Black,https://cdn.example/g3.jpg,active
+old-gringo-1,Old Gringo Cowgirl Boots 7.5,Old Gringo,280,Women's embroidered. OBO,7.5,Brown,https://cdn.example/g4.jpg,archived
