@@ -1,19 +1,24 @@
+import { cookies } from 'next/headers';
+import { redirect } from 'next/navigation';
 import PublicIntakeForm from '../../components/public-intake-form';
-import SellerTerms from '../../components/seller-terms';
-import { WBW_ACCOUNT_LABEL, WBW_ACCOUNT_URL } from '../../lib/wbw-account';
+import { sessionSecret } from '../../lib/gate';
+import { readSession } from '../../lib/session';
 
-export const metadata = { title: 'Seller intake · BootLister', robots: { index: false, follow: false } };
+export const dynamic = 'force-dynamic';
+export const metadata = { title: 'Seller intake sheet · BootLister', robots: { index: false, follow: false } };
 
-// Public seller intake. No sign-in. The site layout still has the bug report button.
-export default function IntakePage() {
+// Admin-only phone sheet. Dan fills it in while talking to the seller. Signed-out visitors go to /login.
+export default async function IntakePage() {
+  const jar = await cookies();
+  const who = await readSession(jar.get('auth')?.value, sessionSecret());
+  if (!who) redirect('/login');
+  if (who.role !== 'admin') redirect('/');
   return (
     <main>
       <style>{css}</style>
-      <h1>Seller intake</h1>
-      <p className="intro">A short form so we can set up your Western Boot World seller profile and import your listings to Western Boot World.</p>
-      <p className="intro"><a href={WBW_ACCOUNT_URL} target="_blank" rel="noopener noreferrer">{WBW_ACCOUNT_LABEL}</a></p>
+      <h1>Seller intake sheet</h1>
+      <p className="intro">For calls with a new seller. Saving creates the BootLister seller, then shows what to paste into WBW.</p>
       <PublicIntakeForm />
-      <SellerTerms />
     </main>
   );
 }
@@ -41,14 +46,17 @@ b{color:#2b2118}
 .known{margin:4px 0;padding:12px;border-radius:6px;background:#eef6f5;color:#1f4f4c;font-size:15px}
 .known a{color:#1f6f6b;font-weight:600}
 h3{margin:12px 0 0;font-size:1rem;color:#1f6f6b}
-.terms{margin-top:16px;padding:12px 16px;background:#fff;border:1px solid #e6dfd6;border-radius:8px;display:flex;flex-direction:column;gap:8px}
-.terms summary{font-weight:600;cursor:pointer;color:#1f6f6b}
-.terms-text{max-height:50vh;overflow:auto;font-size:14px;border:1px solid #eee;padding:8px;border-radius:6px;margin:8px 0}
 .pw{position:relative;display:flex}
 .pw input{flex:1;padding-right:48px}
 .pw .eye{position:absolute;right:2px;top:50%;transform:translateY(-50%);width:44px!important;height:40px;padding:0;border:0;background:transparent;display:flex;align-items:center;justify-content:center;color:#6b5a4a}
 .preview{width:96px;height:96px;object-fit:cover;border-radius:8px;background:#eee}
-.hp{position:absolute;left:-10000px;width:1px;height:1px;overflow:hidden}
-.thanks p{margin:8px 0 0;color:#6b5a4a}
+.wbw-setup h2{font-size:1.2rem;margin:4px 0}
+.wbw-link{display:inline-block;padding:10px 14px;background:#1f6f6b;color:#fff;border-radius:6px;font-weight:600;text-decoration:none}
+.wbw-section{border-top:1px solid #e6dfd6;padding-top:8px;margin-top:8px}
+.wbw-row{display:grid;grid-template-columns:1fr auto;gap:2px 8px;padding:6px 0;border-bottom:1px dashed #eee;align-items:center}
+.wbw-label{grid-column:1;font-size:12px;color:#6b5a4a}
+.wbw-value{grid-column:1;white-space:pre-wrap;word-break:break-word}
+.wbw-row .copy{grid-column:2;grid-row:1/span 2;width:auto!important;padding:8px 12px}
+.warn{color:#a3261b}
 @media(max-width:640px){main{padding:12px 12px 40px}input,select,textarea,button{width:100%;box-sizing:border-box}}
 `;

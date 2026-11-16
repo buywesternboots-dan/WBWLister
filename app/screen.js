@@ -12,7 +12,6 @@ import { intakeLabel } from '../lib/intake';
 import IntakeForm from '../components/intake-form';
 import { WBW_ACCOUNT_LABEL, WBW_ACCOUNT_URL } from '../lib/wbw-account';
 import IntakeSubmissions from '../components/intake-submissions';
-import ApplicationsBanner from '../components/applications-banner';
 
 // Selected seller comes from ?seller= (the extension's seller dropdown uses the same names).
 const seller = () => new URLSearchParams(location.search).get('seller') || '';
@@ -268,7 +267,6 @@ export default function Screen({ admin = false }) {
   return (
     <main>
       <style>{css}</style>
-      {admin && <ApplicationsBanner />}
       {Object.entries(CHOICES).map(([f, opts]) => <datalist key={f} id={`dl-${f}`}>{opts.map(o => <option key={o} value={o} />)}</datalist>)}
 
       <div className="who">
@@ -480,6 +478,7 @@ dl{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:4p
 .guess{background:#fff3c4;border-radius:4px;padding:0 4px}.miss{background:#fde8e6;border-radius:4px;padding:0 4px}
 .preset{margin-left:6px;padding:0 6px;font-size:12px}
 .help{font-size:13px;color:#6b5a4a;background:#fff;border:1px solid #e6dfd6;border-radius:8px;padding:10px}
+.wbw-row{display:grid;grid-template-columns:1fr auto;gap:2px 8px;padding:6px 0;border-bottom:1px dashed #eee;align-items:center}.wbw-label{font-size:12px;color:#6b5a4a}.wbw-value{white-space:pre-wrap;word-break:break-word}.wbw-row .copy{grid-column:2;grid-row:1/span 2}.wbw-section h3{margin:8px 0 0;font-size:14px}
 .intake-list{margin:0 0 12px;padding:10px 12px 10px 28px;background:#fff;border:1px solid #e6dfd6;border-radius:8px;font-size:14px}
 .packet{display:flex;gap:10px;align-items:flex-start;padding:8px 0;border-top:1px solid #e6dfd6}
 .packet img{width:48px;height:48px;object-fit:cover;border-radius:6px;background:#eee;flex-shrink:0}

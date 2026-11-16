@@ -34,11 +34,11 @@ test('logged out, every API route returns 401 and / redirects to /login', async 
     for (const file of files) {
       const rel = file.replace(/\\/g, '/');
       const path = '/' + rel.slice(rel.indexOf('app/')).replace(/^app\//, '').replace(/\/route\.js$/, '');
-      const signIn = path === '/api/login' || path === '/api/register' || path === '/api/public-intake/check' || path === '/api/terms-accept'; // public, status only
+      const signIn = path === '/api/login' || path === '/api/register'; // public sign-in
       const decision = await decide(path, '', ENV);
       if (signIn) assert.equal(decision.type, 'next', path);
       else assert.deepEqual(decision, { type: 'json', status: 401, error: 'Please log in.' }, path);
-      if (path === '/api/register' || path === '/api/public-intake' || path === '/api/public-intake/check' || path === '/api/terms-accept') continue;
+      if (path === '/api/register') continue;
       const mod = await import(pathToFileURL(file).href);
       for (const method of METHODS) {
         if (typeof mod[method] !== 'function') continue;

@@ -1,7 +1,6 @@
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import MarkFixed from './toggle';
-import ApplicationsBanner from '../../../components/applications-banner';
 import { listReports } from '../../../lib/bug-store';
 import { filterReports, priorityColor, priorityFilter, renderAnalysis, REPORT_PAGE, reportWindow, safeHttpUrl, safeImageSrc } from '../../../lib/bugs';
 import { sessionSecret } from '../../../lib/gate';
@@ -37,7 +36,6 @@ export default async function BugReports({ searchParams }) {
   };
   return <main>
     <style>{css}</style>
-    <ApplicationsBanner />
     <header>
       <div>
         <h1>Bug reports</h1>
