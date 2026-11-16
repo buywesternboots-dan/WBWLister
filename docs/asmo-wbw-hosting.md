@@ -45,3 +45,11 @@ A Render/Fly/Cloud Run service would work the same as the box worker, but it is 
 - Never fetch westernbootworld.com or eBay hosts. Prefer photo bytes already on Vercel Blob.
 - Listing title, description, price, and size stay read-only.
 - Free tools only. No paid AI.
+
+## TODO (asmoWBW v0.2.1)
+
+Reuse of a still-fresh prior `items.asmowbw` result is coming in asmoWBW v0.2.1. The field name is not settled yet. Leave BootLister as it is until that version lands: do not add a BootLister-side reuse of asmoWBW results, and keep sending the current listing JSON on each run. Today, asmoWBW's `reused_applied` flag only looks at the existing lens `opt_applied` pass.
+
+`og:image` must be an absolute `https` URL after BootLister rewrites it (the Blob JPEG URL, or the site origin plus `/img/{id}/{n}/{file}`). Never leave a relative path.
+
+Undo uses the `items.asmowbw` record as the source of truth. Original photo blobs and `items.photos` URLs are never overwritten or deleted.

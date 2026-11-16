@@ -146,8 +146,8 @@ If a future import or an admin-supplied payload includes a non-private notes fie
 
 | Data | Where | Use only when |
 |---|---|---|
-| Bundled maker directory | `lib/wbw-ref.js` (`bundledDirectory`) | `exactMaker(brand)` returns one maker. Then the stored brand may be replaced by that canonical `maker.name` for naming. |
-| Style snapshot | `data/wbw-reference/models.csv` via `matchStyleSample()` | Status is `candidate` and `matches.length === 1` (exact maker + full style number). Ambiguous or blank → ignore. Style string is kept verbatim, including leading zeros. |
+| Bundled maker directory | sent as `maker_directory?: { name: string }[]` (from `lib/wbw-ref.js` `bundledDirectory`) | Name-only rows. Use when exactly one maker name matches the listing brand. |
+| Style snapshot | sent as the per-listing `style_sample` match object from `matchStyleSample()` | Status is `candidate` and `matches.length === 1` (exact maker + full style number). Ambiguous or blank → ignore. Style string is kept verbatim, including leading zeros. BootLister does not send the raw models.csv catalog. |
 | `style_ref` | `items.style_ref` jsonb | Seller/admin accepted a catalog card (`acceptedStyleRef`). Shape includes `maker_name`, `style_number`, `record_title`, `record_url`, `source_url`, `other_card_text`, `accepted_at`. `other_card_text` is unverified; material is applied only on an exact material-name match (`exactMaterialName`). |
 | `opt_proposal.style_sample` | jsonb | Same match object as above if Prepare has already run. |
 | `boot_references` | separate table, keyed by seller + maker + model | Seller-entered note: `maker`, `model`, `status` (`confirmed` / `candidate`), `provenance`, `notes`. A confirmed model may inform naming only when that model already appears in the listing text or verified `id_text`. |
@@ -323,6 +323,7 @@ type AsmowbwListingInput = {
   id_checked_at?: string | null;
   seller_notes?: string | null;    // only if explicitly supplied; LP Notes are not stored today
   sku?: string | null;             // only if explicitly supplied or safely parsed from source_id
+  maker_directory?: { name: string }[];  // exact maker names only; BootLister sends [{ name }] from the bundled snapshot
 
   // Photo bytes are attached at run time, not stored in Postgres.
   media?: Array<{

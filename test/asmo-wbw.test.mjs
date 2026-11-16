@@ -8,8 +8,9 @@ import { ADMIN_ACTIONS, guardAction } from '../lib/http.js';
 import { itemsResponse } from '../lib/items-api.js';
 import { sessionToken } from '../lib/session.js';
 import {
-  ASMO_MEDIA, CONTENT_FIELDS, appliedAsmo, attachablePhotoUrl, inputFingerprint,
-  isBlockedAsmoHost, storedRecord, undoRecord, withPrevious,
+  ASMO_MEDIA, CONTENT_FIELDS, DEFAULT_ORIGIN, absoluteOgImage, appliedAsmo,
+  asmoStorePath, assertNewDerivativePath, attachablePhotoUrl, inputFingerprint,
+  isBlockedAsmoHost, listingPatch, storedRecord, undoRecord, withPrevious,
 } from '../lib/asmo-wbw.js';
 import { inferredSku, listingInput, publicSeller, withCatalog } from '../lib/asmo-wbw-input.js';
 import { attachMedia, invokeAsmoWbw, runListing } from '../lib/asmo-wbw-run.js';
@@ -146,7 +147,8 @@ test('storedRecord + undo keep listing text read-only and can restore the previo
   assert.equal(first.listing_text_readonly, true);
   assert.equal(first.images[0].file.includes('0123'), true);
   assert.equal(first.images[0].stored_url, PHOTOS[0]);
-  assert.match(String(first.open_graph['og:image']), /\/img\/1842\/1\//);
+  assert.equal(first.open_graph['og:image'], `${DEFAULT_ORIGIN}/img/1842/1/${first.images[0].file}`);
+  assert.match(first.open_graph['og:image'], /^https:\/\//);
   for (const f of CONTENT_FIELDS) assert.equal(first[f], undefined);
   const second = withPrevious(storedRecord(fakeResult(input, { seo_title: 'Second' }), { now: '2026-11-16T17:00:00.000Z', input }), first);
   assert.equal(second.seo_title, 'Second');
@@ -154,6 +156,76 @@ test('storedRecord + undo keep listing text read-only and can restore the previo
   assert.deepEqual(undoRecord(second).asmowbw.seo_title, first.seo_title);
   assert.equal(undoRecord(first).asmowbw, null);
   assert.equal(undoRecord(null).undone, false);
+});
+
+test('og:image is an absolute https URL: Blob JPEG when present, otherwise the site origin plus /img path', () => {
+  const input = listingInput(lucchese(), seller);
+  const relative = fakeResult(input);
+  const withOrigin = storedRecord(relative, { now: '2026-11-16T16:00:00.000Z', input, origin: 'https://bootlister.vercel.app' });
+  const expectedPath = `${DEFAULT_ORIGIN}/img/1842/1/${withOrigin.images[0].file}`;
+  assert.equal(withOrigin.open_graph['og:image'], expectedPath);
+  assert.equal(withOrigin.result.images[0].open_graph['og:image'], expectedPath);
+  assert.match(withOrigin.open_graph['og:image'], /^https:\/\//);
+  assert.equal(withOrigin.open_graph['og:image'].startsWith('/'), false);
+  assert.equal(withOrigin.open_graph['og:image'].includes('1842/lucchese'), false);
+
+  const blob = 'https://abc.public.blob.vercel-storage.com/asmowbw/1842/1/lucchese-mens-0123-black-cherry-goat-cowboy-boots-10d-1.jpg';
+  const withBlob = storedRecord(fakeResult(input, {
+    images: fakeResult(input).images.map((im, i) => i === 0 ? { ...im, jpeg_url: blob } : im),
+    open_graph: { ...fakeResult(input).open_graph, 'og:image': '1842/relative.jpg' },
+  }), { now: '2026-11-16T16:00:00.000Z', input, origin: 'https://example.invalid' });
+  assert.equal(withBlob.open_graph['og:image'], blob);
+  assert.equal(withBlob.result.images[0].open_graph['og:image'], blob);
+  assert.match(withBlob.open_graph['og:image'], /^https:\/\//);
+
+  assert.equal(absoluteOgImage({ listingId: 1842, n: 1, filename: 'boot.jpg', origin: 'http://insecure.example' }), 'https://bootlister.vercel.app/img/1842/1/boot.jpg');
+});
+
+test('ASMO run and undo never overwrite or delete original photo blobs', async () => {
+  const photos = [...PHOTOS];
+  const item = lucchese({ photos: [...photos] });
+  const stored = {};
+  const result = await runListing(listingInput(item, seller), {
+    now: '2026-11-16T16:00:00.000Z',
+    origin: 'https://bootlister.vercel.app',
+    storePhoto: async (p, body, type) => {
+      assertNewDerivativePath(p, photos);
+      stored[p] = { body, type };
+      return `https://abc.public.blob.vercel-storage.com/${p}`;
+    },
+    run: async payload => {
+      const listing = fakeResult(payload);
+      return {
+        ok: true,
+        result: listing,
+        files: listing.images.flatMap(im => ([
+          { path: im.jpeg, content_type: 'image/jpeg', base64: Buffer.from('ffd8ff', 'hex').toString('base64') },
+          { path: im.webp, content_type: 'image/webp', base64: Buffer.from('RIFF....WEBP').toString('base64') },
+        ])),
+      };
+    },
+  });
+  assert.deepEqual(item.photos, photos);
+  assert.deepEqual(result.patch, listingPatch(result.record));
+  assert.equal(result.patch.photos, undefined);
+  for (const f of CONTENT_FIELDS) assert.equal(result.patch[f], undefined);
+  assert.ok(Object.keys(stored).length >= 4);
+  for (const path of Object.keys(stored)) {
+    assert.equal(path.startsWith('asmowbw/1842/'), true);
+    assert.equal(path.startsWith('photos/'), false);
+    assert.equal(photos.includes(path), false);
+    assert.equal(photos.some(url => url === path || url.endsWith('/' + path)), false);
+  }
+  const undone = undoRecord(withPrevious(result.record, { media: ASMO_MEDIA, seo_title: 'Earlier' }));
+  assert.equal(undone.asmowbw.seo_title, 'Earlier');
+  assert.equal(undone.photos, undefined);
+  assert.deepEqual(item.photos, photos);
+
+  assert.equal(asmoStorePath(1842, 1, 'boot.jpg'), 'asmowbw/1842/1/boot.jpg');
+  assert.equal(assertNewDerivativePath('asmowbw/1842/1/boot.jpg', photos), 'asmowbw/1842/1/boot.jpg');
+  assert.throws(() => assertNewDerivativePath('photos/aa11.jpg', photos), /must not overwrite original photo blobs/);
+  assert.throws(() => assertNewDerivativePath(photos[0], photos), /must not overwrite original photo blobs/);
+  assert.throws(() => assertNewDerivativePath('photos/aa11.jpg'.replace(/^/, ''), photos), /must not overwrite/);
 });
 
 test('appliedAsmo is used for export when photos and facts still match, and ignored when they change', () => {
@@ -211,6 +283,8 @@ test('runListing calls asmoWBW, stores derivatives, and never patches listing te
   assert.equal(result.summary.optimized, 2);
   assert.equal(result.summary.photos, 2);
   assert.ok(Object.keys(stored).length >= 4);
+  assert.deepEqual(input.photos, PHOTOS);
+  for (const path of Object.keys(stored)) assert.equal(path.startsWith('asmowbw/'), true);
 });
 
 test('attachMedia skips blocked hosts and still returns a slot for naming', async () => {
