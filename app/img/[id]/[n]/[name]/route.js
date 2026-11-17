@@ -1,4 +1,4 @@
-// Public photo URL with an SEO filename: serves the seller's photo unchanged (pixels), with XMP keywords/credit added and long cache.
+// Public photo URL with an SEO filename: serves the stored photo (pixels, ICC, resolution unchanged). XMP is merged, never duplicated; asmoWBW fields win.
 // Blob URLs and source URLs (kept when Blob is full) are fetched http(s)-only, never from a private address, images only.
 import { lookup } from 'node:dns/promises';
 import http from 'node:http';
