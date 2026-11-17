@@ -8,12 +8,12 @@ import { ADMIN_ACTIONS, guardAction } from '../lib/http.js';
 import { itemsResponse } from '../lib/items-api.js';
 import { sessionToken } from '../lib/session.js';
 import {
-  ASMO_MEDIA, CONTENT_FIELDS, OG_BASE_URL, appliedAsmo,
-  asmoStorePath, assertNewDerivativePath, attachablePhotoUrl, inputFingerprint,
-  isBlockedAsmoHost, listingPatch, storedRecord, undoRecord, withPrevious,
-} from '../lib/asmo-wbw.js';
-import { inferredSku, listingInput, publicSeller, withCatalog } from '../lib/asmo-wbw-input.js';
-import { attachMedia, invokeAsmoWbw, runListing } from '../lib/asmo-wbw-run.js';
+  AMCASO_MEDIA, CONTENT_FIELDS, OG_BASE_URL, appliedAmcaso,
+  amcasoStorePath, assertNewDerivativePath, attachablePhotoUrl, inputFingerprint,
+  isBlockedAmcasoHost, listingPatch, storedRecord, undoRecord, withPrevious,
+} from '../lib/amcaso-wbw.js';
+import { inferredSku, listingInput, publicSeller, withCatalog } from '../lib/amcaso-wbw-input.js';
+import { attachMedia, invokeAmcasoWbw, runListing } from '../lib/amcaso-wbw-run.js';
 
 const PHOTOS = [
   'https://abc.public.blob.vercel-storage.com/photos/aa11.jpg',
@@ -64,7 +64,7 @@ function fakeResult(input, over = {}) {
   });
   return {
     ok: true,
-    tool: 'asmoWBW',
+    tool: 'amcasoWBW',
     version: '0.2.0',
     listing_id: input.id,
     seller: input.seller,
@@ -134,8 +134,8 @@ test('withCatalog sends a name-only maker directory and a JSON-safe style sample
 });
 
 test('eBay and westernbootworld.com photo URLs are never attachable', () => {
-  assert.equal(isBlockedAsmoHost('https://i.ebayimg.com/images/g/xx/s-l1600.jpg'), true);
-  assert.equal(isBlockedAsmoHost('https://www.westernbootworld.com/photo.jpg'), true);
+  assert.equal(isBlockedAmcasoHost('https://i.ebayimg.com/images/g/xx/s-l1600.jpg'), true);
+  assert.equal(isBlockedAmcasoHost('https://www.westernbootworld.com/photo.jpg'), true);
   assert.equal(attachablePhotoUrl('https://i.ebayimg.com/images/g/xx/s-l1600.jpg'), false);
   assert.equal(attachablePhotoUrl('https://westernbootworld.com/photo.jpg'), false);
   assert.equal(attachablePhotoUrl(PHOTOS[0]), true);
@@ -144,7 +144,7 @@ test('eBay and westernbootworld.com photo URLs are never attachable', () => {
 test('storedRecord + undo keep listing text read-only and can restore the previous pass', () => {
   const input = listingInput(lucchese(), seller);
   const first = storedRecord(fakeResult(input), { now: '2026-11-16T16:00:00.000Z', input });
-  assert.equal(first.media, ASMO_MEDIA);
+  assert.equal(first.media, AMCASO_MEDIA);
   assert.equal(first.listing_text_readonly, true);
   assert.equal(first.images[0].file.includes('0123'), true);
   assert.equal(first.images[0].stored_url, PHOTOS[0]);
@@ -179,7 +179,7 @@ test('listingInput sends og_base_url and a compact asmowbw_prior from the stored
   assert.equal(again.asmowbw_prior.result, undefined);
 });
 
-test('og:image from asmoWBW is kept as an absolute https URL', () => {
+test('og:image from amcasoWBW is kept as an absolute https URL', () => {
   const input = listingInput(lucchese(), seller);
   const result = fakeResult(input);
   const stored = storedRecord(result, { now: '2026-11-16T16:00:00.000Z', input });
@@ -189,7 +189,7 @@ test('og:image from asmoWBW is kept as an absolute https URL', () => {
   assert.equal(stored.open_graph['og:image'].startsWith('1842/'), false);
 });
 
-test('runListing passes og_base_url and asmowbw_prior through to asmoWBW', async () => {
+test('runListing passes og_base_url and asmowbw_prior through to amcasoWBW', async () => {
   const applied = storedRecord(fakeResult(listingInput(lucchese(), seller)), { now: '2026-11-16T16:00:00.000Z', input: listingInput(lucchese(), seller) });
   const input = listingInput(lucchese({ asmowbw: applied }), seller);
   let seen;
@@ -205,7 +205,7 @@ test('runListing passes og_base_url and asmowbw_prior through to asmoWBW', async
   assert.equal(seen.asmowbw_prior.images[0].stored_url, PHOTOS[0]);
 });
 
-test('ASMO run and undo never overwrite or delete original photo blobs', async () => {
+test('AMCASO run and undo never overwrite or delete original photo blobs', async () => {
   const photos = [...PHOTOS];
   const item = lucchese({ photos: [...photos] });
   const stored = {};
@@ -240,23 +240,23 @@ test('ASMO run and undo never overwrite or delete original photo blobs', async (
     assert.equal(photos.includes(path), false);
     assert.equal(photos.some(url => url === path || url.endsWith('/' + path)), false);
   }
-  const undone = undoRecord(withPrevious(result.record, { media: ASMO_MEDIA, seo_title: 'Earlier' }));
+  const undone = undoRecord(withPrevious(result.record, { media: AMCASO_MEDIA, seo_title: 'Earlier' }));
   assert.equal(undone.asmowbw.seo_title, 'Earlier');
   assert.equal(undone.photos, undefined);
   assert.deepEqual(item.photos, photos);
 
-  assert.equal(asmoStorePath(1842, 1, 'boot.jpg'), 'asmowbw/1842/1/boot.jpg');
+  assert.equal(amcasoStorePath(1842, 1, 'boot.jpg'), 'asmowbw/1842/1/boot.jpg');
   assert.equal(assertNewDerivativePath('asmowbw/1842/1/boot.jpg', photos), 'asmowbw/1842/1/boot.jpg');
   assert.throws(() => assertNewDerivativePath('photos/aa11.jpg', photos), /must not overwrite original photo blobs/);
   assert.throws(() => assertNewDerivativePath(photos[0], photos), /must not overwrite original photo blobs/);
   assert.throws(() => assertNewDerivativePath('photos/aa11.jpg'.replace(/^/, ''), photos), /must not overwrite/);
 });
 
-test('appliedAsmo is used for export when photos and facts still match, and ignored when they change', () => {
+test('appliedAmcaso is used for export when photos and facts still match, and ignored when they change', () => {
   const input = listingInput(lucchese(), seller);
   const record = storedRecord(fakeResult(input), { now: '2026-11-16T16:00:00.000Z', input });
   const item = { ...lucchese(), asmowbw: record };
-  assert.ok(appliedAsmo(item));
+  assert.ok(appliedAmcaso(item));
   const row = exportRecord(item, { origin: 'https://bootlister.vercel.app', seller: { display_name: 'Dan Hoffenberg', location: 'Texas' } });
   assert.equal(row.title, item.title);
   assert.equal(row.description, item.description);
@@ -264,14 +264,14 @@ test('appliedAsmo is used for export when photos and facts still match, and igno
   assert.match(row.photos[0], /\/img\/1842\/1\/.+\.jpg$/);
   assert.equal(row.alts[0], record.images[0].alt);
   assert.equal(row.seo_title, record.seo_title);
-  const stalePhotos = appliedAsmo({ ...item, photos: ['https://abc.public.blob.vercel-storage.com/photos/other.jpg', PHOTOS[1]] });
+  const stalePhotos = appliedAmcaso({ ...item, photos: ['https://abc.public.blob.vercel-storage.com/photos/other.jpg', PHOTOS[1]] });
   assert.equal(stalePhotos, null);
-  const staleFacts = appliedAsmo({ ...item, brand: 'Tony Lama', title: 'Tony Lama boots, style 0123, size 10 D' });
+  const staleFacts = appliedAmcaso({ ...item, brand: 'Tony Lama', title: 'Tony Lama boots, style 0123, size 10 D' });
   assert.equal(staleFacts, null);
   assert.equal(inputFingerprint(listingInput({ ...lucchese(), brand: 'Tony Lama' }, seller)) === inputFingerprint(input), false);
 });
 
-test('runListing calls asmoWBW, stores derivatives, and never patches listing text', async () => {
+test('runListing calls amcasoWBW, stores derivatives, and never patches listing text', async () => {
   const stored = {};
   const input = listingInput(lucchese(), seller);
   const jpeg = Buffer.from('ffd8ff', 'hex');
@@ -331,7 +331,7 @@ const patch = (token, bearer, body) => new Request('http://localhost/api/items',
   body: JSON.stringify(body),
 });
 
-test('ASMO and undo are admin-only item actions', async () => {
+test('AMCASO and undo are admin-only item actions', async () => {
   assert.equal(ADMIN_ACTIONS.includes('asmowbw'), true);
   assert.equal(ADMIN_ACTIONS.includes('asmowbw-undo'), true);
   assert.throws(() => guardAction({ role: 'seller', seller: 'ada' }, 'asmowbw'), /Only an admin can do that/);
@@ -339,12 +339,15 @@ test('ASMO and undo are admin-only item actions', async () => {
   assert.equal(guardAction({ role: 'admin' }, 'asmowbw'), undefined);
   assert.equal(ADMIN_ACTIONS.includes('asmowbw-apply'), true);
   assert.throws(() => guardAction({ role: 'seller', seller: 'ada' }, 'asmowbw-apply'), /Only an admin can do that/);
+  for (const a of ['amcasowbw', 'amcasowbw-apply', 'amcasowbw-undo']) {
+    assert.throws(() => guardAction({ role: 'seller', seller: 'ada' }, a), /Only an admin can do that/);
+  }
 
   const item = lucchese();
   const db = {
     getByIds: async ids => ids.map(Number).includes(item.id) ? [{ ...item }] : [],
-    runAsmowbw: async (sellerName, opts) => ({ optimized: opts.ids.length, failed: 0, skipped: 0, photos: 2, processed: opts.ids.length, summaries: [], seller: sellerName }),
-    undoAsmowbw: async (_s, ids) => ({ undone: ids.length, skipped: 0, processed: ids.length }),
+    runAmcasowbw: async (sellerName, opts) => ({ optimized: opts.ids.length, failed: 0, skipped: 0, photos: 2, processed: opts.ids.length, summaries: [], seller: sellerName }),
+    undoAmcasowbw: async (_s, ids) => ({ undone: ids.length, skipped: 0, processed: ids.length }),
   };
   const admin = await sessionToken('admin', ENV.APP_PASSWORD);
   const ada = await sessionToken('seller:ada', ENV.APP_PASSWORD);
@@ -356,18 +359,27 @@ test('ASMO and undo are admin-only item actions', async () => {
   assert.equal((await undone.json()).undone, 1);
   const sellerDenied = await itemsResponse(patch(ada, 'danhoffenberg', { action: 'asmowbw', ids: [1842] }), db, ENV);
   assert.equal(sellerDenied.status, 403);
+  // New AMCASO action names; the pre-rename names above keep working.
+  const renamed = await itemsResponse(patch(admin, 'danhoffenberg', { action: 'amcasowbw', ids: [1842] }), db, ENV);
+  assert.equal(renamed.status, 200);
+  assert.equal((await renamed.json()).optimized, 1);
+  const renamedUndo = await itemsResponse(patch(admin, 'danhoffenberg', { action: 'amcasowbw-undo', ids: [1842] }), db, ENV);
+  assert.equal(renamedUndo.status, 200);
+  assert.equal((await renamedUndo.json()).undone, 1);
+  const renamedDenied = await itemsResponse(patch(ada, 'danhoffenberg', { action: 'amcasowbw', ids: [1842] }), db, ENV);
+  assert.equal(renamedDenied.status, 403);
 });
 
-test('asmoWBW CLI accepts a contract listing and returns the output shape (live Python)', async t => {
+test('amcasoWBW CLI accepts a contract listing and returns the output shape (live Python)', async t => {
   const root = path.join(process.cwd(), 'vendor/asmo-wbw');
   const python = process.env.ASMO_WBW_PYTHON || '/workspace/asmo-wbw/.venv/bin/python';
   const jpegPath = path.join(root, 'fixtures/listings/media/aa11.jpg');
   const { stat } = await import('node:fs/promises');
   try { await stat(python); } catch {
-    t.skip('asmoWBW Python venv is not available on this host');
+    t.skip('amcasoWBW Python venv is not available on this host');
     return;
   }
-  const work = await mkdtemp(path.join(tmpdir(), 'asmo-cli-'));
+  const work = await mkdtemp(path.join(tmpdir(), 'amcaso-cli-'));
   try {
     const input = withCatalog(listingInput(lucchese({
       photos: [jpegPath, path.join(root, 'fixtures/listings/media/aa12.jpg')],
@@ -376,9 +388,9 @@ test('asmoWBW CLI accepts a contract listing and returns the output shape (live 
       { n: 1, stored_url: input.photos[0], path: jpegPath },
       { n: 2, stored_url: input.photos[1], path: path.join(root, 'fixtures/listings/media/aa12.jpg') },
     ];
-    const raw = await invokeAsmoWbw(input, { python, forceCli: true, timeoutMs: 60_000, keepWork: false });
+    const raw = await invokeAmcasoWbw(input, { python, forceCli: true, timeoutMs: 60_000, keepWork: false });
     const result = raw.result ?? raw;
-    assert.equal(result.tool, 'asmoWBW');
+    assert.match(result.tool, /^(asmo|amcaso)WBW$/); // vendored v0.2 still reports asmoWBW
     assert.equal(result.listing_id, 1842);
     assert.equal(result.listing_text_readonly, true);
     assert.equal(result.fetch_used, false);

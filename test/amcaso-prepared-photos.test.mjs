@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { appliedAsmo, storePreparedPhotos, undoPreparedPhotos, qualityWarnings, SMALL_FILE_BYTES } from '../lib/asmo-wbw.js';
+import { appliedAmcaso, storePreparedPhotos, undoPreparedPhotos, qualityWarnings, SMALL_FILE_BYTES } from '../lib/amcaso-wbw.js';
 import { exportRecord } from '../lib/export.js';
 import { withXmp } from '../lib/seo.js';
 import { countXmpPackets, imageSize, jpegIccSegments, jpegScanPayload, readXmpFields, sniffFormat } from '../lib/photo-meta.js';
@@ -11,9 +11,9 @@ import { countXmpPackets, imageSize, jpegIccSegments, jpegScanPayload, readXmpFi
 const FIX = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'photos');
 const load = name => readFileSync(join(FIX, name));
 
-const ASMO_TITLE = 'Lucchese 0123 side';
-const ASMO_DESC = 'Lucchese 0123 goat cowboy boots, side view';
-const ASMO_KW = ['Lucchese', '0123', 'goat'];
+const AMCASO_TITLE = 'Lucchese 0123 side';
+const AMCASO_DESC = 'Lucchese 0123 goat cowboy boots, side view';
+const AMCASO_KW = ['Lucchese', '0123', 'goat'];
 
 const itemBase = {
   id: 44,
@@ -32,7 +32,7 @@ const itemBase = {
 function resultFor(images) {
   return {
     ok: true,
-    tool: 'asmoWBW',
+    tool: 'amcasoWBW',
     version: '0.3.1',
     facts_fp: 'abc123',
     seo_title: 'Lucchese 0123 cowboy boots',
@@ -63,8 +63,8 @@ test('stored photos are the prepared file bytes, not the source or a thumbnail',
   const put = memoryPut();
   const item = { ...itemBase };
   const result = resultFor([
-    { n: 1, filename: 'lucchese-0123-cowboy-boots-1.jpg', alt: 'side', title: ASMO_TITLE, width: 1200, height: 1200, format: 'jpeg' },
-    { n: 2, filename: 'lucchese-0123-cowboy-boots-2.png', alt: 'pair', title: ASMO_TITLE, width: 1200, height: 800, format: 'png' },
+    { n: 1, filename: 'lucchese-0123-cowboy-boots-1.jpg', alt: 'side', title: AMCASO_TITLE, width: 1200, height: 1200, format: 'jpeg' },
+    { n: 2, filename: 'lucchese-0123-cowboy-boots-2.png', alt: 'pair', title: AMCASO_TITLE, width: 1200, height: 800, format: 'png' },
   ]);
   const stored = await storePreparedPhotos(item, result, [
     { n: 1, filename: 'lucchese-0123-cowboy-boots-1.jpg', bytes: prepared },
@@ -79,7 +79,7 @@ test('stored photos are the prepared file bytes, not the source or a thumbnail',
   assert.equal(stored.asmowbw.images[1].stored_url, stored.photos[1]);
   assert.equal(stored.asmowbw.images[0].original_url, item.photos[0]);
   const live = { ...item, photos: stored.photos, asmowbw: stored.asmowbw };
-  assert.ok(appliedAsmo(live));
+  assert.ok(appliedAmcaso(live));
   const row = exportRecord(live, { origin: 'https://bootlister.test' });
   assert.equal(row.photos[0], 'https://bootlister.test/img/44/1/lucchese-0123-cowboy-boots-1.jpg');
   assert.equal(row.photos[1], 'https://bootlister.test/img/44/2/lucchese-0123-cowboy-boots-2.png');
@@ -89,7 +89,7 @@ test('stored photos are the prepared file bytes, not the source or a thumbnail',
   assert.equal(undone.asmowbw, null);
 });
 
-test('/img output keeps dimensions, ICC, and asmoWBW metadata instead of clobbering them', () => {
+test('/img output keeps dimensions, ICC, and amcasoWBW metadata instead of clobbering them', () => {
   const prepared = load('prepared-lucchese.jpg');
   const item = {
     ...itemBase,
@@ -98,9 +98,9 @@ test('/img output keeps dimensions, ICC, and asmoWBW metadata instead of clobber
     guessed: ['material'],
   };
   const before = readXmpFields(prepared);
-  assert.equal(before.title, ASMO_TITLE);
-  assert.equal(before.description, ASMO_DESC);
-  assert.deepEqual(before.keywords, ASMO_KW);
+  assert.equal(before.title, AMCASO_TITLE);
+  assert.equal(before.description, AMCASO_DESC);
+  assert.deepEqual(before.keywords, AMCASO_KW);
   const size = imageSize(prepared);
   const icc = jpegIccSegments(prepared);
   assert.equal(size.width, 1200);
@@ -114,9 +114,9 @@ test('/img output keeps dimensions, ICC, and asmoWBW metadata instead of clobber
   assert.deepEqual(jpegIccSegments(out), icc);
   assert.deepEqual(imageSize(out), size);
   const after = readXmpFields(out);
-  assert.equal(after.title, ASMO_TITLE);
-  assert.equal(after.description, ASMO_DESC);
-  assert.deepEqual(after.keywords, ASMO_KW);
+  assert.equal(after.title, AMCASO_TITLE);
+  assert.equal(after.description, AMCASO_DESC);
+  assert.deepEqual(after.keywords, AMCASO_KW);
   assert.equal(after.title.includes('Alligator'), false);
   assert.equal(String(after.keywords).includes('Alligator'), false);
 });
@@ -156,14 +156,14 @@ test('odd seller inputs stay native: tiny, PNG, WebP, portrait, EXIF-rotated, an
   assert.ok(qualityWarnings(files.tiny, 200, 180).some(w => w.includes('under 1000 px')));
   assert.ok(qualityWarnings(files.tiny, 200, 180).some(w => w.includes('very small')));
 
-  // PNG and WebP already prepared: /img must pass them through, keep pixels/size, and keep asmo XMP.
+  // PNG and WebP already prepared: /img must pass them through, keep pixels/size, and keep amcaso XMP.
   for (const name of ['png', 'webp']) {
     const src = files[name];
     const out = withXmp(src, itemBase, 1);
     assert.deepEqual(out, src);
     assert.equal(countXmpPackets(out), 1);
     assert.deepEqual(imageSize(out), imageSize(src));
-    assert.equal(readXmpFields(out).title, ASMO_TITLE);
+    assert.equal(readXmpFields(out).title, AMCASO_TITLE);
   }
 
   // Portrait PNG without metadata: write native XMP, do not convert to JPEG.

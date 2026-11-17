@@ -22,8 +22,8 @@ const db = {
   editOptimization: wbw.editOptimization,
   applyOptimization: wbw.applyOptimizationToItem,
   acceptStyleCandidate: wbw.acceptStyleCandidate,
-  runAsmowbw: wbw.runAsmowbw,
-  undoAsmowbw: wbw.undoAsmowbw,
+  runAmcasowbw: wbw.runAmcasowbw,
+  undoAmcasowbw: wbw.undoAmcasowbw,
 };
 
 // GET ?status= → that seller's items. POST one listing. PATCH bulk actions.

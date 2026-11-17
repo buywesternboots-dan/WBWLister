@@ -1,4 +1,4 @@
-// Public photo URL with an SEO filename: serves the stored photo (pixels, ICC, resolution unchanged). XMP is merged, never duplicated; asmoWBW fields win.
+// Public photo URL with an SEO filename: serves the stored photo (pixels, ICC, resolution unchanged). XMP is merged, never duplicated; amcasoWBW fields win.
 // Blob URLs and source URLs (kept when Blob is full) are fetched http(s)-only, never from a private address, images only.
 import { lookup } from 'node:dns/promises';
 import http from 'node:http';
@@ -6,7 +6,7 @@ import https from 'node:https';
 import { BlockList, isIP } from 'node:net';
 import { getItem } from '../../../../../lib/wbw';
 import { withXmp } from '../../../../../lib/seo';
-import { appliedAsmo } from '../../../../../lib/asmo-wbw';
+import { appliedAmcaso } from '../../../../../lib/amcaso-wbw';
 
 const MAX_BYTES = 15 * 1024 * 1024, TIMEOUT_MS = 15000;
 const BLOCKED = new BlockList();
@@ -124,8 +124,8 @@ export async function GET(req, { params }) {
   const { id, n } = await params;
   const item = /^\d+$/.test(id) ? await getItem(id) : null, original = item?.photos[n - 1];
   if (!original) return new Response('Not found', { status: 404 });
-  const asmo = item ? appliedAsmo(item) : null;
-  const im = asmo?.images?.find(x => x.n === Number(n));
+  const amcaso = item ? appliedAmcaso(item) : null;
+  const im = amcaso?.images?.find(x => x.n === Number(n));
   const accept = req.headers?.get?.('accept') || '';
   const wantWebp = /\bimage\/webp\b/i.test(accept);
   const src = (wantWebp && im?.webp_url) || im?.jpeg_url || original;

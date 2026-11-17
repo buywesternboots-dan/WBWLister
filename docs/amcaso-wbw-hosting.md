@@ -1,6 +1,8 @@
-# Hosting asmoWBW for BootLister
+# Hosting amcasoWBW for BootLister
 
-asmoWBW v0.2.1 is a local Python CLI (`python -m asmo_wbw run --in listing.json --out-dir out/`). It needs Python 3.11+, Pillow, NumPy, and piexif. It is CPU-only and free. It does not fit comfortably inside a short Vercel serverless request, so the live ASMO button should call it as a background/sidecar worker.
+> AMCASO (All Media Compression And Search Optimization) was called ASMO before Nov 17, 2026. BootLister reads `AMCASO_WBW_*` env vars first and falls back to the older `ASMO_WBW_*` names. The vendored tool (`vendor/asmo-wbw`, Python package `asmo_wbw` v0.2) and `scripts/asmo-wbw-worker.py` keep their old names on purpose: an installed worker already runs from those paths and env vars. The `items.asmowbw` column, `asmowbw/` Blob prefix, and the old `asmowbw*` API actions are kept for compatibility.
+
+amcasoWBW v0.2.1 is a local Python CLI (`python -m asmo_wbw run --in listing.json --out-dir out/`). It needs Python 3.11+, Pillow, NumPy, and piexif. It is CPU-only and free. It does not fit comfortably inside a short Vercel serverless request, so the live AMCASO button should call it as a background/sidecar worker.
 
 This PR does not deploy anything, create accounts, or add environment variables. It only documents what a later deploy would need.
 
@@ -10,7 +12,7 @@ Run `scripts/asmo-wbw-worker.py` on the shared box (or any always-on host you al
 
 BootLister (on Vercel) builds one listing JSON per click, may attach photo bytes already stored on Vercel Blob, POSTs to the worker, stores the result on `items.asmowbw`, and uploads optimized JPEG/WebP to Blob.
 
-**Why this path:** no new paid service, no size or timeout fight with a Vercel function, and it matches asmoWBW's own integration note (use a worker or a separate Python service, not a short serverless request). Bulk runs stay operator-triggered: the admin UI sends listings in small batches (one per request).
+**Why this path:** no new paid service, no size or timeout fight with a Vercel function, and it matches amcasoWBW's own integration note (use a worker or a separate Python service, not a short serverless request). Bulk runs stay operator-triggered: the admin UI sends listings in small batches (one per request).
 
 **What a later deploy would need**
 
@@ -31,7 +33,7 @@ A Vercel Python function *might* hold the 114MB venv (Pillow + NumPy + piexif), 
 - Hobby functions time out in 10s (60s in some Fluid setups). Pro defaults to 60s, max 300s. Optimizing up to 30 photos (decode, resize, JPEG + WebP, EXIF/XMP) can overrun a short budget, and a bulk click is worse.
 - Cold starts with NumPy are slow.
 - There is no durable disk for the undo journal (we'd still have to ship files back through the response).
-- asmoWBW's INTEGRATION.md says not to run it inside a short serverless request.
+- amcasoWBW's INTEGRATION.md says not to run it inside a short serverless request.
 
 Skip this unless a later measurement shows a single small listing reliably finishes within the plan's limit.
 
@@ -46,9 +48,9 @@ A Render/Fly/Cloud Run service would work the same as the box worker, but it is 
 - Listing title, description, price, and size stay read-only.
 - Free tools only. No paid AI.
 
-## asmoWBW v0.2.1
+## amcasoWBW v0.2.1
 
-BootLister sends the previous `items.asmowbw` record as `asmowbw_prior`. asmoWBW reuses filenames, alt, caption, and SEO when `facts_fp` still matches and each image `stored_url` still equals `photos[i]` in order. The stored record keeps `reused_applied`, `reused_source`, `facts_fp`, and per-image `stored_url`.
+BootLister sends the previous `items.asmowbw` record as `asmowbw_prior`. amcasoWBW reuses filenames, alt, caption, and SEO when `facts_fp` still matches and each image `stored_url` still equals `photos[i]` in order. The stored record keeps `reused_applied`, `reused_source`, `facts_fp`, and per-image `stored_url`.
 
 Every run passes `og_base_url` / `--og-base-url` `https://bootlister.vercel.app` so `og:image` is already an absolute https URL. BootLister does not rewrite it.
 

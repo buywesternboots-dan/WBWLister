@@ -110,7 +110,7 @@ test('a seller session stays on that seller; a different Bearer name is rejected
 
 test('a seller session cannot run admin actions; their own edit and sync can', () => {
   const seller = { role: 'seller', seller: 'ada' }, admin = { role: 'admin' };
-  for (const action of ['delete', 'move', 'sellers', 'idcheck', 'backfill', 'optimize-backfill', 'asmowbw', 'asmowbw-undo']) {
+  for (const action of ['delete', 'move', 'sellers', 'idcheck', 'backfill', 'optimize-backfill', 'asmowbw', 'asmowbw-undo', 'amcasowbw', 'amcasowbw-apply', 'amcasowbw-undo']) {
     assert.equal(ADMIN_ACTIONS.includes(action), true);
     assert.throws(() => guardAction(seller, action), /Only an admin can do that/);
     assert.equal(guardAction(admin, action), undefined);
