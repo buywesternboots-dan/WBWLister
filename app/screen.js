@@ -59,10 +59,16 @@ const SELLER_ADVANCED = [
   ['return_days', 'Return window in days (blank = final sale)'],
   ['brand_context', 'Brand context on WBW listings (from the WBW brand page)', 'toggle'],
 ];
+// File name: bootlister-<seller>-<local YYYY-MM-DD>.csv
+const exportFilename = (s = {}, d = new Date()) => {
+  const who = String(s.display_name || s.name || 'all-sellers').normalize('NFKD').replace(/[^\w\s-]/g, '').trim().replace(/[\s_]+/g, '-').replace(/-+/g, '-').toLowerCase() || 'seller';
+  const day = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  return `bootlister-${who}-${day}.csv`;
+};
 // Export: every field on the WBW "Sell a pair" form, then the extra columns this import still needs. Built in lib/export.js.
 const download = (rows, brands = {}, s = {}) => {
   const csv = toCsv(rows, { origin: location.origin, brands, seller: s });
-  Object.assign(document.createElement('a'), { href: URL.createObjectURL(new Blob([csv], { type: 'text/csv' })), download: `bootlister-export-${new Date().toISOString().slice(0, 10)}.csv` }).click();
+  Object.assign(document.createElement('a'), { href: URL.createObjectURL(new Blob([csv], { type: 'text/csv' })), download: exportFilename(s) }).click();
 };
 // Copy-ready posts for other marketplaces; "Posted" tracks where and when each was posted.
 function Share({ item, seller, reload }) {

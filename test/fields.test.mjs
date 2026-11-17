@@ -21,7 +21,7 @@ describe('WBW sell-a-pair fields', () => {
     }
     assert.equal(cols.includes('(in)'), false);
     assert.match(src, /toCsv\(/);
-    assert.match(src, /bootlister-export-/);
+    assert.match(src, /bootlister-\$\{who\}-\$\{day\}\.csv/);
     assert.equal(src.includes('wbw-import-'), false);
   });
 
