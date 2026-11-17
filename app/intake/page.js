@@ -2,13 +2,13 @@ import PublicIntakeForm from '../../components/public-intake-form';
 
 export const metadata = { title: 'Seller intake · BootLister', robots: { index: false, follow: false } };
 
-// Public seller intake. No sign-in. The site layout still has the bug report button.
+// Open form, no sign-in (Dan, Nov 15 11:35 PM). Often filled in by Dan on a call with the seller.
 export default function IntakePage() {
   return (
     <main>
       <style>{css}</style>
       <h1>Seller intake</h1>
-      <p className="intro">A short form so we can set up your Western Boot World seller profile and import your listings for review.</p>
+      <p className="intro">Saving creates the BootLister seller, then shows what to paste into Western Boot World.</p>
       <PublicIntakeForm />
     </main>
   );
@@ -29,8 +29,26 @@ input,select,textarea,button{font:inherit;padding:10px 12px;border:1px solid #cf
 .primary{background:#1f6f6b;border-color:#1f6f6b;color:#fff}
 .primary:disabled{opacity:.5}
 .err{color:#a3261b;margin:0}
+.check span{display:flex;flex-direction:column;gap:2px}
+legend{font-size:1.05rem}
+b{color:#2b2118}
+.choice{border:0;padding:4px 0;gap:10px}
+.choice legend{padding:0;font-weight:500;color:#2b2118;font-size:15px}
+.known{margin:4px 0;padding:12px;border-radius:6px;background:#eef6f5;color:#1f4f4c;font-size:15px}
+.known a{color:#1f6f6b;font-weight:600}
+h3{margin:12px 0 0;font-size:1rem;color:#1f6f6b}
+.pw{position:relative;display:flex}
+.pw input{flex:1;padding-right:48px}
+.pw .eye{position:absolute;right:2px;top:50%;transform:translateY(-50%);width:44px!important;height:40px;padding:0;border:0;background:transparent;display:flex;align-items:center;justify-content:center;color:#6b5a4a}
 .preview{width:96px;height:96px;object-fit:cover;border-radius:8px;background:#eee}
+.wbw-setup h2{font-size:1.2rem;margin:4px 0}
+.wbw-link{display:inline-block;padding:10px 14px;background:#1f6f6b;color:#fff;border-radius:6px;font-weight:600;text-decoration:none}
+.wbw-section{border-top:1px solid #e6dfd6;padding-top:8px;margin-top:8px}
+.wbw-row{display:grid;grid-template-columns:1fr auto;gap:2px 8px;padding:6px 0;border-bottom:1px dashed #eee;align-items:center}
+.wbw-label{grid-column:1;font-size:12px;color:#6b5a4a}
+.wbw-value{grid-column:1;white-space:pre-wrap;word-break:break-word}
+.wbw-row .copy{grid-column:2;grid-row:1/span 2;width:auto!important;padding:8px 12px}
+.warn{color:#a3261b}
 .hp{position:absolute;left:-10000px;width:1px;height:1px;overflow:hidden}
-.thanks p{margin:8px 0 0;color:#6b5a4a}
 @media(max-width:640px){main{padding:12px 12px 40px}input,select,textarea,button{width:100%;box-sizing:border-box}}
 `;

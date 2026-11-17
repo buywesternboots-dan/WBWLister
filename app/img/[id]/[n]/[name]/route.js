@@ -6,6 +6,7 @@ import https from 'node:https';
 import { BlockList, isIP } from 'node:net';
 import { getItem } from '../../../../../lib/wbw';
 import { withXmp } from '../../../../../lib/seo';
+import { appliedAsmo } from '../../../../../lib/asmo-wbw';
 
 const MAX_BYTES = 15 * 1024 * 1024, TIMEOUT_MS = 15000;
 const BLOCKED = new BlockList();
@@ -121,11 +122,17 @@ export async function readSourcePhoto(src, opt = {}) {
 export async function GET(req, { params }) {
   // The filename in the path is a label. Lookup is id and photo index, so an older name still resolves.
   const { id, n } = await params;
-  const item = /^\d+$/.test(id) ? await getItem(id) : null, src = item?.photos[n - 1];
-  if (!src) return new Response('Not found', { status: 404 });
+  const item = /^\d+$/.test(id) ? await getItem(id) : null, original = item?.photos[n - 1];
+  if (!original) return new Response('Not found', { status: 404 });
+  const asmo = item ? appliedAsmo(item) : null;
+  const im = asmo?.images?.find(x => x.n === Number(n));
+  const accept = req.headers?.get?.('accept') || '';
+  const wantWebp = /\bimage\/webp\b/i.test(accept);
+  const src = (wantWebp && im?.webp_url) || im?.jpeg_url || original;
   try {
     // Blob and source photos go through the same checks: public address only, raster image types only, size and time caps.
     const { body, type } = await readSourcePhoto(src);
-    return new Response(withXmp(body, item, +n), { headers: { 'Content-Type': type, ...PHOTO_HEADERS } });
+    const out = type === 'image/jpeg' ? withXmp(body, item, +n) : body;
+    return new Response(out, { headers: { 'Content-Type': type, ...PHOTO_HEADERS } });
   } catch { return new Response('Not found', { status: 404 }); }
 }

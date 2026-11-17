@@ -9,7 +9,9 @@ import { toCsv } from '../lib/export';
 import { CHANNELS, post } from '../lib/crosspost';
 import { isExtensionShop, sellerFormState, sellerSavePayload } from '../lib/seller-links';
 import { intakeLabel } from '../lib/intake';
+import { wbwSellerStatus } from '../lib/wbw-status';
 import IntakeForm from '../components/intake-form';
+import { WBW_ACCOUNT_LABEL, WBW_ACCOUNT_URL } from '../lib/wbw-account';
 import IntakeSubmissions from '../components/intake-submissions';
 
 // Selected seller comes from ?seller= (the extension's seller dropdown uses the same names).
@@ -57,10 +59,16 @@ const SELLER_ADVANCED = [
   ['return_days', 'Return window in days (blank = final sale)'],
   ['brand_context', 'Brand context on WBW listings (from the WBW brand page)', 'toggle'],
 ];
+// File name: bootlister-<seller>-<local YYYY-MM-DD>.csv
+const exportFilename = (s = {}, d = new Date()) => {
+  const who = String(s.display_name || s.name || 'all-sellers').normalize('NFKD').replace(/[^\w\s-]/g, '').trim().replace(/[\s_]+/g, '-').replace(/-+/g, '-').toLowerCase() || 'seller';
+  const day = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  return `bootlister-${who}-${day}.csv`;
+};
 // Export: every field on the WBW "Sell a pair" form, then the extra columns this import still needs. Built in lib/export.js.
 const download = (rows, brands = {}, s = {}) => {
   const csv = toCsv(rows, { origin: location.origin, brands, seller: s });
-  Object.assign(document.createElement('a'), { href: URL.createObjectURL(new Blob([csv], { type: 'text/csv' })), download: `bootlister-export-${new Date().toISOString().slice(0, 10)}.csv` }).click();
+  Object.assign(document.createElement('a'), { href: URL.createObjectURL(new Blob([csv], { type: 'text/csv' })), download: exportFilename(s) }).click();
 };
 // Copy-ready posts for other marketplaces; "Posted" tracks where and when each was posted.
 function Share({ item, seller, reload }) {
@@ -77,6 +85,14 @@ const CONCURRENT = 4; // website products imported at once
 // Facebook and Depop block servers, so the Chrome extension imports them (isExtensionShop).
 const done = n => `Done: ${n.added} new, ${n.updated} changed${n.sold != null ? `, ${n.sold} already sold (skipped)` : ''}, ${n.removed} gone (now Pending sold), ${n.failed} failed${n.skipped ? ` ${n.skipped}` : ''}`;
 const daysLeft = i => Math.max(0, 30 - Math.floor((Date.now() - new Date(i.status_at)) / 864e5));
+
+// Read-only WBW API placeholders. There is no toggle; a later API sync will fill these in.
+function WbwStatusBadges({ status, where }) {
+  const badges = (status?.badges ?? wbwSellerStatus(status || {}).badges);
+  return <ul className="wbw-seller-status" data-wbw-status={where}>
+    {badges.map(b => <li key={b.key} data-wbw-status-badge={b.key}><span>{b.label}</span> <span className={b.value == null ? 'pending' : ''}>{b.text}</span></li>)}
+  </ul>;
+}
 
 // Shared item screen. The admin interface passes admin; the seller interface at /seller does not, so those controls are not rendered.
 export default function Screen({ admin = false }) {
@@ -176,6 +192,38 @@ export default function Screen({ admin = false }) {
       .then(r => { if (r.item) setItems(list => list.map(x => x.id === r.item.id ? { ...x, ...r.item } : x)); })
       .catch(e => setErr(e.message))
       .finally(() => setOptBusy(false));
+  };
+  const runAsmo = async ids => {
+    if (!ids?.length) return setErr('Nothing to run ASMO on.');
+    setErr('');
+    setRunState({ label: 'ASMO…', done: 0, total: ids.length, busy: true });
+    let done = 0, optimized = 0, failed = 0, skipped = 0, photos = 0;
+    try {
+      for (let i = 0; i < ids.length; i += 1) {
+        const part = await api('PATCH', { action: 'asmowbw', ids: [ids[i]] });
+        done += part.processed || 1;
+        optimized += part.optimized || 0;
+        failed += part.failed || 0;
+        skipped += part.skipped || 0;
+        photos += part.photos || 0;
+        setRun({ done, total: ids.length, label: `ASMO: ${optimized} updated${failed ? `, ${failed} failed` : ''}` });
+      }
+      setRunState({
+        label: `ASMO finished: ${optimized} listing(s) updated, ${photos} photo(s) named${failed ? `, ${failed} failed` : ''}${skipped ? `, ${skipped} skipped` : ''}. Original photos kept. Titles, descriptions, prices, and sizes were not changed.`,
+      });
+      setSel(new Set());
+      load();
+    } catch (e) { setRunState(null); setErr(e.message); }
+  };
+  const undoAsmo = async ids => {
+    if (!ids?.length) return setErr('Select at least one item to undo ASMO.');
+    setErr('');
+    try {
+      const r = await api('PATCH', { action: 'asmowbw-undo', ids });
+      setRunState({ label: `ASMO undo: ${r.undone || 0} listing(s) restored${r.skipped ? `, ${r.skipped} had nothing to undo` : ''}.` });
+      setSel(new Set());
+      load();
+    } catch (e) { setErr(e.message); }
   };
   const saveSeller = () => api('POST', sellerSavePayload(sellerForm, { rename_from: sellerForm.created_at && current?.name }), '', '/api/sellers')
     .then(s => { setSellerForm(null); s.name === who ? loadSellers() : switchTo(s.name); }).catch(e => setErr(e.message));
@@ -278,14 +326,22 @@ export default function Screen({ admin = false }) {
         <button className="primary" onClick={() => setSellerForm(sellerFormState({ sync: 'off' }))}>+ Add seller</button></>}
         {!admin && current?.name && <button type="button" onClick={() => setIntakeOpen(true)}>{current.intake?.done ? 'Update intake' : 'Finish intake'}</button>}
         {admin && who && <button type="button" onClick={() => act({ action: 'optimize-backfill' })}>Optimize existing</button>}
+        {admin && who && <button type="button" data-asmo disabled={run?.busy} onClick={() => {
+          const ids = sel.size ? [...sel] : shown.map(i => i.id);
+          if (!ids.length) return setErr('Nothing to run ASMO on.');
+          if (!sel.size && !confirm(`Run ASMO on all ${ids.length} listings in this view? Photo names, alt text, and web-sized copies may change. Titles, descriptions, prices, and sizes stay the same. Original photos are kept.`)) return;
+          runAsmo(ids);
+        }}>ASMO</button>}
         {admin && <a className="src" href="/bootlister-extension-0.19.zip" download title="Needed for Facebook and Depop imports">Chrome extension 0.19{ext ? ' ✓' : ''}</a>}
         {admin && <a className="src" href="/admin/bugs">Bug reports</a>}
+        {!admin && <a className="src" href={WBW_ACCOUNT_URL} target="_blank" rel="noopener noreferrer">{WBW_ACCOUNT_LABEL}</a>}
         <a className="src" href="/login" onClick={e => { e.preventDefault(); fetch('/api/login', { method: 'DELETE' }).then(() => location.assign('/login')); }}>Log out</a>
       </div>
       {!admin && <p className="help">Your job is to double-check each listing before it goes live, including anything shown in yellow. When you approve it, it is published right away. It is marked exported here — WBW is not connected yet, so nothing is sent to the live site.</p>}
       {admin && who && <p className="help">When a seller approves a listing, it is published here right away. You can still see and edit every listing. Export CSV is the file for WBW. Nothing is sent to the live site yet.</p>}
       {admin && current?.intake && <p className={current.intake.done ? 'help' : 'warn'}>{intakeLabel(current.intake)}</p>}
-      {admin && !who && !sellerForm && sellers.some(s => s.name) && <ul className="intake-list">{sellers.filter(s => s.name).map(s => <li key={s.seller}>{s.display_name ?? s.seller} — {intakeLabel(s.intake)}</li>)}</ul>}
+      {admin && current?.name && <div className="wbw-seller-status-detail" data-wbw-status-detail><WbwStatusBadges status={current.wbw_status} where="detail" /></div>}
+      {admin && !who && !sellerForm && sellers.some(s => s.name) && <ul className="intake-list" data-seller-list>{sellers.filter(s => s.name).map(s => <li key={s.seller}>{s.display_name ?? s.seller} — {intakeLabel(s.intake)}<WbwStatusBadges status={s.wbw_status} where="list" /></li>)}</ul>}
       {admin && <IntakeSubmissions rows={packets} onChange={() => { loadPackets(); loadSellers(); }} busy={intakeBusy} setBusy={setIntakeBusy} setErr={setErr} />}
       {intakeOpen && current?.name && <IntakeForm seller={current} admin={admin} busy={intakeBusy} error={err} onSave={saveIntake} onClose={() => setIntakeOpen(false)} />}
       {!ext && isExtensionShop(link) && <p className="help">Facebook and Depop import through the BootLister Chrome extension, which uses the sign-in already in this browser:
@@ -294,6 +350,7 @@ export default function Screen({ admin = false }) {
 
       {admin && sellerForm && <div className="panel">
         <strong>{sellerForm.created_at ? 'Edit seller' : 'New seller'}</strong>
+        {sellerForm.created_at && <WbwStatusBadges status={sellerForm.wbw_status || current?.wbw_status} where="detail" />}
         <label>WBW seller name* (the WBW account these items attach to)<input value={sellerForm.name ?? ''} onChange={setForm('name')} /></label>
         <label>Display name*<input value={sellerForm.display_name ?? ''} onChange={setForm('display_name')} /></label>
         <label>Shop link (website, Poshmark, eBay, Facebook, or Depop)<input value={sellerForm.shop_link ?? ''} onChange={setForm('shop_link')} /></label>
@@ -362,6 +419,8 @@ export default function Screen({ admin = false }) {
           {!live && tab !== 'pending' && <button onClick={() => bulk({ action: 'restore' })}>Restore</button>}
           {admin && <button onClick={scan}>Scan photos for ID info</button>}
           {admin && <button onClick={() => { const to = prompt('Move the selected items to which seller?'); if (to) bulk({ action: 'move', to }); }}>Move to seller…</button>}
+          {admin && <button type="button" data-asmo disabled={run?.busy} onClick={() => runAsmo([...sel])}>ASMO</button>}
+          {admin && <button type="button" data-asmo-undo disabled={run?.busy} onClick={() => undoAsmo([...sel])}>Undo ASMO</button>}
           {admin && <button onClick={() => confirm(`Delete ${sel.size} items? Their photos and details stay in the WBW photo archive.`) && bulk({ action: 'delete' })}>Delete</button>}
         </>}
       </div>}
@@ -401,6 +460,7 @@ export default function Screen({ admin = false }) {
               {!admin && i.approved_at && <small className="warn">Saving changes takes it off the exported list until you approve it again.</small>}
             </div> : <div className="info" onClick={() => setEdit(i)}>
               <strong>{i.title || 'Untitled'}</strong>
+              {i.asmowbw?.media === 'asmowbw' && <small data-asmo-applied>ASMO applied{i.asmowbw.applied_at ? ` ${String(i.asmowbw.applied_at).slice(0, 10)}` : ''}</small>}
               {i.source_url && <a className="src" href={i.source_url} target="_blank" onClick={e => e.stopPropagation()}>
                 View on {{ facebook: 'Facebook', depop: 'Depop', poshmark: 'Poshmark', ebay: 'eBay' }[i.source] ?? i.source}</a>}
               {i.source === 'listperfectly' && <small>List Perfectly{i.markets ? ` · listed on ${i.markets}` : ''}</small>}
@@ -476,7 +536,12 @@ dl{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:4p
 .guess{background:#fff3c4;border-radius:4px;padding:0 4px}.miss{background:#fde8e6;border-radius:4px;padding:0 4px}
 .preset{margin-left:6px;padding:0 6px;font-size:12px}
 .help{font-size:13px;color:#6b5a4a;background:#fff;border:1px solid #e6dfd6;border-radius:8px;padding:10px}
+.wbw-row{display:grid;grid-template-columns:1fr auto;gap:2px 8px;padding:6px 0;border-bottom:1px dashed #eee;align-items:center}.wbw-label{font-size:12px;color:#6b5a4a}.wbw-value{white-space:pre-wrap;word-break:break-word}.wbw-row .copy{grid-column:2;grid-row:1/span 2}.wbw-section h3{margin:8px 0 0;font-size:14px}
 .intake-list{margin:0 0 12px;padding:10px 12px 10px 28px;background:#fff;border:1px solid #e6dfd6;border-radius:8px;font-size:14px}
+.wbw-seller-status{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 0;padding:0;list-style:none}
+.wbw-seller-status li{display:inline-flex;align-items:center;gap:6px;font-size:12px;background:#f4efe8;border:1px solid #e6dfd6;border-radius:999px;padding:2px 8px;color:#2b2118}
+.wbw-seller-status .pending{color:#6b5a4a}
+.wbw-seller-status-detail{margin:0 0 12px}
 .packet{display:flex;gap:10px;align-items:flex-start;padding:8px 0;border-top:1px solid #e6dfd6}
 .packet img{width:48px;height:48px;object-fit:cover;border-radius:6px;background:#eee;flex-shrink:0}
 .packet > div{flex:1;display:flex;flex-direction:column;gap:4px;min-width:0}

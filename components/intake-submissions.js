@@ -1,4 +1,12 @@
 'use client';
+import { EMAIL_PREFS, PAYMENT_METHODS, PRICE_FREQUENCIES } from '../lib/public-intake-constants';
+import WbwSetupPanel from './wbw-setup-panel';
+
+const EXTRA = [['aliases', 'Aliases'], ['bio', 'Bio'], ['fun_fact', 'Fun fact'], ['sells_where', 'Sells today'],
+  ['boot_types', 'Boots'], ['measurement_method', 'Measures boots by'], ['pairs_estimate', 'Pairs to list'], ['notes', 'Notes'],
+  ['pricing_notes', 'Pricing change'], ['shipping_policy', 'Shipping policy'], ['return_policy', 'Return policy']];
+const payLabel = p => [...(p?.methods || []).filter(k => k !== 'other').map(k => PAYMENT_METHODS.find(([m]) => m === k)?.[1] || k), ...(p?.other ? [p.other] : p?.methods?.includes('other') ? ['Other'] : [])].join(', ');
+const STATUS = { pending: 'Seller not created yet', approved: 'Seller created', declined: 'Declined' };
 
 const api = (method, body, path = '/api/intake-submissions') =>
   fetch(path, { method, headers: { 'Content-Type': 'application/json' }, body: body && JSON.stringify(body) })
@@ -24,26 +32,46 @@ export default function IntakeSubmissions({ rows = [], onChange, busy, setBusy, 
     }
   };
 
+  const revealForCopy = id => async () => {
+    if (!confirm('Copy the temporary WBW password? This is recorded.')) throw new Error('Not copied.');
+    const r = await act({ action: 'reveal', id });
+    if (!r?.password) throw new Error('No password saved.');
+    return r.password;
+  };
+
   return (
-    <div className="panel">
-      <strong>Public seller intake</strong>
-      <small>Share <a href="/intake">/intake</a> or create a one-time link. Temporary passwords are for WBW registration only. Reveal is recorded. Clear the password after you register them on WBW.</small>
-      <span><button type="button" disabled={busy} onClick={() => act({ action: 'invite' }, r => { if (r?.url) { const el = document.getElementById('intake-invite-url'); if (el) el.value = `${location.origin}${r.url}`; } })}>Create intake link</button></span>
-      <label>Intake link (shown once)<input id="intake-invite-url" readOnly data-private="" placeholder="Create a link to fill this" /></label>
-      {!rows.length && <p className="empty">No public intake forms yet.</p>}
+    <div className="panel" id="applications">
+      <strong>Seller intakes</strong>
+      <small>Fill in the <a href="/intake">intake sheet</a> on a call. Saving creates the BootLister seller. Temporary passwords are for WBW registration only. Reveal is recorded. Clear the password after you register them on WBW.</small>
+      {!rows.length && <p className="empty">No intakes yet.</p>}
       {rows.map(r => (
         <div className="packet" key={r.id}>
           {r.photo_url && <img src={r.photo_url} alt="" width="48" height="48" />}
           <div>
-            <strong>{r.display_name || 'Intake link (not filled yet)'}</strong>
+            <strong>{r.display_name || 'Intake'}</strong>
+            {r.username && <small>@{r.username}</small>}
+            {r.sells_belts != null && <small><b>Belt dealer:</b> {r.sells_belts ? 'Yes' : 'No'}</small>}
+            {r.price_change_frequency && <small><b>Changes prices:</b> {PRICE_FREQUENCIES.find(([k]) => k === r.price_change_frequency)?.[1] || r.price_change_frequency.replace(/^other: /, 'Other: ')}</small>}
+            {r.encyclopedia_help != null && <small><b>Help build encyclopedia:</b> {r.encyclopedia_help ? 'Yes' : 'No'}</small>}
+            {r.encyclopedia_permission != null && <small><b>Encyclopedia may use photos/details:</b> {r.encyclopedia_permission ? 'Yes' : 'No'}</small>}
+            {r.pricing_change && <small><b>Change pricing:</b> {r.pricing_change === 'yes' ? 'Yes' : 'No, keep prices'}</small>}
+            {r.payment_methods && <small><b>Payment methods:</b> {payLabel(r.payment_methods)}</small>}
+            {r.email && <details className="wbw-copy"><summary>WBW account setup</summary>
+              <WbwSetupPanel row={r} reveal={r.has_password ? revealForCopy(r.id) : null} />
+            </details>}
+            {r.status === 'approved' && r.seller_name && <small><b>BootLister seller:</b> {r.seller_name}</small>}
+            {r.has_wbw_account != null && <small><b>WBW account:</b> {r.has_wbw_account ? 'Already has one (link it)' : 'Needs one (we set it up)'}</small>}
+            {r.import_mode && <small><b>Import:</b> {r.import_mode === 'live' ? 'Live (list for sale right away)' : 'Drafts in their WBW account'}</small>}
             <small>{r.email || 'No email yet'}{r.location ? ` · ${r.location}` : ''}{r.phone ? ` · ${r.phone}` : ''}</small>
-            <small>{r.status === 'approved' ? `Approved as ${r.seller_name}` : 'Pending'}{r.has_password ? ' · password saved' : r.password_cleared_at ? ' · password cleared' : ' · no password'}</small>
+            <small>{STATUS[r.status] || r.status}{r.has_password ? ' · password saved' : r.password_cleared_at ? ' · password cleared' : ' · no password'}</small>
+            {EXTRA.filter(([k]) => r[k]).map(([k, l]) => <small key={k}><b>{l}:</b> {r[k]}</small>)}
+            {r.email_prefs && <small><b>Emails:</b> {EMAIL_PREFS.filter(([k]) => r.email_prefs[k]).map(([, l]) => l).join(', ') || 'none'}</small>}
             {r.has_password && <label>Temporary WBW password<input id={`pw-${r.id}`} data-private="" type="text" readOnly autoComplete="off" />
             </label>}
             <span>
+              {r.status === 'pending' && r.email && <button type="button" className="primary" disabled={busy} onClick={() => act({ action: 'create-seller', id: r.id })}>Create BootLister seller</button>}
               {r.has_password && <button type="button" disabled={busy} onClick={() => reveal(r.id)}>Reveal password</button>}
               {r.has_password && <button type="button" disabled={busy} onClick={() => confirm('Clear this password? Use this after you register them on WBW.') && act({ action: 'clear', id: r.id })}>Clear password (registered on WBW)</button>}
-              {r.status !== 'approved' && r.display_name && r.email && <button type="button" className="primary" disabled={busy} onClick={() => confirm(`Approve ${r.display_name} as a BootLister seller?`) && act({ action: 'approve', id: r.id })}>Approve into a seller</button>}
             </span>
           </div>
         </div>

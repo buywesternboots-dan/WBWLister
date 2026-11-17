@@ -1,5 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
+import VideoPlaceholder from './video-placeholder';
 
 const obj = v => {
   if (!v) return null;
@@ -59,6 +60,7 @@ export default function OptimizePanel({ item, proposal, title, description, busy
       <small>Photo copy names for the CSV. Stored files and the seller’s source images are not renamed. Pixels are not changed.</small>
       <ul>{(p.images ?? []).map(im => <li key={im.n}>{im.file} — {im.alt}<br />stored: {im.stored_url}</li>)}</ul>
     </div>
+    <VideoPlaceholder />
     <label>SEO description (not exported — the sell-a-pair file has no meta description column)
       <textarea readOnly rows="3" value={p.portable?.seo_description ?? ''} /></label>
     <small>{p.portable?.note}</small>

@@ -5,7 +5,9 @@ import { admitIntakeLimit, submitPublicIntake } from '../../../lib/public-intake
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
-// Public POST. Rate-limited and honeypotted. Never returns the temporary password or an intake id.
+// Open POST from /intake (no sign-in). Rate-limited and honeypotted.
+// Saves the intake and creates the BootLister seller. Returns only the new seller name, never the password,
+// an intake id, or anything from another submission.
 export async function publicIntakeResponse(req, db = { admit: admitIntakeLimit, submit: submitPublicIntake }, env = process.env) {
   if (req.method !== 'POST') throw new HttpError('Please log in.', 401);
   let body;
@@ -20,8 +22,8 @@ export async function publicIntakeResponse(req, db = { admit: admitIntakeLimit, 
     const emailGate = await db.admit(`email:${email.slice(0, 200)}`, INTAKE_LIMIT);
     if (!emailGate.ok) throw new HttpError('Please wait a bit before sending another form.', 429);
   }
-  await db.submit(body, { ip, env });
-  return { ok: true };
+  const out = await db.submit(body, { ip, env });
+  return { ok: true, seller_name: out?.seller_name ?? null };
 }
 
 export const POST = handle(req => publicIntakeResponse(req));

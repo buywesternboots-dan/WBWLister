@@ -1,0 +1,5 @@
+# Core (already on the box). View analysis uses NumPy + Pillow.
+# OpenCV and onnxruntime are optional; the photo-to-video venv has both.
+pillow>=10
+numpy>=1.26
+piexif>=1.1.3
