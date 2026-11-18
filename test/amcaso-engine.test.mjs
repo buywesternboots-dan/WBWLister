@@ -92,24 +92,35 @@ test('EXIF GPS is removed in place; orientation and everything else stay', async
   assert.deepEqual(jpegScanPayload(out.image), jpegScanPayload(withGps));
 });
 
-test('still GIF and BMP are converted to JPEG with metadata and reported', async () => {
+test('still GIF and BMP keep original bytes and pixel size', async () => {
   const sharp = (await import('sharp')).default;
   const gif = await sharp({ create: { width: 1200, height: 1000, channels: 3, background: '#8b4513' } }).gif().toBuffer();
   const g = await prepareWbwImage(gif, golden.meta);
-  assert.equal(g.format, 'jpeg');
-  assert.equal(g.converted, true);
-  assert.equal(g.converted_from, 'gif');
+  assert.equal(g.format, 'gif');
+  assert.equal(g.converted, false);
+  assert.equal(g.metadata_written, false);
+  assert.equal(g.image.equals(gif), true);
   assert.deepEqual([g.width, g.height], [1200, 1000]);
-  assert.ok(g.warnings.includes('GIF cannot hold standard XMP; converted to JPEG'));
-  assert.equal(readXmpFields(g.image).credit, golden.meta.credit);
+  assert.match(g.warnings.join(' '), /GIF kept as original/);
   const w = 3, h = 2, row = 12, bmp = Buffer.alloc(54 + row * h);
   bmp.write('BM', 0, 'latin1'); bmp.writeUInt32LE(bmp.length, 2); bmp.writeUInt32LE(54, 10); bmp.writeUInt32LE(40, 14);
   bmp.writeInt32LE(w, 18); bmp.writeInt32LE(h, 22); bmp.writeUInt16LE(1, 26); bmp.writeUInt16LE(24, 28);
   const b = await prepareWbwImage(bmp, golden.meta);
-  assert.equal(b.format, 'jpeg');
-  assert.equal(b.converted_from, 'bmp');
-  assert.deepEqual(size(b.image).width, 3);
-  assert.ok(b.warnings.some(x => x.startsWith('shortest edge 2 px')));
+  assert.equal(b.format, 'bmp');
+  assert.equal(b.converted, false);
+  assert.equal(b.image.equals(bmp), true);
+  assert.deepEqual([b.width, b.height], [3, 2]);
+});
+
+test('an optimized JPEG keeps the source pixel dimensions', async () => {
+  const sharp = (await import('sharp')).default;
+  const wide = await sharp({ create: { width: 2400, height: 1800, channels: 3, background: '#8b4513' } }).jpeg().toBuffer();
+  const { jpegScanPayload } = await import('../lib/photo-meta.js');
+  const out = await prepareWbwImage(wide, golden.meta);
+  assert.deepEqual([out.width, out.height], [2400, 1800]);
+  assert.deepEqual(size(out.image), { width: 2400, height: 1800, components: 3 });
+  assert.deepEqual(jpegScanPayload(out.image), jpegScanPayload(wide));
+  assert.equal(out.converted, false);
 });
 
 test('runEngine reports an unreadable photo as an error and returns no file for it', async () => {
