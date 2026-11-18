@@ -2,4 +2,12 @@ node_modules
 .next
 .env*
 .vercel
+public/bootlister.zip
 public/wbw-importer.zip
+
+# Python worker / vendored asmoWBW
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.asmo-wbw/

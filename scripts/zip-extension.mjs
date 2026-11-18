@@ -1,6 +1,6 @@
 // Packs extension/ into public/wbw-importer.zip (stored, uncompressed) so the app can offer the extension for download.
 // Runs before every build (package.json "build").
-import { readdirSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
+import { readdirSync, readFileSync, writeFileSync, mkdirSync, unlinkSync } from 'fs';
 import { crc32 } from 'zlib';
 
 const files = readdirSync('extension').map(name => [Buffer.from(`wbw-importer/${name}`), readFileSync(`extension/${name}`)]);
@@ -19,5 +19,12 @@ const dir = Buffer.concat(central), end = Buffer.alloc(22);
 end.writeUInt32LE(0x06054b50, 0); end.writeUInt16LE(files.length, 8); end.writeUInt16LE(files.length, 10);
 end.writeUInt32LE(dir.length, 12); end.writeUInt32LE(offset, 16);
 mkdirSync('public', { recursive: true });
-writeFileSync('public/wbw-importer.zip', Buffer.concat([...local, dir, end]));
-console.log(`public/wbw-importer.zip: ${files.length} files`);
+const zip = Buffer.concat([...local, dir, end]);
+const version = JSON.parse(readFileSync('extension/manifest.json', 'utf8')).version;
+const current = `bootlister-extension-${version}.zip`;
+for (const name of readdirSync('public')) {
+  if (/^bootlister-extension-.*\.zip$/.test(name) && name !== current) unlinkSync(`public/${name}`);
+}
+writeFileSync('public/wbw-importer.zip', zip);
+writeFileSync(`public/${current}`, zip);
+console.log(`public/wbw-importer.zip and public/bootlister-extension-${version}.zip: ${files.length} files`);

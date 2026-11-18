@@ -1,0 +1,786 @@
+{
+ "tool": "amcasoWBW 0.3.2 @ 01b4bc5",
+ "meta": {
+  "title": "Lucchese Men's 0123 Black, Cherry Goat cowboy boots size 10 D width (photo 1)",
+  "description": "Lucchese cowboy boots style 0123 & \"goat\" <size 10>. Photo 1 of 3.",
+  "keywords": [
+   "Lucchese",
+   "Men's",
+   "0123",
+   "size 10",
+   "Café"
+  ],
+  "credit": "Dan Hoffenberg via westernbootworld.com",
+  "copyright": "westernbootworld.com"
+ },
+ "text": [
+  {
+   "name": "lucchese",
+   "facts_fp": "59bced17",
+   "seo_title": "Black Cherry Goat Lucchese cowboy boots style 0123 size 10 D width",
+   "seo_description": "Lucchese cowboy boots style 0123 size 10 D width Black Cherry. Style #: 0123 Black cherry goat Lucchese cowboy boots, size 10 D. sole 12 in, heel 1.5 in.",
+   "credit": "Dan Hoffenberg via westernbootworld.com",
+   "listing_slug": "lucchese-0123-black-cherry-goat-cowboy-boots-10d",
+   "fields": {
+    "brand": "Lucchese",
+    "size": "10",
+    "width": "D",
+    "color": "Black Cherry",
+    "material": "Goat",
+    "sole_length": "12",
+    "heel_height": "1.5",
+    "style": "0123",
+    "noun": "cowboy boots"
+   },
+   "flags": {
+    "brand_exact": false,
+    "style_status": "blank",
+    "material_status": "none"
+   },
+   "omitted": [
+    {
+     "field": "sized_for",
+     "reason": "Left out of the new wording because the listing does not state it."
+    },
+    {
+     "field": "material_type",
+     "reason": "Inferred from the listing and not verified, so it is left out of the new wording."
+    }
+   ],
+   "images": [
+    {
+     "n": 1,
+     "filename": "lucchese-0123-black-cherry-goat-cowboy-boots-10d-1.jpg",
+     "alt": "Lucchese cowboy boots in Black Cherry Goat style 0123 size 10 D width - photo 1 of 3",
+     "caption": "Lucchese cowboy boots style 0123 size 10 D width. Sole 12 in, heel 1.5 in. Photo 1 of 3.",
+     "title": "Black Cherry Goat Lucchese cowboy boots style 0123 size 10 D width (photo 1)",
+     "keywords": [
+      "Lucchese",
+      "0123",
+      "Black Cherry",
+      "Goat",
+      "cowboy boots",
+      "size 10",
+      "D width"
+     ]
+    },
+    {
+     "n": 2,
+     "filename": "lucchese-0123-black-cherry-goat-cowboy-boots-10d-2.jpg",
+     "alt": "Lucchese 0123 cowboy boots Black Cherry Goat size 10 D width - photo 2 of 3",
+     "caption": "Lucchese 0123 in Black Cherry Goat size 10 D width. Photo 2 of 3.",
+     "title": "Black Cherry Goat Lucchese cowboy boots style 0123 size 10 D width (photo 2)",
+     "keywords": [
+      "Lucchese",
+      "0123",
+      "Black Cherry",
+      "Goat",
+      "cowboy boots",
+      "size 10",
+      "D width"
+     ]
+    },
+    {
+     "n": 3,
+     "filename": "lucchese-0123-black-cherry-goat-cowboy-boots-10d-3.jpg",
+     "alt": "Lucchese 0123 Black Cherry Goat cowboy boots size 10 D width - photo 3 of 3",
+     "caption": "Black Cherry Goat Lucchese cowboy boots , style 0123 size 10 D width. Photo 3 of 3.",
+     "title": "Black Cherry Goat Lucchese cowboy boots style 0123 size 10 D width (photo 3)",
+     "keywords": [
+      "Lucchese",
+      "0123",
+      "Black Cherry",
+      "Goat",
+      "cowboy boots",
+      "size 10",
+      "D width"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "lucchese-ref",
+   "facts_fp": "59bced17",
+   "seo_title": "Lucchese cowboy boots style 0123 Black Cherry Goat size 10 D width",
+   "seo_description": "Lucchese 0123 size 10D Black Cherry. Style #: 0123 Black cherry goat Lucchese cowboy boots, size 10 D. sole 12 in, heel 1.5 in.",
+   "credit": "Dan Hoffenberg via westernbootworld.com",
+   "listing_slug": "lucchese-0123-black-cherry-goat-cowboy-boots-10d",
+   "fields": {
+    "brand": "Lucchese",
+    "size": "10",
+    "width": "D",
+    "color": "Black Cherry",
+    "material": "Goat",
+    "sole_length": "12",
+    "heel_height": "1.5",
+    "style": "0123",
+    "noun": "cowboy boots"
+   },
+   "flags": {
+    "brand_exact": false,
+    "style_status": "matched",
+    "material_status": "none"
+   },
+   "omitted": [
+    {
+     "field": "sized_for",
+     "reason": "Left out of the new wording because the listing does not state it."
+    },
+    {
+     "field": "material_type",
+     "reason": "Inferred from the listing and not verified, so it is left out of the new wording."
+    }
+   ],
+   "images": [
+    {
+     "n": 1,
+     "filename": "lucchese-0123-black-cherry-goat-cowboy-boots-10d-1.jpg",
+     "alt": "Lucchese 0123 cowboy boots Black Cherry Goat size 10 D width - photo 1 of 3",
+     "caption": "Lucchese 0123 in Black Cherry Goat size 10 D width. Photo 1 of 3.",
+     "title": "Lucchese cowboy boots style 0123 Black Cherry Goat size 10 D width (photo 1)",
+     "keywords": [
+      "Lucchese",
+      "0123",
+      "Black Cherry",
+      "Goat",
+      "cowboy boots",
+      "size 10",
+      "D width"
+     ]
+    },
+    {
+     "n": 2,
+     "filename": "lucchese-0123-black-cherry-goat-cowboy-boots-10d-2.jpg",
+     "alt": "Lucchese cowboy boots in Black Cherry Goat style 0123 size 10 D width - photo 2 of 3",
+     "caption": "Lucchese cowboy boots style 0123 size 10 D width. Sole 12 in, heel 1.5 in. Photo 2 of 3.",
+     "title": "Lucchese cowboy boots style 0123 Black Cherry Goat size 10 D width (photo 2)",
+     "keywords": [
+      "Lucchese",
+      "0123",
+      "Black Cherry",
+      "Goat",
+      "cowboy boots",
+      "size 10",
+      "D width"
+     ]
+    },
+    {
+     "n": 3,
+     "filename": "lucchese-0123-black-cherry-goat-cowboy-boots-10d-3.jpg",
+     "alt": "Black Cherry Goat Lucchese cowboy boots style 0123 size 10 D width - photo 3 of 3",
+     "caption": "Lucchese cowboy boots style 0123 Black Cherry Goat size 10 D width. Photo 3 of 3.",
+     "title": "Lucchese cowboy boots style 0123 Black Cherry Goat size 10 D width (photo 3)",
+     "keywords": [
+      "Lucchese",
+      "0123",
+      "Black Cherry",
+      "Goat",
+      "cowboy boots",
+      "size 10",
+      "D width"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "guessed",
+   "facts_fp": "8af08236",
+   "seo_title": "cowboy boots",
+   "seo_description": "cowboy boots. Worn a few times. Great shape. sole 12 in, heel 1.5 in.",
+   "credit": "Dan Hoffenberg via westernbootworld.com",
+   "listing_slug": "cowboy-boots",
+   "fields": {
+    "sole_length": "12",
+    "heel_height": "1.5",
+    "noun": "cowboy boots"
+   },
+   "flags": {
+    "brand_exact": false,
+    "style_status": "blank",
+    "material_status": "none"
+   },
+   "omitted": [
+    {
+     "field": "sized_for",
+     "reason": "Inferred from the listing and not verified, so it is left out of the new wording."
+    },
+    {
+     "field": "brand",
+     "reason": "Inferred from the listing and not verified, so it is left out of the new wording."
+    },
+    {
+     "field": "size",
+     "reason": "Inferred from the listing and not verified, so it is left out of the new wording."
+    },
+    {
+     "field": "width",
+     "reason": "Inferred from the listing and not verified, so it is left out of the new wording."
+    },
+    {
+     "field": "color",
+     "reason": "Inferred from the listing and not verified, so it is left out of the new wording."
+    },
+    {
+     "field": "material",
+     "reason": "Inferred from the listing and not verified, so it is left out of the new wording."
+    }
+   ],
+   "images": [
+    {
+     "n": 1,
+     "filename": "cowboy-boots-1.jpg",
+     "alt": "cowboy boots - photo 1 of 2",
+     "caption": "in. Photo 1 of 2.",
+     "title": "cowboy boots (photo 1)",
+     "keywords": [
+      "cowboy boots"
+     ]
+    },
+    {
+     "n": 2,
+     "filename": "cowboy-boots-2.jpg",
+     "alt": "cowboy boots in - photo 2 of 2",
+     "caption": "cowboy boots. Sole 12 in, heel 1.5 in. Photo 2 of 2.",
+     "title": "cowboy boots (photo 2)",
+     "keywords": [
+      "cowboy boots"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "belt",
+   "facts_fp": "219a3527",
+   "seo_title": "Tony Lama belt Brown Leather size 34",
+   "seo_description": "Tony Lama belt size 34 Brown. Brown tooled leather belt, size 34. Pre-owned.",
+   "credit": "Dan Hoffenberg via westernbootworld.com",
+   "listing_slug": "tony-lama-brown-leather-belt-34",
+   "fields": {
+    "brand": "Tony Lama",
+    "size": "34",
+    "color": "Brown",
+    "material": "Leather",
+    "condition": "Broken In",
+    "noun": "belt"
+   },
+   "flags": {
+    "brand_exact": true,
+    "style_status": "blank",
+    "material_status": "none"
+   },
+   "omitted": [],
+   "images": [
+    {
+     "n": 1,
+     "filename": "tony-lama-brown-leather-belt-34-1.jpg",
+     "alt": "Tony Lama belt Brown Leather size 34",
+     "caption": "Tony Lama in Brown Leather size 34.",
+     "title": "Tony Lama belt Brown Leather size 34 (photo 1)",
+     "keywords": [
+      "Tony Lama",
+      "Brown",
+      "Leather",
+      "belt",
+      "size 34"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "women",
+   "facts_fp": "8791bfdd",
+   "seo_title": "Old Gringo cowboy boots size 7.5 B width",
+   "seo_description": "Old Gringo size 7.5B. Women's Old Gringo embroidered boots, size 7.5 B, snip toe, cuban heel. Shaft 13 inches. Brand new with tags. shaft 13 in.",
+   "credit": "Dan Hoffenberg via westernbootworld.com",
+   "listing_slug": "old-gringo-womens-cowboy-boots-7-5b",
+   "fields": {
+    "brand": "Old Gringo",
+    "sized_for": "Women",
+    "size": "7.5",
+    "width": "B",
+    "toe": "Snip",
+    "heel": "Cuban",
+    "shaft_height": "13",
+    "keywords": "embroidered, snip toe, Western",
+    "noun": "cowboy boots"
+   },
+   "flags": {
+    "brand_exact": false,
+    "style_status": "blank",
+    "material_status": "none"
+   },
+   "omitted": [
+    {
+     "field": "color",
+     "reason": "Inferred from the listing and not verified, so it is left out of the new wording."
+    },
+    {
+     "field": "condition",
+     "reason": "Inferred from the listing and not verified, so it is left out of the new wording."
+    }
+   ],
+   "images": [
+    {
+     "n": 1,
+     "filename": "old-gringo-womens-cowboy-boots-7-5b-1.jpg",
+     "alt": "Old Gringo cowboy boots in size 7.5 B width - photo 1 of 4",
+     "caption": "Old Gringo cowboy boots size 7.5 B width. Photo 1 of 4.",
+     "title": "Old Gringo cowboy boots size 7.5 B width (photo 1)",
+     "keywords": [
+      "Old Gringo",
+      "Women's",
+      "cowboy boots",
+      "size 7.5",
+      "B width",
+      "Snip",
+      "Cuban",
+      "embroidered",
+      "snip toe",
+      "Western"
+     ]
+    },
+    {
+     "n": 2,
+     "filename": "old-gringo-womens-cowboy-boots-7-5b-2.jpg",
+     "alt": "Old Gringo cowboy boots size 7.5 B width - photo 2 of 4",
+     "caption": "Old Gringo cowboy boots Snip, Cuban size 7.5 B width. Photo 2 of 4.",
+     "title": "Old Gringo cowboy boots size 7.5 B width (photo 2)",
+     "keywords": [
+      "Old Gringo",
+      "Women's",
+      "cowboy boots",
+      "size 7.5",
+      "B width",
+      "Snip",
+      "Cuban",
+      "embroidered",
+      "snip toe",
+      "Western"
+     ]
+    },
+    {
+     "n": 3,
+     "filename": "old-gringo-womens-cowboy-boots-7-5b-3.jpg",
+     "alt": "Old Gringo Women's cowboy boots size 7.5 B width - photo 3 of 4",
+     "caption": "Old Gringo cowboy boots size 7.5 B width. Shaft 13 in. Photo 3 of 4.",
+     "title": "Old Gringo cowboy boots size 7.5 B width (photo 3)",
+     "keywords": [
+      "Old Gringo",
+      "Women's",
+      "cowboy boots",
+      "size 7.5",
+      "B width",
+      "Snip",
+      "Cuban",
+      "embroidered",
+      "snip toe",
+      "Western"
+     ]
+    },
+    {
+     "n": 4,
+     "filename": "old-gringo-womens-cowboy-boots-7-5b-4.jpg",
+     "alt": "Old Gringo cowboy boots size 7.5 B width - photo 4 of 4",
+     "caption": "Old Gringo in size 7.5 B width. Photo 4 of 4.",
+     "title": "Old Gringo cowboy boots size 7.5 B width (photo 4)",
+     "keywords": [
+      "Old Gringo",
+      "Women's",
+      "cowboy boots",
+      "size 7.5",
+      "B width",
+      "Snip",
+      "Cuban",
+      "embroidered",
+      "snip toe",
+      "Western"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "sample",
+   "facts_fp": "3504468c",
+   "seo_title": "Justin 3302 cowboy boots in size 11 EE width",
+   "seo_description": "Justin cowboy boots style 3302 size 11 EE width. Justin ropers, size 11 EE, made in USA. Model # 3302.",
+   "credit": "Dan Hoffenberg via westernbootworld.com",
+   "listing_slug": "justin-3302-cowboy-boots-11ee",
+   "fields": {
+    "brand": "Justin",
+    "size": "11",
+    "width": "EE",
+    "made_in": "USA",
+    "style": "3302",
+    "noun": "cowboy boots"
+   },
+   "flags": {
+    "brand_exact": true,
+    "style_status": "matched",
+    "material_status": "needs-human"
+   },
+   "omitted": [
+    {
+     "field": "material",
+     "reason": "Inferred from the listing and not verified, so it is left out of the new wording."
+    }
+   ],
+   "images": [
+    {
+     "n": 1,
+     "filename": "justin-3302-cowboy-boots-11ee-1.jpg",
+     "alt": "Justin cowboy boots style 3302 size 11 EE width - photo 1 of 2",
+     "caption": "Justin cowboy boots , style 3302 size 11 EE width. Photo 1 of 2.",
+     "title": "Justin 3302 cowboy boots in size 11 EE width (photo 1)",
+     "keywords": [
+      "Justin",
+      "3302",
+      "cowboy boots",
+      "size 11",
+      "EE width"
+     ]
+    },
+    {
+     "n": 2,
+     "filename": "justin-3302-cowboy-boots-11ee-2.jpg",
+     "alt": "Justin 3302 cowboy boots size 11 EE width - photo 2 of 2",
+     "caption": "Justin cowboy boots , style 3302 size 11 EE width. Photo 2 of 2.",
+     "title": "Justin 3302 cowboy boots in size 11 EE width (photo 2)",
+     "keywords": [
+      "Justin",
+      "3302",
+      "cowboy boots",
+      "size 11",
+      "EE width"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "bare",
+   "facts_fp": "eb4f2666",
+   "seo_title": "in",
+   "seo_description": "",
+   "credit": "Dan Hoffenberg via westernbootworld.com",
+   "listing_slug": "listing-12",
+   "fields": {},
+   "flags": {
+    "brand_exact": false,
+    "style_status": "blank",
+    "material_status": "none"
+   },
+   "omitted": [],
+   "images": [
+    {
+     "n": 1,
+     "filename": "1.jpg",
+     "alt": "in - photo 1 of 2",
+     "caption": "in. Photo 1 of 2.",
+     "title": "in (photo 1)",
+     "keywords": []
+    },
+    {
+     "n": 2,
+     "filename": "2.jpg",
+     "alt": "in - photo 2 of 2",
+     "caption": "photo. Photo 2 of 2.",
+     "title": "in (photo 2)",
+     "keywords": []
+    }
+   ]
+  },
+  {
+   "name": "unicode-long",
+   "facts_fp": "db4ca3b9",
+   "seo_title": "Rios of Mercedes cowboy boots Café Full Quill Ostrich size 9.5 D width",
+   "seo_description": "Rios of Mercedes size 9.5D Café. Full quill ostrich, café color. Full quill ostrich, café color. Full quill ostrich, café color. Full quill ostrich, café",
+   "credit": "Dan Hoffenberg via westernbootworld.com",
+   "listing_slug": "rios-of-mercedes-cafe-full-quill-ostrich-cowboy-boots-9-5d",
+   "fields": {
+    "brand": "Rios of Mercedes",
+    "size": "9.5",
+    "width": "D",
+    "color": "Café",
+    "material": "Full Quill Ostrich",
+    "sole_length": "11.75",
+    "shaft_circ": "15",
+    "noun": "cowboy boots"
+   },
+   "flags": {
+    "brand_exact": false,
+    "style_status": "blank",
+    "material_status": "none"
+   },
+   "omitted": [],
+   "images": [
+    {
+     "n": 1,
+     "filename": "rios-of-mercedes-cafe-full-quill-ostrich-cowboy-boots-9-5d-1.jpg",
+     "alt": "Rios of Mercedes cowboy boots Café Full Quill Ostrich size 9.5 D width - photo 1 of 12",
+     "caption": "Rios of Mercedes in Café Full Quill Ostrich size 9.5 D width. Photo 1 of 12.",
+     "title": "Rios of Mercedes cowboy boots Café Full Quill Ostrich size 9.5 D width (photo 1)",
+     "keywords": [
+      "Rios of Mercedes",
+      "Café",
+      "Full Quill Ostrich",
+      "cowboy boots",
+      "size 9.5",
+      "D width"
+     ]
+    },
+    {
+     "n": 2,
+     "filename": "rios-of-mercedes-cafe-full-quill-ostrich-cowboy-boots-9-5d-2.jpg",
+     "alt": "Rios of Mercedes cowboy boots in Café Full Quill Ostrich size 9.5 D width - photo 2 of 12",
+     "caption": "Rios of Mercedes cowboy boots size 9.5 D width. Sole 11.75 in, shaft circ 15 in. Photo 2 of 12.",
+     "title": "Rios of Mercedes cowboy boots Café Full Quill Ostrich size 9.5 D width (photo 2)",
+     "keywords": [
+      "Rios of Mercedes",
+      "Café",
+      "Full Quill Ostrich",
+      "cowboy boots",
+      "size 9.5",
+      "D width"
+     ]
+    },
+    {
+     "n": 3,
+     "filename": "rios-of-mercedes-cafe-full-quill-ostrich-cowboy-boots-9-5d-3.jpg",
+     "alt": "Café Full Quill Ostrich Rios of Mercedes cowboy boots size 9.5 D width - photo 3 of 12",
+     "caption": "Rios of Mercedes cowboy boots Café Full Quill Ostrich size 9.5 D width. Photo 3 of 12.",
+     "title": "Rios of Mercedes cowboy boots Café Full Quill Ostrich size 9.5 D width (photo 3)",
+     "keywords": [
+      "Rios of Mercedes",
+      "Café",
+      "Full Quill Ostrich",
+      "cowboy boots",
+      "size 9.5",
+      "D width"
+     ]
+    },
+    {
+     "n": 4,
+     "filename": "rios-of-mercedes-cafe-full-quill-ostrich-cowboy-boots-9-5d-4.jpg",
+     "alt": "Rios of Mercedes Café Full Quill Ostrich cowboy boots size 9.5 D width - photo 4 of 12",
+     "caption": "Café Full Quill Ostrich Rios of Mercedes cowboy boots size 9.5 D width. Photo 4 of 12.",
+     "title": "Rios of Mercedes cowboy boots Café Full Quill Ostrich size 9.5 D width (photo 4)",
+     "keywords": [
+      "Rios of Mercedes",
+      "Café",
+      "Full Quill Ostrich",
+      "cowboy boots",
+      "size 9.5",
+      "D width"
+     ]
+    },
+    {
+     "n": 5,
+     "filename": "rios-of-mercedes-cafe-full-quill-ostrich-cowboy-boots-9-5d-5.jpg",
+     "alt": "Rios of Mercedes cowboy boots Café Full Quill Ostrich size 9.5 D width - photo 5 of 12",
+     "caption": "Rios of Mercedes in Café Full Quill Ostrich size 9.5 D width. Photo 5 of 12.",
+     "title": "Rios of Mercedes cowboy boots Café Full Quill Ostrich size 9.5 D width (photo 5)",
+     "keywords": [
+      "Rios of Mercedes",
+      "Café",
+      "Full Quill Ostrich",
+      "cowboy boots",
+      "size 9.5",
+      "D width"
+     ]
+    },
+    {
+     "n": 6,
+     "filename": "rios-of-mercedes-cafe-full-quill-ostrich-cowboy-boots-9-5d-6.jpg",
+     "alt": "Rios of Mercedes cowboy boots in Café Full Quill Ostrich size 9.5 D width - photo 6 of 12",
+     "caption": "Rios of Mercedes cowboy boots size 9.5 D width. Sole 11.75 in, shaft circ 15 in. Photo 6 of 12.",
+     "title": "Rios of Mercedes cowboy boots Café Full Quill Ostrich size 9.5 D width (photo 6)",
+     "keywords": [
+      "Rios of Mercedes",
+      "Café",
+      "Full Quill Ostrich",
+      "cowboy boots",
+      "size 9.5",
+      "D width"
+     ]
+    },
+    {
+     "n": 7,
+     "filename": "rios-of-mercedes-cafe-full-quill-ostrich-cowboy-boots-9-5d-7.jpg",
+     "alt": "Café Full Quill Ostrich Rios of Mercedes cowboy boots size 9.5 D width - photo 7 of 12",
+     "caption": "Rios of Mercedes cowboy boots Café Full Quill Ostrich size 9.5 D width. Photo 7 of 12.",
+     "title": "Rios of Mercedes cowboy boots Café Full Quill Ostrich size 9.5 D width (photo 7)",
+     "keywords": [
+      "Rios of Mercedes",
+      "Café",
+      "Full Quill Ostrich",
+      "cowboy boots",
+      "size 9.5",
+      "D width"
+     ]
+    },
+    {
+     "n": 8,
+     "filename": "rios-of-mercedes-cafe-full-quill-ostrich-cowboy-boots-9-5d-8.jpg",
+     "alt": "Rios of Mercedes Café Full Quill Ostrich cowboy boots size 9.5 D width - photo 8 of 12",
+     "caption": "Café Full Quill Ostrich Rios of Mercedes cowboy boots size 9.5 D width. Photo 8 of 12.",
+     "title": "Rios of Mercedes cowboy boots Café Full Quill Ostrich size 9.5 D width (photo 8)",
+     "keywords": [
+      "Rios of Mercedes",
+      "Café",
+      "Full Quill Ostrich",
+      "cowboy boots",
+      "size 9.5",
+      "D width"
+     ]
+    },
+    {
+     "n": 9,
+     "filename": "rios-of-mercedes-cafe-full-quill-ostrich-cowboy-boots-9-5d-9.jpg",
+     "alt": "Rios of Mercedes cowboy boots Café Full Quill Ostrich size 9.5 D width - photo 9 of 12",
+     "caption": "Rios of Mercedes in Café Full Quill Ostrich size 9.5 D width. Photo 9 of 12.",
+     "title": "Rios of Mercedes cowboy boots Café Full Quill Ostrich size 9.5 D width (photo 9)",
+     "keywords": [
+      "Rios of Mercedes",
+      "Café",
+      "Full Quill Ostrich",
+      "cowboy boots",
+      "size 9.5",
+      "D width"
+     ]
+    },
+    {
+     "n": 10,
+     "filename": "rios-of-mercedes-cafe-full-quill-ostrich-cowboy-boots-9-5d-10.jpg",
+     "alt": "Café Full Quill Ostrich Rios of Mercedes cowboy boots size 9.5 D width - photo 10 of 12",
+     "caption": "Rios of Mercedes in Café Full Quill Ostrich size 9.5 D width. Photo 10 of 12.",
+     "title": "Rios of Mercedes cowboy boots Café Full Quill Ostrich size 9.5 D width (photo 10)",
+     "keywords": [
+      "Rios of Mercedes",
+      "Café",
+      "Full Quill Ostrich",
+      "cowboy boots",
+      "size 9.5",
+      "D width"
+     ]
+    },
+    {
+     "n": 11,
+     "filename": "rios-of-mercedes-cafe-full-quill-ostrich-cowboy-boots-9-5d-11.jpg",
+     "alt": "Rios of Mercedes cowboy boots in Café Full Quill Ostrich size 9.5 D width - photo 11 of 12",
+     "caption": "Café Full Quill Ostrich Rios of Mercedes cowboy boots size 9.5 D width. Photo 11 of 12.",
+     "title": "Rios of Mercedes cowboy boots Café Full Quill Ostrich size 9.5 D width (photo 11)",
+     "keywords": [
+      "Rios of Mercedes",
+      "Café",
+      "Full Quill Ostrich",
+      "cowboy boots",
+      "size 9.5",
+      "D width"
+     ]
+    },
+    {
+     "n": 12,
+     "filename": "rios-of-mercedes-cafe-full-quill-ostrich-cowboy-boots-9-5d-12.jpg",
+     "alt": "Rios of Mercedes cowboy boots Café Full Quill Ostrich size 9.5 D width - photo 12 of 12",
+     "caption": "Rios of Mercedes cowboy boots Café Full Quill Ostrich size 9.5 D width. Photo 12 of 12.",
+     "title": "Rios of Mercedes cowboy boots Café Full Quill Ostrich size 9.5 D width (photo 12)",
+     "keywords": [
+      "Rios of Mercedes",
+      "Café",
+      "Full Quill Ostrich",
+      "cowboy boots",
+      "size 9.5",
+      "D width"
+     ]
+    }
+   ]
+  }
+ ],
+ "media": [
+  {
+   "name": "cmyk.jpg",
+   "sha256": "de0c4cc911914313e4fa5155aeb661bf72d849479ec16782d159b122ffee5e19",
+   "format": "jpeg",
+   "width": 1200,
+   "height": 1100,
+   "orientation": 1,
+   "gps_stripped": false,
+   "warnings": []
+  },
+  {
+   "name": "portrait.png",
+   "sha256": "01aab974aa0c602bf4f9c218bcbe6cb0a7536fe6bf46850f2e2fbc71aad6d0b0",
+   "format": "png",
+   "width": 800,
+   "height": 1400,
+   "orientation": null,
+   "gps_stripped": false,
+   "warnings": [
+    "shortest edge 800 px is under 1000 px",
+    "file is 6 KB (very small)"
+   ]
+  },
+  {
+   "name": "prepared-landscape.webp",
+   "sha256": "3e6e3296af52a0f5ccd84e344d311560cedd1fa1ae3f7d6f25988bd6c76fcc6c",
+   "format": "webp",
+   "width": 1600,
+   "height": 900,
+   "orientation": null,
+   "gps_stripped": false,
+   "warnings": [
+    "shortest edge 900 px is under 1000 px",
+    "file is 3 KB (very small)"
+   ]
+  },
+  {
+   "name": "prepared-lucchese.jpg",
+   "sha256": "e1b341d16e64e226e766ccd5302d3ca0b1384e72ef94cea1135e0e2df3423077",
+   "format": "jpeg",
+   "width": 1200,
+   "height": 1200,
+   "orientation": 1,
+   "gps_stripped": false,
+   "warnings": [
+    "file is 42 KB (very small)"
+   ]
+  },
+  {
+   "name": "prepared-side.png",
+   "sha256": "2521971ca92d84a7f1022a6142c3693858d414a8243d134d3bad955101449411",
+   "format": "png",
+   "width": 1200,
+   "height": 800,
+   "orientation": null,
+   "gps_stripped": false,
+   "warnings": [
+    "shortest edge 800 px is under 1000 px",
+    "file is 6 KB (very small)"
+   ]
+  },
+  {
+   "name": "rotated.jpg",
+   "sha256": "fb8c3b35030287ffc2ddea5de8ec9241f453c4c011a95553d5c6126699905bc8",
+   "format": "jpeg",
+   "width": 1500,
+   "height": 1000,
+   "orientation": 6,
+   "gps_stripped": false,
+   "warnings": [
+    "file is 43 KB (very small)"
+   ]
+  },
+  {
+   "name": "tiny.jpg",
+   "sha256": "3b08fd7c16062119d7b55ceb5b2f13afeef48e29ddfc9a8d5017eca63a1567e1",
+   "format": "jpeg",
+   "width": 200,
+   "height": 180,
+   "orientation": 1,
+   "gps_stripped": false,
+   "warnings": [
+    "shortest edge 180 px is under 1000 px",
+    "file is 1 KB (very small)"
+   ]
+  }
+ ]
+}
