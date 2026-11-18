@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { askingPrice, priceFlags } from '../lib/price-flag.js';
 
@@ -54,6 +55,25 @@ test('falls back to the exact brand when the style group is too small', () => {
   assert.equal(flags.get('7').group, 'brand');
   assert.equal(flags.get('7').label, 'Justin');
   assert.equal(flags.get('7').count, 7);
+});
+
+test('similar boots from every seller form one group, and the flag has no other prices', () => {
+  const mine = { ...row(1, 'Lucchese', '0030', 900), seller: 'ada' };
+  assert.equal(priceFlags([mine]).size, 0);
+  const others = Array.from({ length: 6 }, (_, i) => ({ ...row(100 + i, 'Lucchese', '0030', 100 + i), seller: `shop-${i}` }));
+  const flags = priceFlags([mine, ...others]);
+  const flag = flags.get('1');
+  assert.equal(flag.direction, 'high');
+  assert.equal(flag.group, 'brand+style');
+  assert.equal(flag.label, 'Lucchese style 0030');
+  assert.equal(flag.count, 7);
+  assert.deepEqual(Object.keys(flag).sort(), ['count', 'direction', 'group', 'label', 'median']);
+  assert.equal(JSON.stringify(flag).includes('shop-'), false);
+  const src = readFileSync(new URL('../lib/wbw.js', import.meta.url), 'utf8');
+  const fn = src.slice(src.indexOf('export async function getItems'), src.indexOf('export const SELLER_FIELDS'));
+  assert.match(fn, /select id, brand, id_text, price, wbw_price from items/);
+  assert.equal(fn.includes('price, wbw_price from items where seller'), false);
+  assert.match(fn, /seller = \$\{seller\} and status/);
 });
 
 test('a different brand is not pulled into the group', () => {
