@@ -354,7 +354,6 @@ export default function Screen({ admin = false }) {
       </details>}
       {admin && current?.intake && <p className={current.intake.done ? 'help line' : 'warn line'}>{intakeLabel(current.intake)}</p>}
       {admin && current?.name && <div className="wbw-seller-status-detail" data-wbw-status-detail><WbwStatusBadges status={current.wbw_status} where="detail" /></div>}
-      {admin && !who && !sellerForm && sellers.some(s => s.name) && <ul className="intake-list" data-seller-list>{sellers.filter(s => s.name).map(s => <li key={s.seller}>{s.display_name ?? s.seller} — {intakeLabel(s.intake)}<WbwStatusBadges status={s.wbw_status} where="list" /></li>)}</ul>}
       {admin && <IntakeSubmissions rows={packets} onChange={() => { loadPackets(); loadSellers(); }} busy={intakeBusy} setBusy={setIntakeBusy} setErr={setErr} />}
       {intakeOpen && current?.name && <IntakeForm seller={current} admin={admin} busy={intakeBusy} error={err} onSave={saveIntake} onClose={() => setIntakeOpen(false)} />}
       {!ext && isExtensionShop(link) && <details className="help-fold"><summary>Facebook and Depop need the Chrome extension</summary><p className="help">The extension uses the sign-in already in this browser:
@@ -570,7 +569,6 @@ dl{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:6p
 .preset{margin-left:6px;padding:2px 6px;font-size:13px}
 .help{font-size:14px;color:#4a3d31;background:#fff;border:1px solid #e6dfd6;border-radius:8px;padding:10px;margin:6px 0 0}
 .wbw-row{display:grid;grid-template-columns:1fr auto;gap:2px 8px;padding:6px 0;border-bottom:1px dashed #eee;align-items:center}.wbw-label{font-size:13px;color:#4a3d31}.wbw-value{white-space:pre-wrap;word-break:break-word}.wbw-row .copy{grid-column:2;grid-row:1/span 2}.wbw-section h3{margin:8px 0 0;font-size:15px}
-.intake-list{margin:0 0 8px;padding:8px 12px 8px 28px;background:#fff;border:1px solid #e6dfd6;border-radius:8px;font-size:14px}
 .wbw-seller-status{display:flex;flex-wrap:wrap;gap:6px;margin:0;padding:0;list-style:none}
 .wbw-seller-status li{display:inline-flex;align-items:center;gap:6px;font-size:12px;background:#f4efe8;border:1px solid #e6dfd6;border-radius:999px;padding:2px 8px;color:#2b2118}
 .wbw-seller-status .pending{color:#4a3d31}

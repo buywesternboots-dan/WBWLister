@@ -67,19 +67,19 @@ test('the sellers schema is ready for a later API sync and the admin form cannot
   assert.deepEqual(WBW_STATUS_FLAGS.map(f => f.field), ['wbw_signed_up', 'wbw_accepted', 'wbw_phone_verified']);
 });
 
-test('the admin seller list and detail show the three placeholder badges, with no toggles', () => {
+test('badges show only for the selected seller, not as a list of every seller', () => {
   const screen = read('app/screen.js');
   assert.match(screen, /function WbwStatusBadges/);
   assert.match(screen, /data-wbw-status-detail/);
-  assert.match(screen, /data-seller-list/);
-  assert.match(screen, /where="list"/);
   assert.match(screen, /where="detail"/);
   assert.match(screen, /wbwSellerStatus/);
+  assert.equal(screen.includes('data-seller-list'), false);
+  assert.equal(screen.includes('where="list"'), false);
   assert.equal(screen.includes('wbw_signed_up'), false);
   assert.equal(/type="checkbox"[^>]*wbw|wbw[^=]*type="checkbox"/.test(screen), false);
   assert.equal(screen.includes('setWbwStatus'), false);
   assert.equal(screen.includes('action: \'wbw-status\''), false);
   assert.match(screen, /admin && current\?\.name && <div className="wbw-seller-status-detail"/);
-  assert.match(screen, /admin && !who && !sellerForm && sellers.some/);
+  assert.equal(screen.includes('sellers.filter(s => s.name).map'), false);
   assert.equal(screen.includes('{!admin && <WbwStatusBadges'), false);
 });
