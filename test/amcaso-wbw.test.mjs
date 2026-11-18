@@ -402,7 +402,7 @@ test('amcasoWBW CLI accepts a contract listing and returns the output shape (liv
     assert.match(result.open_graph['og:image'], /^https:\/\//);
     assert.equal(result.open_graph['og:image'].startsWith(OG_BASE_URL + '/'), true);
     assert.ok(raw.files.some(f => f.path.endsWith('.jpg')));
-    assert.ok(raw.files.some(f => f.path.endsWith('.webp')));
+    assert.equal(raw.files.some(f => f.path.endsWith('.webp')), false);
   } finally {
     await rm(work, { recursive: true, force: true });
   }

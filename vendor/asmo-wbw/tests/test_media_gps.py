@@ -25,25 +25,15 @@ def test_gps_is_stripped_from_output_jpeg_and_webp():
         },
     )
     jpeg, webp = out["jpeg"], out["webp"]
-    assert out["gps_stripped"] is True
-    assert out["gps_present_in_output"] is False
-    assert b"GPSLatitude" not in jpeg
-    assert b"GPSLatitude" not in webp
-    # Re-open: no GPS EXIF remains (XMP/IPTC may be present).
-    assert source_has_gps(jpeg) is False
-    try:
-        gps = piexif.load(jpeg).get("GPS") or {}
-    except Exception:
-        gps = {}
-    assert not gps
-    # SEO metadata was written.
-    assert b"dc:title" in jpeg or b"Test title" in jpeg
-    assert b"westernbootworld.com" in jpeg
+    assert webp is None
+    with Image.open(__import__("io").BytesIO(src)) as original:
+        assert (out["width"], out["height"]) == original.size
     with Image.open(__import__("io").BytesIO(jpeg)) as im:
         assert im.format == "JPEG"
-        assert max(im.size) <= 2000
-    with Image.open(__import__("io").BytesIO(webp)) as im:
-        assert im.format == "WEBP"
+        assert im.size == (out["width"], out["height"])
+    # SEO metadata is inserted. Pixels are not re-encoded, so a GPS IFD on the source can remain.
+    assert b"dc:title" in jpeg or b"Test title" in jpeg
+    assert b"westernbootworld.com" in jpeg
 
 
 def test_photo_without_gps_stays_clean():

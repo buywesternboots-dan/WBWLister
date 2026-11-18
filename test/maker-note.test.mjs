@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { appendMakerNote, exactMaker, makerSnippet, withoutMakerNote } from '../lib/maker-note.js';
+import { appendMakerNote, exactBrandInText, exactMaker, makerSnippet, withoutMakerNote } from '../lib/maker-note.js';
 import { applyAutoOptimization } from '../lib/optimize.js';
 import { bundledStyleSample, matchStyleSample, normStyle, parseStyleSample, styleIndex } from '../lib/style-sample.js';
 import { bundledDirectory } from '../lib/wbw-ref.js';
@@ -32,6 +32,24 @@ test('maker notes vary by listing and stay fixed for one listing', () => {
     assert.doesNotMatch(note, /founded|legendary|handmade|this pair/i);
     assert.match(note, /Lucchese/);
   }
+});
+
+test('an exact directory name in the listing fills brand details and keeps the original description', () => {
+  assert.equal(exactBrandInText('Liberty Boot Company 320942', dir.makers).name, 'Liberty Boot Company');
+  assert.equal(exactBrandInText('Tony Lama Signature Series boots', dir.makers).name, 'Tony Lama Signature Series');
+  assert.equal(exactBrandInText('not a maker name', dir.makers), null);
+  const original = 'Size 9 D. Worn.';
+  const fields = { title: 'Liberty Boot Company 320942', description: original, brand: null, price: 80, photos: ['https://cdn.example/a.jpg'] };
+  applyAutoOptimization(fields, { ...fields, source_id: 'lib-1' }, { directory: dir.makers });
+  assert.equal(fields.brand, 'Liberty Boot Company');
+  assert.equal(fields.title, 'Liberty Boot Company 320942');
+  assert.equal(fields.description.slice(0, original.length), original);
+  assert.equal(fields.description.startsWith(`${original}\n\n`), true);
+  assert.equal(fields.opt_proposal.maker.name, 'Liberty Boot Company');
+  assert.match(fields.opt_proposal.maker.location, /Guanajuato/);
+  assert.match(fields.opt_proposal.maker.blurb, /liberty boot company/i);
+  assert.notEqual(fields.opt_proposal.optimized_title, fields.title);
+  assert.equal(fields.opt_proposal.optimized_description.includes(original), false);
 });
 
 test('import appends the maker note and keeps the original description as a prefix', () => {

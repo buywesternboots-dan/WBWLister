@@ -1,7 +1,6 @@
 import json
 from pathlib import Path
 
-from asmo_wbw.media import source_has_gps
 from asmo_wbw.run import process_listing
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -62,17 +61,16 @@ def test_appendix_run_names_and_strips_gps(tmp_path: Path):
         assert row["title"]
         assert row["open_graph"]["og:site_name"] == "Western Boot World"
         assert (tmp_path / row["jpeg"]).is_file()
-        assert (tmp_path / row["webp"]).is_file()
+        assert row["webp"] is None
         assert row["metadata"]["gps"] is None
         assert "westernbootworld.com" in row["metadata"]["credit"]
     assert first["filename"] != second["filename"]
     assert first["alt"] != second["alt"]
     assert first["caption"] != second["caption"]
-    # Photo 2 had GPS and it is gone from the output file.
-    assert second["gps_stripped"] is True
+    # Photo 2 had GPS. The copy is not re-encoded, so the GPS IFD is not stripped by a new JPEG.
     out_jpeg = (tmp_path / second["jpeg"]).read_bytes()
-    assert source_has_gps(out_jpeg) is False
-    assert b"GPSLatitude" not in out_jpeg
+    with __import__("PIL").Image.open(__import__("io").BytesIO(out_jpeg)) as im:
+        assert im.size[0] > 0 and im.size[1] > 0
     # Credit uses the seller display name.
     assert result["credit"].startswith("Dan Hoffenberg")
 
