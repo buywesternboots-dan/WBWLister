@@ -42,10 +42,12 @@ test('model extraction keeps leading zeros and skips sizes and prices', () => {
   assert.equal(extractModel('Style number: 0507R'), '0507R');
   assert.equal(extractModel('Model # 01883'), '01883');
   assert.equal(extractModel('Model No. 1883'), '1883');
-  assert.equal(extractModel('Lot: 00421'), '00421');
-  assert.equal(extractModel('Lot #00421'), '00421');
-  assert.equal(extractModel('SKU: 0507R'), '0507R');
-  assert.equal(extractModel('SKU # 320942'), '320942');
+  assert.equal(extractModel('Lot: 00421'), '');
+  assert.equal(extractModel('Lot #00421'), '');
+  assert.equal(extractModel('SKU: 0507R'), '');
+  assert.equal(extractModel('SKU # 320942'), '');
+  assert.equal(extractModel('Stock # A4401'), '');
+  assert.equal(extractModel('Inventory: 00991'), '');
   assert.equal(extractModel("US Men's size: 12D Model: 320942 price $400"), '320942');
   assert.equal(extractModel('nearby 32094 and 3209420'), '');
   for (const text of [

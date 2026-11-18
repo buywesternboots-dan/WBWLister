@@ -478,6 +478,7 @@ export default function Screen({ admin = false }) {
               {missing(i).length > 0 && <small className="err">Missing: {missing(i).map(label).join(', ')}</small>}
               {unverified(i).length > 0 && <small className="warn">Verify: {unverified(i).map(label).join(', ')}</small>}
               {needsCheck(i) ? <small className="err">{admin ? "Needs the seller's check" : 'Needs your check'}</small> : <small>Approved by {i.approved_by} on {String(i.approved_at).slice(0, 10)}</small>}
+              {Array.isArray(i.photo_codes) && i.photo_codes.length > 0 && <small className="warn">From photos, not verified: {i.photo_codes.map(c => `${c.text} (${c.type}, photo ${c.photo})`).join('; ')}</small>}
               <dl>
                 {i.missing_group_price && <div className="err"><dt>Missing group price</dt><dd>Spreadsheet price kept</dd></div>}
                 {FIELDS.filter(f => f !== 'title' && f !== 'description' && (i[f] || flagged(i).includes(f) || ['wbw_price', 'price', 'brand', 'sized_for', 'size', 'condition', 'material'].includes(f))).map(f =>

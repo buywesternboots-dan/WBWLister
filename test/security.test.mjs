@@ -129,7 +129,7 @@ test('photo hosts are checked by hostname, and private addresses are not fetched
   assert.match(img, /readSourcePhoto\(src\)/);
   assert.match(img, /X-Content-Type-Options': 'nosniff'/);
   assert.match(img, /default-src 'none'; sandbox/);
-  assert.match(read('lib/wbw.js'), /ENRICH_V = 12/);
+  assert.match(read('lib/wbw.js'), /ENRICH_V = 13/);
 });
 
 test('the extension only talks to the saved BootLister hosts and does not store the password', () => {
