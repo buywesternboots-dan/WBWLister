@@ -270,7 +270,10 @@ def process_listing(
                         if src_path and Path(dest).resolve() == Path(src_path).resolve():
                             raise RuntimeError(f"refusing to overwrite source blob {src_path}")
                     jpeg_path.write_bytes(optimized["jpeg"])
-                    webp_path.write_bytes(optimized["webp"])
+                    if optimized.get("webp"):
+                        webp_path.write_bytes(optimized["webp"])
+                    else:
+                        webp_rel = None
                     width, height = optimized["width"], optimized["height"]
                     gps_stripped = bool(optimized["gps_stripped"] or gps_stripped)
                     new_hash = sha256_file(jpeg_path)
@@ -311,7 +314,7 @@ def process_listing(
                 "title": title,
                 "keywords": kws,
                 "jpeg": str(Path(str(listing_id)) / jpeg_rel),
-                "webp": str(Path(str(listing_id)) / webp_rel) if src_bytes else None,
+                "webp": str(Path(str(listing_id)) / webp_rel) if src_bytes and webp_rel else None,
                 "width": width,
                 "height": height,
                 "gps_stripped": gps_stripped,

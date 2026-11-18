@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { describe, it } from 'node:test';
 import { post } from '../lib/crosspost.js';
-import { CSV } from '../lib/export.js';
+import { CSV, exportFilename } from '../lib/export.js';
 import { altText } from '../lib/seo.js';
 import { displayWidth } from '../lib/vocab.js';
 import { enrich } from '../lib/wbw.js';
@@ -21,7 +21,9 @@ describe('WBW sell-a-pair fields', () => {
     }
     assert.equal(cols.includes('(in)'), false);
     assert.match(src, /toCsv\(/);
-    assert.match(src, /bootlister-\$\{who\}-\$\{day\}\.csv/);
+    assert.match(src, /exportFilename/);
+    assert.equal(exportFilename({ display_name: 'Ada Boots' }, new Date(2026, 10, 18)), 'bootlister-ada-boots-2026-11-18.csv');
+    assert.equal(exportFilename({}, new Date(2026, 0, 5)), 'bootlister-all-sellers-2026-01-05.csv');
     assert.equal(src.includes('wbw-import-'), false);
   });
 

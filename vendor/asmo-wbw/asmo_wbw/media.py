@@ -15,7 +15,7 @@ from typing import Any
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
-from PIL import Image, ImageOps
+from PIL import Image
 
 MAX_EDGE = 2000
 JPEG_QUALITY = 85
@@ -193,45 +193,27 @@ def optimize_image(
     source: bytes,
     *,
     meta: dict[str, Any],
-    max_edge: int = MAX_EDGE,
+    max_edge: int | None = None,
 ) -> dict[str, Any]:
-    """Return web JPEG and WebP bytes with GPS removed and SEO tags written."""
+    """Full-size copy for SEO tags. No resize, no lossy re-encode, no WebP conversion.
+
+    JPEG gets XMP/IPTC inserted around the original scan. Other formats are copied
+    unchanged. max_edge is ignored; it used to downscale the long edge to 2000px.
+    The caller's source file is not modified.
+    """
+    del max_edge
     had_gps = source_has_gps(source)
     with Image.open(io.BytesIO(source)) as im:
-        im = ImageOps.exif_transpose(im)
-        im = im.convert("RGB")
         w, h = im.size
-        long_edge = max(w, h)
-        if long_edge > max_edge:
-            scale = max_edge / long_edge
-            im = im.resize((int(w * scale), int(h * scale)), Image.Resampling.LANCZOS)
-            w, h = im.size
-        jpeg_buf = io.BytesIO()
-        im.save(jpeg_buf, format="JPEG", quality=JPEG_QUALITY, optimize=True, exif=b"")
-        webp_buf = io.BytesIO()
-        xmp = build_xmp(
-            title=meta.get("title") or "",
-            description=meta.get("description") or "",
-            keywords=list(meta.get("keywords") or []),
-            credit=meta.get("credit") or "",
-            copyright=meta.get("copyright") or "westernbootworld.com",
-        )
-        try:
-            im.save(webp_buf, format="WEBP", quality=WEBP_QUALITY, method=6, xmp=xmp)
-        except TypeError:
-            im.save(webp_buf, format="WEBP", quality=WEBP_QUALITY, method=6)
-    jpeg = embed_metadata_jpeg(jpeg_buf.getvalue(), meta)
-    webp = webp_buf.getvalue()
-    # Belt and suspenders: outputs must not contain a GPS IFD.
-    gps_left = source_has_gps(jpeg) or (b"GPSLatitude" in jpeg or b"\x00\x88" in jpeg[:64] and False)
-    # After our re-encode, EXIF is empty except XMP/IPTC we added (no GPS).
+    jpeg = embed_metadata_jpeg(source, meta) if source[:2] == b"\xff\xd8" else source
+    gps_out = source_has_gps(jpeg)
     return {
         "jpeg": jpeg,
-        "webp": webp,
+        "webp": None,
         "width": w,
         "height": h,
-        "gps_stripped": had_gps,
-        "gps_present_in_output": False if not gps_left else source_has_gps(jpeg),
+        "gps_stripped": bool(had_gps and not gps_out),
+        "gps_present_in_output": bool(gps_out),
     }
 
 

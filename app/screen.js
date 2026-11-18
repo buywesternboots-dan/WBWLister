@@ -5,7 +5,7 @@ import { needsCheck, REQUIRED } from '../lib/publish';
 import { exportReadiness } from '../lib/readiness';
 import OptimizePanel from '../components/optimize-panel';
 import { packCsvChunks } from '../lib/csv';
-import { toCsv } from '../lib/export';
+import { exportFilename, toCsv } from '../lib/export';
 import { CHANNELS, post } from '../lib/crosspost';
 import { isExtensionShop, sellerFormState, sellerSavePayload } from '../lib/seller-links';
 import { intakeLabel } from '../lib/intake';
@@ -46,7 +46,8 @@ const FILTERS = { check: ['Needs a check', needsCheck], approved: ['Approved', i
   ready: ['Ready', isReady], idinfo: ['Has ID info', i => i.id_photos?.length > 0], verify: ['To verify', i => unverified(i).length > 0],
   ...Object.fromEntries(REQUIRED.map(f => [f, [`Missing ${label(f)}`, i => !i[f]]])),
   ...Object.fromEntries(ALERT.map(f => [f, [`No ${label(f).toLowerCase()}`, i => !i[f]]])),
-  nogroup: ['No group price', i => !!i.missing_group_price] };
+  nogroup: ['No group price', i => !!i.missing_group_price],
+  priceflag: ['Price check', i => !!i.price_flag] };
 // Inventory list: newest import first. Filter by item type (boot or belt) from items.boot.
 const byNewest = (a, b) => b.created_at.localeCompare(a.created_at);
 // Advanced seller fields, shown collapsed. Contact, notes, and automatic sync stay in the saved record but are not on the form.
@@ -60,11 +61,10 @@ const SELLER_ADVANCED = [
   ['return_days', 'Return window in days (blank = final sale)'],
   ['brand_context', 'Brand context on WBW listings (from the WBW brand page)', 'toggle'],
 ];
-// File name: bootlister-<seller>-<local YYYY-MM-DD>.csv
-const exportFilename = (s = {}, d = new Date()) => {
-  const who = String(s.display_name || s.name || 'all-sellers').normalize('NFKD').replace(/[^\w\s-]/g, '').trim().replace(/[\s_]+/g, '-').replace(/-+/g, '-').toLowerCase() || 'seller';
-  const day = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-  return `bootlister-${who}-${day}.csv`;
+const asObj = v => {
+  if (!v) return null;
+  if (typeof v === 'string') { try { return JSON.parse(v); } catch { return null; } }
+  return v;
 };
 // Export: every field on the WBW "Sell a pair" form, then the extra columns this import still needs. Built in lib/export.js.
 const download = (rows, brands = {}, s = {}) => {
@@ -116,6 +116,7 @@ export default function Screen({ admin = false }) {
   const [err, setErr] = useState('');
   const [me, setMe] = useState(null);
   const [optBusy, setOptBusy] = useState(false);
+  const [optNote, setOptNote] = useState(null);
   const [intakeOpen, setIntakeOpen] = useState(false);
   const [intakeBusy, setIntakeBusy] = useState(false);
   const [packets, setPackets] = useState([]);
@@ -150,7 +151,10 @@ export default function Screen({ admin = false }) {
     return () => window.removeEventListener('message', on);
   }, []);
 
-  const act = body => { setErr(''); api('PATCH', body).then(() => { setSel(new Set()); setEdit(null); load(); loadSellers(); }).catch(e => setErr(e.message)); };
+  const act = body => { setErr(''); api('PATCH', body).then(r => {
+    setSel(new Set()); setEdit(null); load(); loadSellers();
+    if (r && r.optimized != null) setRunState({ label: `Optimize existing: ${r.optimized} updated, ${r.failed} failed, ${r.left} still waiting. Original titles and descriptions were not changed.` });
+  }).catch(e => setErr(e.message)); };
   const bulk = body => act({ ids: [...sel], ...body });
   const toggle = id => setSel(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const lower = () => { const v = Number(adj.value); if (v > 0) bulk({ action: 'price', [adj.unit === '%' ? 'percent' : 'amount']: v }); };
@@ -173,10 +177,16 @@ export default function Screen({ admin = false }) {
     if (note) setErr(note);
   };
   const prepareOpt = i => {
-    setErr(''); setOptBusy(true);
+    setErr(''); setOptBusy(true); setOptNote({ id: i.id, text: 'Optimizing…' });
     api('PATCH', { ids: [i.id], action: 'optimize' })
-      .then(r => { if (r.item) setItems(list => list.map(x => x.id === r.item.id ? { ...x, ...r.item } : x)); })
-      .catch(e => setErr(e.message))
+      .then(r => {
+        if (r.item) setItems(list => list.map(x => x.id === r.item.id ? { ...x, ...r.item } : x));
+        const p = asObj(r.proposal) || asObj(r.item?.opt_proposal);
+        setOptNote({ id: i.id, text: p?.optimized_title
+          ? 'Optimized title and description are under this listing. The seller’s title and description were not changed.'
+          : 'Not enough stored facts for a separate optimized title. The original text was left as it is.' });
+      })
+      .catch(e => { setErr(e.message); setOptNote({ id: i.id, text: e.message }); })
       .finally(() => setOptBusy(false));
   };
   const saveOpt = (i, title, description) => {
@@ -187,7 +197,7 @@ export default function Screen({ admin = false }) {
       .finally(() => setOptBusy(false));
   };
   const applyOpt = (i, title, description) => {
-    if (!confirm('Replace the live title and description with this draft? The imported original stays saved. Approve the listing again before export.')) return;
+    if (!confirm('Save this optimized suggestion beside the listing? The seller’s title and description stay as they are.')) return;
     setOptBusy(true);
     api('PATCH', { ids: [i.id], action: 'optimize-apply', title, description })
       .then(r => { if (r.item) setItems(list => list.map(x => x.id === r.item.id ? { ...x, ...r.item } : x)); })
@@ -331,25 +341,26 @@ export default function Screen({ admin = false }) {
         {admin && who && <button type="button" data-amcaso disabled={run?.busy} onClick={() => {
           const ids = sel.size ? [...sel] : shown.map(i => i.id);
           if (!ids.length) return setErr('Nothing to run AMCASO WBW on.');
-          if (!sel.size && !confirm(`Run AMCASO WBW on all ${ids.length} pairs in this view? Each pair's photos are replaced by full-size copies with title, description, and keywords written in. Originals are kept, and Undo AMCASO WBW puts them back.`)) return;
+          if (!sel.size && !confirm(`Run AMCASO WBW on all ${ids.length} pairs in this view? It writes filenames, alt text, and SEO metadata into full-size copies. Photos are not compressed or resized. Originals are kept, and Undo AMCASO WBW puts them back.`)) return;
           runAmcaso(ids);
-        }}>AMCASO WBW</button>}
+        }} title="Runs in BootLister. Filenames, alt text, and SEO metadata only. No compression or resizing. Originals stay for Undo.">AMCASO WBW</button>}
         {admin && <a className="src" href="/bootlister-extension-0.19.zip" download title="Needed for Facebook and Depop imports">Chrome extension 0.19{ext ? ' ✓' : ''}</a>}
         {admin && <a className="src" href="/admin/bugs">Bug reports</a>}
         {admin && <EncyclopediaPlaceholder />}
         {!admin && <a className="src" href={WBW_ACCOUNT_URL} target="_blank" rel="noopener noreferrer">{WBW_ACCOUNT_LABEL}</a>}
         <a className="src" href="/login" onClick={e => { e.preventDefault(); fetch('/api/login', { method: 'DELETE' }).then(() => location.assign('/login')); }}>Log out</a>
       </div>
-      {!admin && <p className="help">Your job is to double-check each listing before it goes live, including anything shown in yellow. When you approve it, it is published right away. It is marked exported here — WBW is not connected yet, so nothing is sent to the live site.</p>}
-      {admin && who && <p className="help">When a seller approves a listing, it is published here right away. You can still see and edit every listing. Export CSV is the file for WBW. Nothing is sent to the live site yet.</p>}
-      {admin && current?.intake && <p className={current.intake.done ? 'help' : 'warn'}>{intakeLabel(current.intake)}</p>}
+      {(admin ? who : true) && <details className="help-fold"><summary>{admin ? 'About approving and export' : 'About your check'}</summary>
+        {!admin && <p className="help">Your job is to double-check each listing before it goes live, including anything shown in yellow. When you approve it, it is published right away. It is marked exported here — WBW is not connected yet, so nothing is sent to the live site.</p>}
+        {admin && <p className="help">When a seller approves a listing, it is published here right away. You can still see and edit every listing. Export CSV is the file for WBW. Nothing is sent to the live site yet.</p>}
+      </details>}
+      {admin && current?.intake && <p className={current.intake.done ? 'help line' : 'warn line'}>{intakeLabel(current.intake)}</p>}
       {admin && current?.name && <div className="wbw-seller-status-detail" data-wbw-status-detail><WbwStatusBadges status={current.wbw_status} where="detail" /></div>}
-      {admin && !who && !sellerForm && sellers.some(s => s.name) && <ul className="intake-list" data-seller-list>{sellers.filter(s => s.name).map(s => <li key={s.seller}>{s.display_name ?? s.seller} — {intakeLabel(s.intake)}<WbwStatusBadges status={s.wbw_status} where="list" /></li>)}</ul>}
       {admin && <IntakeSubmissions rows={packets} onChange={() => { loadPackets(); loadSellers(); }} busy={intakeBusy} setBusy={setIntakeBusy} setErr={setErr} />}
       {intakeOpen && current?.name && <IntakeForm seller={current} admin={admin} busy={intakeBusy} error={err} onSave={saveIntake} onClose={() => setIntakeOpen(false)} />}
-      {!ext && isExtensionShop(link) && <p className="help">Facebook and Depop import through the BootLister Chrome extension, which uses the sign-in already in this browser:
+      {!ext && isExtensionShop(link) && <details className="help-fold"><summary>Facebook and Depop need the Chrome extension</summary><p className="help">The extension uses the sign-in already in this browser:
         1) download it with the <a href="/bootlister-extension-0.19.zip" download>Chrome extension 0.19</a> link and unzip it; 2) open chrome://extensions and turn on
-        Developer mode; 3) click Load unpacked and pick the unzipped wbw-importer folder; 4) reload this page.</p>}
+        Developer mode; 3) click Load unpacked and pick the unzipped wbw-importer folder; 4) reload this page.</p></details>}
 
       {admin && sellerForm && <div className="panel">
         <strong>{sellerForm.created_at ? 'Edit seller' : 'New seller'}</strong>
@@ -440,6 +451,9 @@ export default function Screen({ admin = false }) {
           </h2>
           {visible.map(i => {
             const ready = exportReadiness(i);
+            const proposal = asObj(i.opt_proposal);
+            const maker = proposal?.maker;
+            const styleHit = proposal?.style_sample?.status === 'candidate' && proposal.style_sample.matches?.length === 1 ? proposal.style_sample.matches[0] : null;
             return <div key={i.id} className="item">
             <input type="checkbox" checked={sel.has(i.id)} onChange={() => toggle(i.id)} />
             <div className="pics">
@@ -458,7 +472,7 @@ export default function Screen({ admin = false }) {
               {i.status === 'published' && <Share item={i} seller={current} reload={load} />}
               <span><button className="primary" onClick={save}>Save (marks all verified)</button>
                 {needsCheck(i) && <button type="button" className="primary" onClick={() => approve(i)}>{admin ? 'Approve for seller' : 'Approve / ready to go live'}</button>}
-                <button type="button" data-prepare-optimize onClick={() => prepareOpt(i)}>Optimize</button>
+                <button type="button" data-prepare-optimize disabled={optBusy} onClick={() => prepareOpt(i)}>{optBusy ? 'Optimizing…' : 'Optimize'}</button>
                 <button onClick={() => setEdit(null)}>Cancel</button></span>
               {!admin && i.approved_at && <small className="warn">Saving changes takes it off the exported list until you approve it again.</small>}
             </div> : <div className="info" onClick={() => setEdit(i)}>
@@ -480,6 +494,14 @@ export default function Screen({ admin = false }) {
               {missing(i).length > 0 && <small className="err">Missing: {missing(i).map(label).join(', ')}</small>}
               {unverified(i).length > 0 && <small className="warn">Verify: {unverified(i).map(label).join(', ')}</small>}
               {needsCheck(i) ? <small className="err">{admin ? "Needs the seller's check" : 'Needs your check'}</small> : <small>Approved by {i.approved_by} on {String(i.approved_at).slice(0, 10)}</small>}
+              {i.price_flag && <small className={i.price_flag.direction === 'high' ? 'err' : 'warn'} data-price-flag>Price {i.price_flag.direction} vs {i.price_flag.label}: median ${Number(i.price_flag.median).toFixed(2)} (n={i.price_flag.count}). Price was not changed.</small>}
+              {maker?.name && <div className="brand-details" data-brand-details><strong>Brand details</strong> {maker.name}{maker.location && maker.location.toLowerCase() !== 'location not documented' ? ` · ${maker.location}` : ''}{maker.blurb ? ` · ${maker.blurb}` : ''}</div>}
+              {styleHit && <small data-style-match>Exact style {styleHit.style_number}</small>}
+              {(proposal?.optimized_title || proposal?.optimized_description) && <div className="optimized" data-optimized>
+                <label>Optimized title<textarea readOnly rows="2" value={proposal.optimized_title || ''} /></label>
+                <label>Optimized description<textarea readOnly rows="3" value={proposal.optimized_description || ''} /></label>
+              </div>}
+              {optNote?.id === i.id && <small data-optimize-status>{optNote.text}</small>}
               <dl>
                 {i.missing_group_price && <div className="err"><dt>Missing group price</dt><dd>Spreadsheet price kept</dd></div>}
                 {FIELDS.filter(f => f !== 'title' && f !== 'description' && (i[f] || flagged(i).includes(f) || ['wbw_price', 'price', 'brand', 'sized_for', 'size', 'condition', 'material'].includes(f))).map(f =>
@@ -490,7 +512,7 @@ export default function Screen({ admin = false }) {
               <small>Tap to edit</small>
               <span>
                 {needsCheck(i) && <button type="button" className="primary" onClick={e => { e.stopPropagation(); approve(i); }}>{admin ? 'Approve for seller' : 'Approve / ready to go live'}</button>}
-                <button type="button" data-prepare-optimize onClick={e => { e.stopPropagation(); prepareOpt(i); }}>Optimize</button>
+                <button type="button" className="primary" data-prepare-optimize disabled={optBusy} onClick={e => { e.stopPropagation(); prepareOpt(i); }}>{optBusy ? 'Optimizing…' : 'Optimize'}</button>
               </span>
             </div>}
             {i.opt_proposal && <OptimizePanel item={items.find(x => x.id === i.id) ?? i} proposal={i.opt_proposal} busy={optBusy}
@@ -507,48 +529,52 @@ export default function Screen({ admin = false }) {
 }
 
 const css = `
-body{margin:0;font:16px/1.4 system-ui,sans-serif;color:#2b2118;background:#faf8f5}
-main{max-width:760px;margin:0 auto;padding:16px}
-button,select,input,textarea{font:inherit;padding:8px 12px;border:1px solid #cfc6bb;border-radius:6px;background:#fff;color:inherit}
+body{margin:0;font:16px/1.45 system-ui,sans-serif;color:#2b2118;background:#faf8f5}
+main{max-width:980px;margin:0 auto;padding:12px 16px 32px}
+button,select,input,textarea{font:inherit;padding:8px 12px;border:1px solid #cfc6bb;border-radius:6px;background:#fff;color:#2b2118}
 button:disabled{opacity:.5}
-nav{display:flex;gap:8px;margin-bottom:16px;overflow-x:auto}
+nav{display:flex;gap:8px;margin:8px 0 12px;overflow-x:auto}
+nav button{white-space:nowrap}
 nav button.on,.primary{background:#1f6f6b;border-color:#1f6f6b;color:#fff}
-label{display:flex;flex-direction:column;font-size:13px;color:#6b5a4a;gap:2px}
-.who,.site,.tools,.bar{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:12px}
-.file{flex-direction:row;align-items:center;gap:8px;font-size:14px;color:#1f6f6b}
-.file input{font-size:13px}
-.who select,.site input,.tools input{flex:1;min-width:0}
-.panel{display:flex;flex-direction:column;gap:6px;padding:12px;margin-bottom:12px;background:#fff;border:1px solid #e6dfd6;border-radius:8px}
-.panel h3{margin:8px 0 0;font-size:14px;color:#1f6f6b}.panel span,.form span{display:flex;gap:6px}
+label{display:flex;flex-direction:column;font-size:14px;color:#4a3d31;gap:4px}
+.who,.site,.tools,.bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:8px}
+.file{flex-direction:row;align-items:center;gap:8px;font-size:15px;color:#1f6f6b}
+.file input{font-size:14px}
+.who select,.site input,.tools input{flex:1;min-width:160px}
+.panel{display:flex;flex-direction:column;gap:8px;padding:12px;margin-bottom:12px;background:#fff;border:1px solid #e6dfd6;border-radius:8px}
+.panel h3{margin:8px 0 0;font-size:15px;color:#1f6f6b}.panel span,.form span,.info > span{display:flex;flex-wrap:wrap;gap:8px}
 .advanced{margin:8px 0 0;border-top:1px solid #e6dfd6;padding-top:8px}
-.advanced summary{cursor:pointer;font-size:14px;color:#1f6f6b}
+.advanced summary,.help-fold summary{cursor:pointer;font-size:14px;color:#1f4f4c}
 .advanced label,.advanced h3{margin-top:6px}
-.run{width:100%;display:flex;flex-direction:column;gap:2px}.run progress{width:100%}.run small{color:#6b5a4a}
-.failed{width:100%;font-size:13px;color:#a3261b;max-height:200px;overflow:auto}.failed a{color:inherit}
-.bar{position:sticky;top:0;padding:10px 0;background:#faf8f5;z-index:1}.bar label{flex-direction:row;align-items:center;gap:6px;font-size:16px}
-.adj{display:flex;gap:4px}.adj input{width:90px}
-h2{font-size:15px;margin:20px 0 8px;color:#6b5a4a;display:flex;flex-wrap:wrap;gap:6px;align-items:center}
-.chip{font-size:12px;padding:2px 8px;border-radius:12px}.chip.miss{color:#a3261b;border-color:#e3b3ad}.chip.on{background:#1f6f6b;border-color:#1f6f6b;color:#fff}
-.item{display:flex;flex-wrap:wrap;gap:12px;align-items:flex-start;padding:10px;background:#fff;border:1px solid #e6dfd6;border-radius:8px;margin-bottom:8px}
+.help-fold{margin:0 0 8px}
+.line{margin:0 0 8px}
+.run{width:100%;display:flex;flex-direction:column;gap:4px}.run progress{width:100%}.run small{color:#4a3d31}
+.failed{width:100%;font-size:14px;color:#a3261b;max-height:200px;overflow:auto}.failed a{color:inherit}
+.bar{position:sticky;top:0;padding:8px 0;background:#faf8f5;z-index:1}.bar label{flex-direction:row;align-items:center;gap:6px;font-size:16px;color:#2b2118}
+.adj{display:flex;gap:4px;flex-wrap:wrap}.adj input{width:90px}
+h2{font-size:16px;margin:16px 0 8px;color:#4a3d31;display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.chip{font-size:13px;padding:4px 8px;border-radius:12px}.chip.miss{color:#a3261b;border-color:#e3b3ad}.chip.on{background:#1f6f6b;border-color:#1f6f6b;color:#fff}
+.item{display:flex;flex-wrap:wrap;gap:12px;align-items:flex-start;padding:12px;background:#fff;border:1px solid #e6dfd6;border-radius:8px;margin-bottom:10px}
 .opt{flex:1 0 100%;display:flex;flex-direction:column;gap:8px;border-top:1px solid #e6dfd6;padding-top:8px}
 .compare{display:grid;grid-template-columns:1fr 1fr;gap:8px}
-@media(max-width:640px){.compare{grid-template-columns:1fr}}
+.optimized{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:6px 0}
+.brand-details{font-size:14px;color:#2b2118;background:#f4efe8;border-radius:6px;padding:6px 8px}
+@media(max-width:640px){.compare,.optimized{grid-template-columns:1fr}.pics{width:100%}.who,.site,.tools{align-items:stretch}.who select,.who button,.site input,.site button,.tools input,.tools select{width:100%}}
 .item img,.noimg{width:72px;height:72px;object-fit:cover;border-radius:6px;background:#eee;flex-shrink:0}
-.pics{display:flex;flex-wrap:wrap;gap:4px;width:148px;align-items:center}.pics img,.pics .noimg{width:48px;height:48px}.photocount{flex:1 0 100%;font-size:12px;color:#6b5a4a}
-.info{display:flex;flex-direction:column;cursor:pointer;flex:1;min-width:0}.info small{color:#8a7a6a}
-.form{display:flex;flex-direction:column;gap:6px;flex:1}.form label>span{display:flex;align-items:center}
-dl{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:4px 12px;margin:6px 0;font-size:13px}dt{color:#8a7a6a;font-size:11px}dd{margin:0}
-.desc{font-size:13px;color:#4a3d31;margin:4px 0;white-space:pre-line;max-height:4.2em;overflow:hidden}
-.src{font-size:13px;color:#1f6f6b;align-self:flex-start}
+.pics{display:flex;flex-wrap:wrap;gap:4px;width:152px;align-items:center}.pics img,.pics .noimg{width:72px;height:72px}.photocount{flex:1 0 100%;font-size:13px;color:#4a3d31}
+.info{display:flex;flex-direction:column;gap:4px;cursor:pointer;flex:1;min-width:0}.info small{color:#4a3d31}
+.form{display:flex;flex-direction:column;gap:8px;flex:1;min-width:0}.form label>span{display:flex;align-items:center;flex-wrap:wrap}
+dl{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:6px 12px;margin:6px 0;font-size:14px}dt{color:#4a3d31;font-size:12px}dd{margin:0}
+.desc{font-size:15px;color:#2b2118;margin:4px 0;white-space:pre-line}
+.src{font-size:14px;color:#1f6f6b;align-self:flex-start}
 .guess{background:#fff3c4;border-radius:4px;padding:0 4px}.miss{background:#fde8e6;border-radius:4px;padding:0 4px}
-.preset{margin-left:6px;padding:0 6px;font-size:12px}
-.help{font-size:13px;color:#6b5a4a;background:#fff;border:1px solid #e6dfd6;border-radius:8px;padding:10px}
-.wbw-row{display:grid;grid-template-columns:1fr auto;gap:2px 8px;padding:6px 0;border-bottom:1px dashed #eee;align-items:center}.wbw-label{font-size:12px;color:#6b5a4a}.wbw-value{white-space:pre-wrap;word-break:break-word}.wbw-row .copy{grid-column:2;grid-row:1/span 2}.wbw-section h3{margin:8px 0 0;font-size:14px}
-.intake-list{margin:0 0 12px;padding:10px 12px 10px 28px;background:#fff;border:1px solid #e6dfd6;border-radius:8px;font-size:14px}
-.wbw-seller-status{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 0;padding:0;list-style:none}
+.preset{margin-left:6px;padding:2px 6px;font-size:13px}
+.help{font-size:14px;color:#4a3d31;background:#fff;border:1px solid #e6dfd6;border-radius:8px;padding:10px;margin:6px 0 0}
+.wbw-row{display:grid;grid-template-columns:1fr auto;gap:2px 8px;padding:6px 0;border-bottom:1px dashed #eee;align-items:center}.wbw-label{font-size:13px;color:#4a3d31}.wbw-value{white-space:pre-wrap;word-break:break-word}.wbw-row .copy{grid-column:2;grid-row:1/span 2}.wbw-section h3{margin:8px 0 0;font-size:15px}
+.wbw-seller-status{display:flex;flex-wrap:wrap;gap:6px;margin:0;padding:0;list-style:none}
 .wbw-seller-status li{display:inline-flex;align-items:center;gap:6px;font-size:12px;background:#f4efe8;border:1px solid #e6dfd6;border-radius:999px;padding:2px 8px;color:#2b2118}
-.wbw-seller-status .pending{color:#6b5a4a}
-.wbw-seller-status-detail{margin:0 0 12px}
+.wbw-seller-status .pending{color:#4a3d31}
+.wbw-seller-status-detail{margin:0 0 8px}
 .packet{display:flex;gap:10px;align-items:flex-start;padding:8px 0;border-top:1px solid #e6dfd6}
 .packet img{width:48px;height:48px;object-fit:cover;border-radius:6px;background:#eee;flex-shrink:0}
 .packet > div{flex:1;display:flex;flex-direction:column;gap:4px;min-width:0}
@@ -557,6 +583,5 @@ dl{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:4p
 .encyclopedia-soon{flex-direction:row;align-items:center;gap:6px;margin:0;font-size:14px;color:#8a7a6a;opacity:.55;cursor:not-allowed}
 .encyclopedia-soon input{width:16px;height:16px;padding:0;margin:0;flex:0 0 auto}
 .encyclopedia-soon small{font-size:12px}
-@media(max-width:640px){.who,.site,.tools{align-items:stretch}.who select,.who button,.site input,.site button{width:100%}}
-.warn{color:#8a5a00!important}.err{color:#a3261b!important}.empty{color:#6b5a4a}
+.warn{color:#8a5a00!important}.err{color:#a3261b!important}.empty{color:#4a3d31}
 `;
