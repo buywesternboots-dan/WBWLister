@@ -13,6 +13,7 @@ import { wbwSellerStatus } from '../lib/wbw-status';
 import IntakeForm from '../components/intake-form';
 import { WBW_ACCOUNT_LABEL, WBW_ACCOUNT_URL } from '../lib/wbw-account';
 import IntakeSubmissions from '../components/intake-submissions';
+import EncyclopediaPlaceholder from '../components/encyclopedia-placeholder';
 
 // Selected seller comes from ?seller= (the extension's seller dropdown uses the same names).
 const seller = () => new URLSearchParams(location.search).get('seller') || '';
@@ -335,6 +336,7 @@ export default function Screen({ admin = false }) {
         }}>AMCASO WBW</button>}
         {admin && <a className="src" href="/bootlister-extension-0.19.zip" download title="Needed for Facebook and Depop imports">Chrome extension 0.19{ext ? ' ✓' : ''}</a>}
         {admin && <a className="src" href="/admin/bugs">Bug reports</a>}
+        {admin && <EncyclopediaPlaceholder />}
         {!admin && <a className="src" href={WBW_ACCOUNT_URL} target="_blank" rel="noopener noreferrer">{WBW_ACCOUNT_LABEL}</a>}
         <a className="src" href="/login" onClick={e => { e.preventDefault(); fetch('/api/login', { method: 'DELETE' }).then(() => location.assign('/login')); }}>Log out</a>
       </div>
@@ -552,6 +554,9 @@ dl{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:4p
 .packet > div{flex:1;display:flex;flex-direction:column;gap:4px;min-width:0}
 .check{flex-direction:row;align-items:flex-start;gap:8px;font-size:15px;color:#2b2118}
 .check input{width:20px;height:20px;flex-shrink:0;margin-top:2px}
+.encyclopedia-soon{flex-direction:row;align-items:center;gap:6px;margin:0;font-size:14px;color:#8a7a6a;opacity:.55;cursor:not-allowed}
+.encyclopedia-soon input{width:16px;height:16px;padding:0;margin:0;flex:0 0 auto}
+.encyclopedia-soon small{font-size:12px}
 @media(max-width:640px){.who,.site,.tools{align-items:stretch}.who select,.who button,.site input,.site button{width:100%}}
 .warn{color:#8a5a00!important}.err{color:#a3261b!important}.empty{color:#6b5a4a}
 `;
