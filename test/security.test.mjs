@@ -99,6 +99,10 @@ test('photo hosts are checked by hostname, and private addresses are not fetched
   assert.equal(allowedPhotoUrl('https://photos.example/a.jpg', { BLOB_PUBLIC_HOST: 'https://photos.example' }), true);
   assert.equal(allowedPhotoUrl('https://cdn.example/a.jpg', { R2_PUBLIC_BASE_URL: 'https://cdn.example' }), true);
   assert.equal(allowedPhotoUrl('https://cdn.example.evil/a.jpg', { R2_PUBLIC_BASE_URL: 'https://cdn.example' }), false);
+  const storeEnv = { PHOTO_STORE_URL: 'https://photos.example:10000' };
+  assert.equal(allowedPhotoUrl('https://photos.example:10000/a.jpg', storeEnv), true);
+  assert.equal(allowedPhotoUrl('https://photos.example/a.jpg', storeEnv), false);
+  assert.equal(allowedPhotoUrl('https://photos.example.evil:10000/a.jpg', storeEnv), false);
   for (const ip of ['127.0.0.1', '10.1.2.3', '192.168.0.5', '172.16.0.1', '169.254.1.1', '0.0.0.1', '100.64.0.1', '100.127.255.255', '224.0.0.1', '239.255.255.255', '::1', 'fe80::1', 'fc00::1', 'ff02::1'])
     assert.equal(isPrivateAddress(ip), true, ip);
   assert.equal(isPrivateAddress('8.8.8.8'), false);
