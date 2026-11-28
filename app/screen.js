@@ -14,6 +14,7 @@ import IntakeForm from '../components/intake-form';
 import { WBW_ACCOUNT_LABEL, WBW_ACCOUNT_URL } from '../lib/wbw-account';
 import IntakeSubmissions from '../components/intake-submissions';
 import EncyclopediaPlaceholder from '../components/encyclopedia-placeholder';
+import WbwApiPanel from '../components/wbw-api-panel';
 
 // Selected seller comes from ?seller= (the extension's seller dropdown uses the same names).
 const seller = () => new URLSearchParams(location.search).get('seller') || '';
@@ -352,10 +353,11 @@ export default function Screen({ admin = false }) {
       </div>
       {(admin ? who : true) && <details className="help-fold"><summary>{admin ? 'About approving and export' : 'About your check'}</summary>
         {!admin && <p className="help">Your job is to double-check each listing before it goes live, including anything shown in yellow. When you approve it, it is published right away. It is marked exported here — WBW is not connected yet, so nothing is sent to the live site.</p>}
-        {admin && <p className="help">When a seller approves a listing, it is published here right away. You can still see and edit every listing. Export CSV is the file for WBW. Nothing is sent to the live site yet.</p>}
+        {admin && <p className="help">When a seller approves a listing, it is published here right away. You can still see and edit every listing. Export CSV is still the file for a WBW import. Send to WBW, in the WBW panel, transfers the selected listings when the server has a WBW API key.</p>}
       </details>}
       {admin && current?.intake && <p className={current.intake.done ? 'help line' : 'warn line'}>{intakeLabel(current.intake)}</p>}
       {admin && current?.name && <div className="wbw-seller-status-detail" data-wbw-status-detail><WbwStatusBadges status={current.wbw_status} where="detail" /></div>}
+      {admin && current?.name && <WbwApiPanel seller={current} selected={[...sel]} api={api} onSaved={() => { load(); loadSellers(); }} />}
       {admin && <IntakeSubmissions rows={packets} onChange={() => { loadPackets(); loadSellers(); }} busy={intakeBusy} setBusy={setIntakeBusy} setErr={setErr} />}
       {intakeOpen && current?.name && <IntakeForm seller={current} admin={admin} busy={intakeBusy} error={err} onSave={saveIntake} onClose={() => setIntakeOpen(false)} />}
       {!ext && isExtensionShop(link) && <details className="help-fold"><summary>Facebook and Depop need the Chrome extension</summary><p className="help">The extension uses the sign-in already in this browser:
@@ -486,6 +488,7 @@ export default function Screen({ admin = false }) {
                 View on {{ facebook: 'Facebook', depop: 'Depop', poshmark: 'Poshmark', ebay: 'eBay' }[i.source] ?? i.source}</a>}
               {i.source === 'listperfectly' && <small>List Perfectly{i.markets ? ` · listed on ${i.markets}` : ''}</small>}
               {i.changed_at && <small className="warn">Changed at source — review before it goes back to WBW</small>}
+              {admin && (i.wbw_confirmed_at || i.wbw_needs_review) && <small data-wbw-confirmed>{i.wbw_needs_review ? 'WBW: needs review' : `WBW: ${i.wbw_status || 'confirmed'}`}{i.wbw_confirmed_at ? ` · last confirmed ${String(i.wbw_confirmed_at).replace('T', ' ').slice(0, 16)}` : ''}{!i.wbw_needs_review && i.wbw_publication_error ? ` · ${i.wbw_publication_error}` : ''}{i.wbw_url ? <a className="src" href={i.wbw_url} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()}> WBW listing</a> : null}</small>}
               <small className={ready.ready ? '' : 'warn'} data-export-ready>{ready.ready ? 'Ready for export' : `Export: ${ready.missing.join('; ')}`}</small>
               {i.opt_error && <small className="err">Optimization failed: {i.opt_error}</small>}
               {i.status === 'pending' && <small className="warn">Gone from the source — confirm sold, or it's marked sold in {daysLeft(i)} days</small>}
@@ -576,6 +579,7 @@ dl{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:6p
 .wbw-seller-status li{display:inline-flex;align-items:center;gap:6px;font-size:12px;background:#f4efe8;border:1px solid #e6dfd6;border-radius:999px;padding:2px 8px;color:#2b2118}
 .wbw-seller-status .pending{color:#4a3d31}
 .wbw-seller-status-detail{margin:0 0 8px}
+.wbw-api p{margin:0;font-size:14px}.wbw-api .hint{color:#4a3d31}.wbw-api ul{margin:6px 0 0;padding-left:18px;font-size:14px}
 .packet{display:flex;gap:10px;align-items:flex-start;padding:8px 0;border-top:1px solid #e6dfd6}
 .packet img{width:48px;height:48px;object-fit:cover;border-radius:6px;background:#eee;flex-shrink:0}
 .packet > div{flex:1;display:flex;flex-direction:column;gap:4px;min-width:0}
